@@ -128,11 +128,13 @@ nixlGpuPostSignalXferReq(nixlGpuXferReqH req_hndl,
                          size_t signal_offset,
                          unsigned channel_id = 0,
                          bool is_no_delay = true,
-                         nixlGpuXferStatusH *xfer_status = nullptr) {
+                         nixlGpuXferStatusH *xfer_status = nullptr,
+                         bool is_with_immediate = false
+                        ) {
     const nixlGpuXferReqParams params{req_hndl, is_no_delay, xfer_status};
 
     ucs_status_t status = ucp_device_counter_inc<static_cast<ucs_device_level_t>(level)>(
-        params.mem_list, signal_desc_index, signal_inc, signal_offset, channel_id, params.flags, params.ucp_request);
+        params.mem_list, signal_desc_index, signal_inc, signal_offset, channel_id, params.flags, params.ucp_request, is_with_immediate);
 
     return nixlGpuConvertUcsStatus(status);
 }
@@ -281,5 +283,23 @@ __device__ void
 nixlGpuWriteSignal(void *signal, uint64_t value) {
     ucp_device_counter_write<static_cast<ucs_device_level_t>(level)>(signal, value);
 }
+
+/**
+ * @brief Wait for signal to be non-zero.
+ *
+ * The signal must be initialized with the host function @ref prepGpuSignal.
+ * This function waits for the signal to become non-zero and returns its value.
+ *
+ * @param req_hndl [in]    Transfer request handle (unused, kept for API consistency).
+ * @param signal_ptr [in]  Address of the signal to wait on.
+ *
+ * @return The signal value once it becomes non-zero.
+ */
+ template<nixl_gpu_level_t level = nixl_gpu_level_t::THREAD>
+ __device__ uint64_t
+ nixlGpuWaitSignal(nixlGpuXferReqH req_hndl, uint64_t* signal_ptr) {
+    const nixlGpuXferReqParams params{req_hndl, true, nullptr};
+    return ucp_device_counter_wait<static_cast<ucs_device_level_t>(level)>(params.mem_list, signal_ptr);
+ }
 
 #endif // _NIXL_DEVICE_CUH
