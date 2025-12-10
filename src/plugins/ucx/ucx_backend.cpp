@@ -1139,9 +1139,13 @@ nixlUcxEngine::nixlUcxEngine(const nixlBackendInitParams &init_params)
         uws.emplace_back(std::make_unique<nixlUcxWorker>(*uc, err_handling_mode));
     }
 
-    auto &uw = uws.front();
-    workerAddr = uw->epAddr();
-    uw->regAmCallback(NOTIF_STR, notifAmCb, this);
+    // Generate the multi-worker connection metadata
+    getConnInfo(workerAddr);
+    
+    // Register notification callback on all workers
+    for (auto &uw : uws) {
+        uw->regAmCallback(NOTIF_STR, notifAmCb, this);
+    }
 
     // Temp fixup
     if (getenv("NIXL_DISABLE_CUDA_ADDR_WA")) {
@@ -1183,7 +1187,47 @@ nixl_status_t nixlUcxEngine::checkConn(const std::string &remote_agent) {
 }
 
 nixl_status_t nixlUcxEngine::getConnInfo(std::string &str) const {
-    str = workerAddr;
+    // Collect all worker addresses
+    std::vector<std::string> worker_addrs;
+    std::vector<size_t> addr_lengths;
+    size_t total_addr_size = 0;
+    
+    for (const auto &uw : uws) {
+        std::string addr = uw->epAddr();
+        worker_addrs.push_back(addr);
+        addr_lengths.push_back(addr.size());
+        total_addr_size += addr.size();
+    }
+    
+    size_t num_workers = uws.size();
+    
+    // Calculate total buffer size:
+    // sizeof(num_workers) + sizeof(addr_lengths array) + concatenated addresses
+    size_t total_size = sizeof(size_t) + (sizeof(size_t) * num_workers) + total_addr_size;
+    
+    // Build the concatenated blob
+    std::vector<char> buffer(total_size);
+    size_t offset = 0;
+    
+    // Write num_workers
+    std::memcpy(buffer.data() + offset, &num_workers, sizeof(size_t));
+    offset += sizeof(size_t);
+    
+    // Write address lengths array
+    for (size_t i = 0; i < num_workers; i++) {
+        std::memcpy(buffer.data() + offset, &addr_lengths[i], sizeof(size_t));
+        offset += sizeof(size_t);
+    }
+    
+    // Write concatenated addresses
+    for (size_t i = 0; i < num_workers; i++) {
+        std::memcpy(buffer.data() + offset, worker_addrs[i].data(), addr_lengths[i]);
+        offset += addr_lengths[i];
+    }
+    
+    // Convert to string
+    str = nixlSerDes::_bytesToString(buffer.data(), total_size);
+    
     return NIXL_SUCCESS;
 }
 
@@ -1192,8 +1236,8 @@ nixl_status_t nixlUcxEngine::connect(const std::string &remote_agent) {
         return loadRemoteConnInfo(remote_agent, workerAddr);
     }
 
-    return (remoteConnMap.find(remote_agent) == remoteConnMap.end()) ? NIXL_ERR_NOT_FOUND :
-                                                                       NIXL_SUCCESS;
+    bool found = (remoteConnMap.find(remote_agent) != remoteConnMap.end());
+    return found ? NIXL_SUCCESS : NIXL_ERR_NOT_FOUND;
 }
 
 nixl_status_t nixlUcxEngine::disconnect(const std::string &remote_agent) {
@@ -1211,23 +1255,72 @@ nixl_status_t nixlUcxEngine::disconnect(const std::string &remote_agent) {
 nixl_status_t nixlUcxEngine::loadRemoteConnInfo (const std::string &remote_agent,
                                                  const std::string &remote_conn_info)
 {
-    size_t size = remote_conn_info.size();
-    std::vector<char> addr(size);
-
     if(remoteConnMap.count(remote_agent)) {
         return NIXL_ERR_INVALID_PARAM;
     }
 
-    nixlSerDes::_stringToBytes(addr.data(), remote_conn_info, size);
+    // Parse the multi-worker metadata blob
+    size_t blob_size = remote_conn_info.size();
+    std::vector<char> blob(blob_size);
+    nixlSerDes::_stringToBytes(blob.data(), remote_conn_info, blob_size);
+    
+    // Parse header: num_workers
+    if (blob_size < sizeof(size_t)) {
+        return NIXL_ERR_MISMATCH;
+    }
+    
+    size_t remote_num_workers;
+    size_t offset = 0;
+    std::memcpy(&remote_num_workers, blob.data() + offset, sizeof(size_t));
+    offset += sizeof(size_t);
+    
+    // Strict validation: worker counts must match
+    if (remote_num_workers != uws.size()) {
+        return NIXL_ERR_INVALID_PARAM;
+    }
+    
+    // Parse address lengths array
+    if (blob_size < offset + (sizeof(size_t) * remote_num_workers)) {
+        return NIXL_ERR_MISMATCH;
+    }
+    
+    std::vector<size_t> addr_lengths(remote_num_workers);
+    for (size_t i = 0; i < remote_num_workers; i++) {
+        std::memcpy(&addr_lengths[i], blob.data() + offset, sizeof(size_t));
+        offset += sizeof(size_t);
+    }
+    
+    // Verify blob has enough data for all addresses
+    size_t total_addr_size = 0;
+    for (size_t i = 0; i < remote_num_workers; i++) {
+        total_addr_size += addr_lengths[i];
+    }
+    
+    if (blob_size < offset + total_addr_size) {
+        return NIXL_ERR_MISMATCH;
+    }
+    
+    // Connect each local worker to its corresponding remote worker
     std::shared_ptr<nixlUcxConnection> conn = std::make_shared<nixlUcxConnection>();
     bool error = false;
-    for (auto &uw: uws) {
-        auto result = uw->connect(addr.data(), size);
+    
+    for (size_t worker_id = 0; worker_id < uws.size(); worker_id++) {
+        // Extract the address for this specific worker
+        void* worker_addr = blob.data() + offset;
+        size_t worker_addr_len = addr_lengths[worker_id];
+        
+        auto result = uws[worker_id]->connect(worker_addr, worker_addr_len);
+        
         if (!result.ok()) {
             error = true;
             break;
         }
+        
         conn->eps.push_back(std::move(*result));
+        
+        // Log UCX endpoint creation details
+        
+        offset += worker_addr_len;
     }
 
     if (error)
