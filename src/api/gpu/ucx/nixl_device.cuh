@@ -302,4 +302,61 @@ nixlGpuWriteSignal(void *signal, uint64_t value) {
     return ucp_device_counter_wait<static_cast<ucs_device_level_t>(level)>(params.mem_list, signal_ptr);
  }
 
+/**
+ * @brief Wait for all operations posted with a given status handle to complete.
+ *
+ * This function blocks the calling thread/warp/block until all RDMA operations
+ * (writes, atomics, signals) tracked by the status handle have completed.
+ * Operations are considered complete when they reach remote memory (for RDMA 
+ * writes) or the remote NIC (for atomics).
+ *
+ * This function polls the hardware completion queue without generating any
+ * additional RDMA traffic, providing a zero-overhead completion mechanism.
+ *
+ * @tparam      level       Level of cooperation (THREAD, WARP, or BLOCK).
+ * @param [in]  xfer_status Status handle that was passed to the post operations.
+ *                          This parameter tracks the completion state of all
+ *                          operations posted with this status handle.
+ *
+ * @return NIXL_SUCCESS     All operations have completed successfully.
+ * @return NIXL_ERR_BACKEND An error occurred in the UCX backend.
+ *
+ * @note The xfer_status parameter must be the same handle that was passed to
+ *       the nixlGpuPost*XferReq functions when posting operations.
+ * @note This function will busy-wait (spin) until completion. For better
+ *       efficiency in long-running operations, consider periodic progress
+ *       checks instead.
+ *
+ * @par Example:
+ * @code
+ * __global__ void dispatch_kernel(nixlGpuXferReqH req_hndl) {
+ *     nixlGpuXferStatusH status;
+ *     
+ *     // Post multiple RDMA writes
+ *     nixlGpuPostSingleWriteXferReq<WARP>(req_hndl, 0, 0, 0, 1024, 0, true, &status);
+ *     nixlGpuPostSingleWriteXferReq<WARP>(req_hndl, 1, 0, 0, 2048, 0, true, &status);
+ *     
+ *     // Post completion signal
+ *     nixlGpuPostSignalXferReq<THREAD>(req_hndl, 2, 1, 0, 0, true, &status);
+ *     
+ *     // Wait for all operations to complete
+ *     nixl_quiet<THREAD>(status);
+ *     
+ *     // Now safe to return or reuse buffers
+ * }
+ * @endcode
+ */
+template<nixl_gpu_level_t level = nixl_gpu_level_t::THREAD>
+__device__ nixl_status_t
+nixl_quiet(nixlGpuXferStatusH &xfer_status) {
+    nixl_status_t status;
+    
+    // Poll until all operations complete
+    do {
+        status = nixlGpuGetXferStatus<level>(xfer_status);
+    } while (status == NIXL_IN_PROG);
+    
+    return status;
+}
+
 #endif // _NIXL_DEVICE_CUH
