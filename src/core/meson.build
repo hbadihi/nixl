@@ -17,6 +17,10 @@
 
 nixl_lib_deps = [nixl_infra, serdes_interface, stream_interface, dl_dep, nixl_common_dep, thread_dep]
 
+if cuda_dep.found()
+    nixl_lib_deps += [ cuda_dep, nixl_gpu_proxy_dep ]
+endif
+
 if etcd_dep.found()
     nixl_lib_deps += [ etcd_dep ]
 endif
@@ -60,6 +64,8 @@ nixl_lib = library('nixl',
                    'telemetry/telemetry.cpp',
                    'telemetry/buffer_exporter.cpp',
                    'telemetry/buffer_plugin.cpp',
+                   'device_proxy/proxy_runtime.cpp',
+                   'device_proxy/proxy_worker.cpp',
                    include_directories: [ nixl_inc_dirs, utils_inc_dirs ],
                    link_args: ['-lstdc++fs'],
                    dependencies: nixl_lib_deps,
