@@ -14,9 +14,33 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#ifndef _NIXL_DEVICE_CUH
-#define _NIXL_DEVICE_CUH
+#ifndef NIXL_SRC_API_GPU_COMMON_NIXL_DEVICE_TYPES_CUH
+#define NIXL_SRC_API_GPU_COMMON_NIXL_DEVICE_TYPES_CUH
 
-#include "../nixl_device.cuh"
+#include <cstddef>
+#include <cstdint>
 
-#endif // _NIXL_DEVICE_CUH
+#include <nixl_types.h>
+
+struct nixlGpuXferStatusH {
+    alignas(16) unsigned char storage[64] = {};
+};
+
+enum class nixl_gpu_level_t : uint64_t {
+    THREAD = 0,
+    WARP = 1,
+    BLOCK = 2,
+    GRID = 3
+};
+
+namespace nixl_gpu_flags {
+constexpr uint64_t defer = 1;
+} // namespace nixl_gpu_flags
+
+struct nixlMemViewElem {
+    nixlMemViewH mvh;
+    size_t index;  /**< Index in the memory view */
+    size_t offset; /**< Offset within the buffer */
+};
+
+#endif // NIXL_SRC_API_GPU_COMMON_NIXL_DEVICE_TYPES_CUH
