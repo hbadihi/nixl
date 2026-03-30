@@ -20,6 +20,8 @@
 #include "mem_section.h"
 #include "telemetry.h"
 #include "stream/metadata_stream.h"
+#include "device_proxy/backend_adapter.h"
+#include "device_proxy/proxy_runtime.h"
 #include "sync.h"
 
 #include <cstdint>
