@@ -17,6 +17,7 @@
 #include "proxy_runtime.h"
 #include "nixl_types.h"
 #include "proxy_worker.h"
+#include <cstdint>
 
 // Shape-only handoff: keep proxy runtime ownership and entry points visible,
 // but leave execution logic to a follow-up implementation. Proxy execution is
@@ -36,8 +37,13 @@ ProxyMemViewRegistry::registerProxyMemView(nixlMemViewH backend_memview,
 
 nixl_status_t
 ProxyMemViewRegistry::unregisterProxyMemView(nixlMemViewH proxy_memview) {
-    (void)proxy_memview;
-    return NIXL_ERR_NOT_SUPPORTED;
+    std::lock_guard<std::mutex> guard(mutex_);
+    auto proxy_memview_id = reinterpret_cast<uint64_t>(proxy_memview);
+    if (proxy_memview_id < 1 || proxy_memview_id >= next_proxy_memview_id_) {
+        return NIXL_ERR_INVALID_PARAM;
+    }
+    backend_memview_by_proxy_id_[proxy_memview_id - 1] = nullptr;
+    return NIXL_SUCCESS;
 }
 
 bool
