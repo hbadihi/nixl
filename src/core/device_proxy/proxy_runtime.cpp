@@ -15,7 +15,9 @@
  * limitations under the License.
  */
 #include "proxy_runtime.h"
+#include "nixl_types.h"
 #include "proxy_worker.h"
+#include <cstdint>
 
 // Shape-only handoff: keep proxy runtime ownership and entry points visible,
 // but leave execution logic to a follow-up implementation. Proxy execution is
@@ -24,34 +26,42 @@
 nixl_status_t
 ProxyMemViewRegistry::registerProxyMemView(nixlMemViewH backend_memview,
                                            nixlMemViewH *proxy_memview) {
-    (void)backend_memview;
-    if (proxy_memview != nullptr) {
-        *proxy_memview = nullptr;
+    std::lock_guard<std::mutex> guard(mutex_);
+    if (proxy_memview == nullptr) {
+        return NIXL_ERR_INVALID_PARAM;
     }
-
-    return NIXL_ERR_NOT_SUPPORTED;
+    backend_memview_by_proxy_id_.push_back(backend_memview);
+    *proxy_memview = reinterpret_cast<nixlMemViewH>(next_proxy_memview_id_++);
+    return NIXL_SUCCESS;
 }
 
 nixl_status_t
 ProxyMemViewRegistry::unregisterProxyMemView(nixlMemViewH proxy_memview) {
-    (void)proxy_memview;
-    return NIXL_ERR_NOT_SUPPORTED;
+    std::lock_guard<std::mutex> guard(mutex_);
+    auto proxy_memview_id = reinterpret_cast<uint64_t>(proxy_memview);
+    if (proxy_memview_id < 1 || proxy_memview_id >= next_proxy_memview_id_) {
+        return NIXL_ERR_INVALID_PARAM;
+    }
+    backend_memview_by_proxy_id_[proxy_memview_id - 1] = nullptr;
+    return NIXL_SUCCESS;
 }
 
 bool
 ProxyMemViewRegistry::resolveProxyMemView(nixlMemViewH proxy_memview,
                                           nixlMemViewH &backend_memview) const {
-    (void)proxy_memview;
-    backend_memview = nullptr;
-    return false;
+    auto proxy_memview_id = reinterpret_cast<uint64_t>(proxy_memview);
+    return resolveProxyMemViewId(proxy_memview_id, backend_memview);
 }
 
 bool
 ProxyMemViewRegistry::resolveProxyMemViewId(uint64_t proxy_memview_id,
                                             nixlMemViewH &backend_memview) const {
-    (void)proxy_memview_id;
-    backend_memview = nullptr;
-    return false;
+    std::lock_guard<std::mutex> guard(mutex_);
+    if (proxy_memview_id < 1 || proxy_memview_id >= next_proxy_memview_id_) {
+        return false;
+    }
+    backend_memview = backend_memview_by_proxy_id_[proxy_memview_id - 1];
+    return backend_memview != nullptr;
 }
 
 void
