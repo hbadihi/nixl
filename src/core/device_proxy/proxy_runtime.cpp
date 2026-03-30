@@ -49,17 +49,19 @@ ProxyMemViewRegistry::unregisterProxyMemView(nixlMemViewH proxy_memview) {
 bool
 ProxyMemViewRegistry::resolveProxyMemView(nixlMemViewH proxy_memview,
                                           nixlMemViewH &backend_memview) const {
-    (void)proxy_memview;
-    backend_memview = nullptr;
-    return false;
+    auto proxy_memview_id = reinterpret_cast<uint64_t>(proxy_memview);
+    return resolveProxyMemViewId(proxy_memview_id, backend_memview);
 }
 
 bool
 ProxyMemViewRegistry::resolveProxyMemViewId(uint64_t proxy_memview_id,
                                             nixlMemViewH &backend_memview) const {
-    (void)proxy_memview_id;
-    backend_memview = nullptr;
-    return false;
+    std::lock_guard<std::mutex> guard(mutex_);
+    if (proxy_memview_id < 1 || proxy_memview_id >= next_proxy_memview_id_) {
+        return false;
+    }
+    backend_memview = backend_memview_by_proxy_id_[proxy_memview_id - 1];
+    return backend_memview != nullptr;
 }
 
 void
