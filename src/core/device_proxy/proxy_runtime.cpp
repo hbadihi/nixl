@@ -15,6 +15,7 @@
  * limitations under the License.
  */
 #include "proxy_runtime.h"
+#include "nixl_types.h"
 #include "proxy_worker.h"
 
 // Shape-only handoff: keep proxy runtime ownership and entry points visible,
@@ -24,12 +25,13 @@
 nixl_status_t
 ProxyMemViewRegistry::registerProxyMemView(nixlMemViewH backend_memview,
                                            nixlMemViewH *proxy_memview) {
-    (void)backend_memview;
-    if (proxy_memview != nullptr) {
-        *proxy_memview = nullptr;
+    std::lock_guard<std::mutex> guard(mutex_);
+    if (proxy_memview == nullptr) {
+        return NIXL_ERR_INVALID_PARAM;
     }
-
-    return NIXL_ERR_NOT_SUPPORTED;
+    backend_memview_by_proxy_id_.push_back(backend_memview);
+    *proxy_memview = reinterpret_cast<nixlMemViewH>(next_proxy_memview_id_++);
+    return NIXL_SUCCESS;
 }
 
 nixl_status_t
