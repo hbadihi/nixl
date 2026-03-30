@@ -19,10 +19,6 @@
 #include "proxy_worker.h"
 #include <cstdint>
 
-// Shape-only handoff: keep proxy runtime ownership and entry points visible,
-// but leave execution logic to a follow-up implementation. Proxy execution is
-// intentionally non-functional in this scaffold.
-
 nixl_status_t
 ProxyMemViewRegistry::registerProxyMemView(nixlMemViewH backend_memview,
                                            nixlMemViewH *proxy_memview) {
