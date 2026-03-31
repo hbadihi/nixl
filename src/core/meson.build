@@ -17,6 +17,10 @@
 
 nixl_lib_deps = [nixl_infra, serdes_interface, stream_interface, dl_dep, nixl_common_dep, thread_dep]
 
+if cuda_dep.found()
+    nixl_lib_deps += [ cuda_dep ]
+endif
+
 if etcd_dep.found()
     nixl_lib_deps += [ etcd_dep ]
 endif
