@@ -22,6 +22,10 @@
 
 struct ProxyDeviceContext;
 
+// Defined in nixl_device_proxy.cu; written by the host runtime via
+// cudaMemcpyToSymbol after startWorkers() and cleared on shutdown().
+extern __device__ ProxyDeviceContext *g_nixl_proxy_ctx;
+
 __device__ inline uint64_t
 proxyMemViewIdFromHandle(nixlMemViewH mvh) {
     return static_cast<uint64_t>(reinterpret_cast<uintptr_t>(mvh));
@@ -29,8 +33,7 @@ proxyMemViewIdFromHandle(nixlMemViewH mvh) {
 
 __device__ inline ProxyDeviceContext *
 load_proxy_context() {
-    // Runtime bootstrap will eventually publish a device-visible proxy context.
-    return nullptr;
+    return g_nixl_proxy_ctx;
 }
 
 struct ProxyDeviceContext : ProxyDeviceContextData {
