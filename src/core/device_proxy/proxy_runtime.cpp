@@ -21,6 +21,11 @@
 #include <algorithm>
 #include <cstdint>
 
+// Defined in src/api/gpu/proxy/nixl_device_proxy.cu (compiled by NVCC).
+// Declared here to avoid including a .cuh from a plain C++ translation unit.
+void nixlProxyPublishContext(ProxyDeviceContextData *ctx);
+void nixlProxyClearContext();
+
 nixl_status_t
 ProxyMemViewRegistry::registerProxyMemView(nixlMemViewH backend_memview,
                                            nixlMemViewH *proxy_memview) {
@@ -143,6 +148,11 @@ ProxyRuntime::init(DeviceProxyBackendAdapter *backend,
             n_ch));
     }
 
+    device_context_storage_.channels = device_channel_views_.data();
+    device_context_storage_.num_channels = channel_count;
+    device_context_storage_.shutdown_word = reinterpret_cast<uint32_t *>(&shutdown_word_);
+    device_context_ = &device_context_storage_;
+
     worker_threads_.clear();
     return NIXL_SUCCESS;
 }
@@ -195,6 +205,8 @@ ProxyRuntime::startWorkers() {
         });
     }
 
+    nixlProxyPublishContext(device_context_);
+
     return NIXL_SUCCESS;
 }
 
@@ -210,6 +222,7 @@ ProxyRuntime::joinWorkerThreads() noexcept {
 nixl_status_t
 ProxyRuntime::shutdown() {
     shutdown_word_.store(1, std::memory_order_release);
+    nixlProxyClearContext();
 
     joinWorkerThreads();
     worker_threads_.clear();
@@ -219,5 +232,6 @@ ProxyRuntime::shutdown() {
     device_channel_views_.clear();
     channels_.clear();
     backend_ = nullptr;
+    device_context_ = nullptr;
     return NIXL_SUCCESS;
 }

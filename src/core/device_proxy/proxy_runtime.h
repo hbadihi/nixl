@@ -43,24 +43,16 @@ struct ChannelState {
     ProxyChannelView device_view{};
     std::vector<ProxyRequestState> inflight_requests;
 
-    WorkRing *work_ring_ = nullptr;
-    ProxySubmission *records_ = nullptr;
-    uint32_t *producer_idx_ = nullptr;
-    uint32_t *consumer_idx_ = nullptr;
-    CompletionSlot *completion_slot_ = nullptr;
+    std::vector<ProxySubmission> records_storage;
+    uint32_t producer_storage = 0;
+    uint32_t consumer_storage = 0;
+    WorkRing ring_storage{};
+    CompletionSlot completion_storage{};
 
     ChannelState() = default;
-    ~ChannelState();
-    ChannelState(ChannelState &&other) noexcept;
-    ChannelState &operator=(ChannelState &&other) noexcept;
-    ChannelState(const ChannelState &) = delete;
-    ChannelState &operator=(const ChannelState &) = delete;
-
-    nixl_status_t
-    allocate(uint32_t channel_id, uint32_t depth);
 
     void
-    deallocate() noexcept;
+    allocate(uint32_t channel_id, uint32_t depth);
 };
 
 class ProxyMemViewRegistry {
@@ -136,7 +128,7 @@ class ProxyRuntime {
         channelCount() const { return static_cast<uint32_t>(channels_.size()); }
 
         const ProxyChannelView *
-        deviceChannelViews() const { return device_channel_views_; }
+        deviceChannelViews() const { return device_channel_views_.data(); }
 
         ProxyDeviceContextData *
         deviceContext() const { return device_context_; }
@@ -146,7 +138,8 @@ class ProxyRuntime {
         joinWorkerThreads() noexcept;
 
         std::vector<ChannelState> channels_;
-        ProxyChannelView *device_channel_views_ = nullptr;
+        std::vector<ProxyChannelView> device_channel_views_;
+        ProxyDeviceContextData device_context_storage_{};
         ProxyDeviceContextData *device_context_ = nullptr;
         std::vector<std::unique_ptr<ProxyWorker>> workers_;
         std::vector<std::thread> worker_threads_;
