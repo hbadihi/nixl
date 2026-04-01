@@ -33,11 +33,7 @@ load_proxy_context() {
     return nullptr;
 }
 
-struct ProxyDeviceContext {
-    // Shape-only handoff: preserve the published device-visible layout only.
-    ProxyChannelView *channels = nullptr;
-    uint32_t num_channels = 0;
-    uint32_t *shutdown_word = nullptr;
+struct ProxyDeviceContext : ProxyDeviceContextData {
 
     __device__ inline nixl_status_t
     enqueue(ProxySubmission submission, nixlGpuXferStatusH *xfer_status = nullptr) {
