@@ -16,13 +16,14 @@
  */
 #include "proxy_worker.h"
 #include "proxy_runtime.h"
+#include <atomic>
 
 // Shape-only handoff: worker dispatch is expected to resolve proxy memview IDs
 // to backend memviews before submitting through the backend adapter.
 
 ProxyWorker::ProxyWorker(DeviceProxyBackendAdapter *backend,
                          const ProxyMemViewRegistry *proxy_memview_registry,
-                         uint32_t *shutdown_word,
+                         std::atomic<uint32_t> *shutdown_word,
                          ChannelState *assigned_channels,
                          uint32_t assigned_channel_count) noexcept
     : backend_(backend),
