@@ -15,8 +15,10 @@
  * limitations under the License.
  */
 #include "proxy_runtime.h"
+#include "backend_adapter.h"
 #include "nixl_types.h"
 #include "proxy_worker.h"
+#include <algorithm>
 #include <cstdint>
 
 nixl_status_t
@@ -67,23 +69,81 @@ ProxyMemViewRegistry::clear() noexcept {
     next_proxy_memview_id_ = 1;
 }
 
+void
+ChannelState::allocate(uint32_t channel_id, uint32_t depth) {
+    records_storage.resize(depth);
+    producer_storage = 0;
+    consumer_storage = 0;
+
+    ring_storage.records = records_storage.data();
+    ring_storage.producer_idx = &producer_storage;
+    ring_storage.consumer_idx = &consumer_storage;
+    ring_storage.depth = depth;
+
+    completion_storage = CompletionSlot{};
+
+    device_view.work_ring = &ring_storage;
+    device_view.completion_slot = &completion_storage;
+    device_view.channel_id = channel_id;
+
+    inflight_requests.clear();
+}
+
 ProxyRuntime::ProxyRuntime() = default;
 
-ProxyRuntime::~ProxyRuntime() = default;
+ProxyRuntime::~ProxyRuntime() {
+    if (backend_) {
+        shutdown();
+    }
+}
 
 nixl_status_t
 ProxyRuntime::init(DeviceProxyBackendAdapter *backend,
                    uint32_t channel_count,
                    uint32_t worker_count) {
-    backend_ = backend;
-    shutdown_word_ = 0;
-    memview_registry_.clear();
-    (void)channel_count;
-    channels_.clear();
-    workers_.clear();
-    worker_threads_.clear();
-    (void)worker_count;
+    if (backend == nullptr || channel_count == 0 || worker_count == 0) {
+        return NIXL_ERR_INVALID_PARAM;
+    }
 
+    backend_ = backend;
+    shutdown_word_.store(0, std::memory_order_relaxed);
+    memview_registry_.clear();
+
+    worker_count = std::min(worker_count, channel_count);
+
+    nixl_status_t rc = backend_->init(worker_count, channel_count);
+    if (rc != NIXL_SUCCESS) {
+        backend_ = nullptr;
+        return rc;
+    }
+
+    channels_.resize(channel_count);
+    for (uint32_t i = 0; i < channel_count; ++i) {
+        channels_[i].allocate(i, ring_depth_);
+    }
+
+    device_channel_views_.resize(channel_count);
+    for (uint32_t i = 0; i < channel_count; ++i) {
+        device_channel_views_[i] = channels_[i].device_view;
+    }
+
+    workers_.clear();
+    workers_.reserve(worker_count);
+
+    for (uint32_t w = 0; w < worker_count; ++w) {
+        uint32_t first_ch = (w * channel_count) / worker_count;
+        uint32_t end_ch   = ((w + 1) * channel_count) / worker_count;
+        uint32_t n_ch     = end_ch - first_ch;
+
+        workers_.push_back(std::make_unique<ProxyWorker>(
+            backend_,
+            &memview_registry_,
+            &shutdown_word_,
+            &channels_[first_ch],
+            n_ch));
+    }
+
+    worker_threads_.clear();
     return NIXL_SUCCESS;
 }
 
@@ -120,10 +180,22 @@ ProxyRuntime::resolveProxyMemViewId(uint64_t proxy_memview_id,
 
 nixl_status_t
 ProxyRuntime::startWorkers() {
+    shutdown_word_.store(1, std::memory_order_release);
     joinWorkerThreads();
     worker_threads_.clear();
 
-    return NIXL_ERR_NOT_SUPPORTED;
+    shutdown_word_.store(0, std::memory_order_relaxed);
+
+    worker_threads_.reserve(workers_.size());
+    for (auto &worker : workers_) {
+        worker_threads_.emplace_back([this, w = worker.get()]() {
+            while (!shutdown_word_.load(std::memory_order_acquire)) {
+                w->runOnce();
+            }
+        });
+    }
+
+    return NIXL_SUCCESS;
 }
 
 void
@@ -137,11 +209,14 @@ ProxyRuntime::joinWorkerThreads() noexcept {
 
 nixl_status_t
 ProxyRuntime::shutdown() {
-    shutdown_word_ = 1;
+    shutdown_word_.store(1, std::memory_order_release);
+
     joinWorkerThreads();
     worker_threads_.clear();
-    memview_registry_.clear();
+
     workers_.clear();
+    memview_registry_.clear();
+    device_channel_views_.clear();
     channels_.clear();
     backend_ = nullptr;
     return NIXL_SUCCESS;

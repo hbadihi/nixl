@@ -17,6 +17,7 @@
 #ifndef NIXL_SRC_CORE_DEVICE_PROXY_PROXY_RUNTIME_H
 #define NIXL_SRC_CORE_DEVICE_PROXY_PROXY_RUNTIME_H
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -29,6 +30,8 @@
 class DeviceProxyBackendAdapter;
 class ProxyWorker;
 
+static constexpr uint32_t kDefaultProxyRingDepth = 256;
+
 struct ProxyRequestState {
     uint64_t op_idx = 0;
     uint64_t backend_req_token = 0;
@@ -37,9 +40,27 @@ struct ProxyRequestState {
 };
 
 struct ChannelState {
-    // Shape-only handoff: retain channel-owned state without queue/progress logic.
     ProxyChannelView device_view{};
     std::vector<ProxyRequestState> inflight_requests;
+
+    WorkRing *work_ring_ = nullptr;
+    ProxySubmission *records_ = nullptr;
+    uint32_t *producer_idx_ = nullptr;
+    uint32_t *consumer_idx_ = nullptr;
+    CompletionSlot *completion_slot_ = nullptr;
+
+    ChannelState() = default;
+    ~ChannelState();
+    ChannelState(ChannelState &&other) noexcept;
+    ChannelState &operator=(ChannelState &&other) noexcept;
+    ChannelState(const ChannelState &) = delete;
+    ChannelState &operator=(const ChannelState &) = delete;
+
+    nixl_status_t
+    allocate(uint32_t channel_id, uint32_t depth);
+
+    void
+    deallocate() noexcept;
 };
 
 class ProxyMemViewRegistry {
@@ -108,16 +129,31 @@ class ProxyRuntime {
         nixl_status_t
         shutdown();
 
+        const ProxyMemViewRegistry &
+        memviewRegistry() const { return memview_registry_; }
+
+        uint32_t
+        channelCount() const { return static_cast<uint32_t>(channels_.size()); }
+
+        const ProxyChannelView *
+        deviceChannelViews() const { return device_channel_views_; }
+
+        ProxyDeviceContextData *
+        deviceContext() const { return device_context_; }
+
     private:
         void
         joinWorkerThreads() noexcept;
 
         std::vector<ChannelState> channels_;
+        ProxyChannelView *device_channel_views_ = nullptr;
+        ProxyDeviceContextData *device_context_ = nullptr;
         std::vector<std::unique_ptr<ProxyWorker>> workers_;
         std::vector<std::thread> worker_threads_;
         ProxyMemViewRegistry memview_registry_;
         DeviceProxyBackendAdapter *backend_ = nullptr;
-        uint32_t shutdown_word_ = 0;
+        std::atomic<uint32_t> shutdown_word_{0};
+        uint32_t ring_depth_ = kDefaultProxyRingDepth;
 };
 
 #endif // NIXL_SRC_CORE_DEVICE_PROXY_PROXY_RUNTIME_H
