@@ -43,16 +43,24 @@ struct ChannelState {
     ProxyChannelView device_view{};
     std::vector<ProxyRequestState> inflight_requests;
 
-    std::vector<ProxySubmission> records_storage;
-    uint32_t producer_storage = 0;
-    uint32_t consumer_storage = 0;
-    WorkRing ring_storage{};
-    CompletionSlot completion_storage{};
+    WorkRing        *work_ring_       = nullptr;
+    ProxySubmission *records_         = nullptr;
+    uint32_t        *producer_idx_    = nullptr;
+    uint32_t        *consumer_idx_    = nullptr;
+    CompletionSlot  *completion_slot_ = nullptr;
 
     ChannelState() = default;
+    ~ChannelState();
+    ChannelState(ChannelState &&) noexcept;
+    ChannelState &operator=(ChannelState &&) noexcept;
+    ChannelState(const ChannelState &) = delete;
+    ChannelState &operator=(const ChannelState &) = delete;
+
+    nixl_status_t
+    allocate(uint32_t channel_id, uint32_t depth);
 
     void
-    allocate(uint32_t channel_id, uint32_t depth);
+    deallocate() noexcept;
 };
 
 class ProxyMemViewRegistry {
@@ -128,7 +136,7 @@ class ProxyRuntime {
         channelCount() const { return static_cast<uint32_t>(channels_.size()); }
 
         const ProxyChannelView *
-        deviceChannelViews() const { return device_channel_views_.data(); }
+        deviceChannelViews() const { return device_channel_views_; }
 
         ProxyDeviceContextData *
         deviceContext() const { return device_context_; }
@@ -138,9 +146,8 @@ class ProxyRuntime {
         joinWorkerThreads() noexcept;
 
         std::vector<ChannelState> channels_;
-        std::vector<ProxyChannelView> device_channel_views_;
-        ProxyDeviceContextData device_context_storage_{};
-        ProxyDeviceContextData *device_context_ = nullptr;
+        ProxyChannelView       *device_channel_views_ = nullptr;
+        ProxyDeviceContextData *device_context_       = nullptr;
         std::vector<std::unique_ptr<ProxyWorker>> workers_;
         std::vector<std::thread> worker_threads_;
         ProxyMemViewRegistry memview_registry_;

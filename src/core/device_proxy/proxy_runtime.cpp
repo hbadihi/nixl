@@ -20,6 +20,7 @@
 #include "proxy_worker.h"
 #include <algorithm>
 #include <cstdint>
+#include <cuda_runtime.h>
 
 // Defined in src/api/gpu/proxy/nixl_device_proxy.cu (compiled by NVCC).
 // Declared here to avoid including a .cuh from a plain C++ translation unit.
@@ -74,24 +75,76 @@ ProxyMemViewRegistry::clear() noexcept {
     next_proxy_memview_id_ = 1;
 }
 
-void
+nixl_status_t
 ChannelState::allocate(uint32_t channel_id, uint32_t depth) {
-    records_storage.resize(depth);
-    producer_storage = 0;
-    consumer_storage = 0;
+    if (cudaMallocHost(&work_ring_,       sizeof(WorkRing))                != cudaSuccess
+     || cudaMallocHost(&records_,         sizeof(ProxySubmission) * depth) != cudaSuccess
+     || cudaMallocHost(&producer_idx_,    sizeof(uint32_t))                != cudaSuccess
+     || cudaMallocHost(&consumer_idx_,    sizeof(uint32_t))                != cudaSuccess
+     || cudaMallocHost(&completion_slot_, sizeof(CompletionSlot))          != cudaSuccess) {
+        deallocate();
+        return NIXL_ERR_BACKEND;
+    }
 
-    ring_storage.records = records_storage.data();
-    ring_storage.producer_idx = &producer_storage;
-    ring_storage.consumer_idx = &consumer_storage;
-    ring_storage.depth = depth;
-
-    completion_storage = CompletionSlot{};
-
-    device_view.work_ring = &ring_storage;
-    device_view.completion_slot = &completion_storage;
-    device_view.channel_id = channel_id;
+    *producer_idx_    = 0;
+    *consumer_idx_    = 0;
+    *completion_slot_ = CompletionSlot{};
+    *work_ring_       = WorkRing{ records_, producer_idx_, consumer_idx_, depth };
+    device_view       = ProxyChannelView{ work_ring_, completion_slot_, channel_id };
 
     inflight_requests.clear();
+    return NIXL_SUCCESS;
+}
+
+void
+ChannelState::deallocate() noexcept {
+    if (completion_slot_) { cudaFreeHost(completion_slot_); completion_slot_ = nullptr; }
+    if (consumer_idx_)    { cudaFreeHost(consumer_idx_);    consumer_idx_    = nullptr; }
+    if (producer_idx_)    { cudaFreeHost(producer_idx_);    producer_idx_    = nullptr; }
+    if (records_)         { cudaFreeHost(records_);         records_         = nullptr; }
+    if (work_ring_)       { cudaFreeHost(work_ring_);       work_ring_       = nullptr; }
+    device_view = ProxyChannelView{};
+}
+
+ChannelState::~ChannelState() {
+    deallocate();
+}
+
+ChannelState::ChannelState(ChannelState &&other) noexcept
+    : device_view(other.device_view),
+      inflight_requests(std::move(other.inflight_requests)),
+      work_ring_(other.work_ring_),
+      records_(other.records_),
+      producer_idx_(other.producer_idx_),
+      consumer_idx_(other.consumer_idx_),
+      completion_slot_(other.completion_slot_) {
+    other.work_ring_       = nullptr;
+    other.records_         = nullptr;
+    other.producer_idx_    = nullptr;
+    other.consumer_idx_    = nullptr;
+    other.completion_slot_ = nullptr;
+    other.device_view      = ProxyChannelView{};
+}
+
+ChannelState &
+ChannelState::operator=(ChannelState &&other) noexcept {
+    if (this != &other) {
+        deallocate();
+        device_view       = other.device_view;
+        inflight_requests = std::move(other.inflight_requests);
+        work_ring_        = other.work_ring_;
+        records_          = other.records_;
+        producer_idx_     = other.producer_idx_;
+        consumer_idx_     = other.consumer_idx_;
+        completion_slot_  = other.completion_slot_;
+        other.work_ring_       = nullptr;
+        other.records_         = nullptr;
+        other.producer_idx_    = nullptr;
+        other.consumer_idx_    = nullptr;
+        other.completion_slot_ = nullptr;
+        other.device_view      = ProxyChannelView{};
+    }
+    return *this;
 }
 
 ProxyRuntime::ProxyRuntime() = default;
@@ -124,13 +177,37 @@ ProxyRuntime::init(DeviceProxyBackendAdapter *backend,
 
     channels_.resize(channel_count);
     for (uint32_t i = 0; i < channel_count; ++i) {
-        channels_[i].allocate(i, ring_depth_);
+        rc = channels_[i].allocate(i, ring_depth_);
+        if (rc != NIXL_SUCCESS) {
+            channels_.clear();
+            backend_ = nullptr;
+            return rc;
+        }
     }
 
-    device_channel_views_.resize(channel_count);
+    if (cudaMallocHost(&device_channel_views_,
+                       sizeof(ProxyChannelView) * channel_count) != cudaSuccess) {
+        channels_.clear();
+        backend_ = nullptr;
+        return NIXL_ERR_BACKEND;
+    }
     for (uint32_t i = 0; i < channel_count; ++i) {
         device_channel_views_[i] = channels_[i].device_view;
     }
+
+    if (cudaMallocHost(&device_context_,
+                       sizeof(ProxyDeviceContextData)) != cudaSuccess) {
+        cudaFreeHost(device_channel_views_);
+        device_channel_views_ = nullptr;
+        channels_.clear();
+        backend_ = nullptr;
+        return NIXL_ERR_BACKEND;
+    }
+    *device_context_ = ProxyDeviceContextData{
+        device_channel_views_,
+        channel_count,
+        reinterpret_cast<uint32_t *>(&shutdown_word_)
+    };
 
     workers_.clear();
     workers_.reserve(worker_count);
@@ -147,11 +224,6 @@ ProxyRuntime::init(DeviceProxyBackendAdapter *backend,
             &channels_[first_ch],
             n_ch));
     }
-
-    device_context_storage_.channels = device_channel_views_.data();
-    device_context_storage_.num_channels = channel_count;
-    device_context_storage_.shutdown_word = reinterpret_cast<uint32_t *>(&shutdown_word_);
-    device_context_ = &device_context_storage_;
 
     worker_threads_.clear();
     return NIXL_SUCCESS;
@@ -229,9 +301,17 @@ ProxyRuntime::shutdown() {
 
     workers_.clear();
     memview_registry_.clear();
-    device_channel_views_.clear();
+
+    if (device_context_) {
+        cudaFreeHost(device_context_);
+        device_context_ = nullptr;
+    }
+    if (device_channel_views_) {
+        cudaFreeHost(device_channel_views_);
+        device_channel_views_ = nullptr;
+    }
+
     channels_.clear();
     backend_ = nullptr;
-    device_context_ = nullptr;
     return NIXL_SUCCESS;
 }
