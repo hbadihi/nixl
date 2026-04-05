@@ -21,5 +21,10 @@ device_api_sources = [
     'utils.cu'
 ]
 
+proxy_device_api_sources = [
+    'proxy_write_test.cu',
+]
+
 # Export for parent meson.build
 device_api_test_sources = files(device_api_sources)
+proxy_device_api_test_sources = files(proxy_device_api_sources)

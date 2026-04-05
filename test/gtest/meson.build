@@ -33,7 +33,7 @@ subdir('mocks')
 subdir('unit')
 subdir('plugins')
 
-if ucx_gpu_device_api_available
+if cuda_dep.found()
     subdir('device_api')
 endif
 
@@ -81,6 +81,8 @@ else
     device_api_dep = []
 endif
 
+proxy_gtest_available = cuda_dep.found()
+
 if ucx_dep.found()
     gtest_sources += 'hw_warning_test.cpp'
     ucx_hw_warning_dep = [ucx_backend_interface, ucx_dep]
@@ -98,6 +100,29 @@ test_exe = executable('gtest',
 )
 
 test('gtest', test_exe, args: [plugin_dirs_arg])
+
+if proxy_gtest_available
+    proxy_gtest_sources = [
+        'main.cpp',
+        'mocks/gmock_engine.cpp',
+        'plugin_manager.cpp',
+        'error_handling.cpp',
+        'common.cpp',
+    ] + proxy_device_api_test_sources
+
+    proxy_test_exe = executable('gtest_proxy',
+        sources : proxy_gtest_sources,
+        include_directories : [nixl_inc_dirs, utils_inc_dirs, gtest_inc_dirs,
+                               nixl_gpu_proxy_inc_dirs, include_directories('device_api')],
+        cpp_args : cpp_flags,
+        dependencies : [nixl_dep, nixl_common_dep, cuda_dep, nixl_gpu_proxy_dep,
+                        gtest_dep, gmock_dep, absl_strings_dep, absl_time_dep,
+                        file_utils_interface],
+        link_with : [nixl_build_lib],
+        install : false)
+
+    test('gtest_proxy', proxy_test_exe, args: [plugin_dirs_arg])
+endif
 
 if get_option('b_sanitize').split(',').contains('thread')
     test_env = environment()

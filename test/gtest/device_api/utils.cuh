@@ -31,7 +31,11 @@
 #include <functional>
 #include <absl/strings/str_format.h>
 
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ <= 900 // Due to limited shared memory on SM_80, SM_90
+#define MAX_THREADS 512
+#else
 #define MAX_THREADS 1024
+#endif
 #define UCS_NSEC_PER_SEC 1000000000ul
 #define NS_TO_SEC(ns) ((ns) * 1.0 / (UCS_NSEC_PER_SEC))
 

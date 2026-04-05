@@ -21,10 +21,10 @@
 
 #if defined(NIXL_GPU_DEVICE_BACKEND_PROXY)
 #include "../proxy/nixl_device_impl.cuh"
-namespace nixl::gpu::selected_impl = nixl::gpu::proxy_impl;
+namespace nixl::gpu { namespace selected_impl = proxy_impl; }
 #elif defined(NIXL_GPU_DEVICE_BACKEND_UCX)
 #include "../ucx/nixl_device_impl.cuh"
-namespace nixl::gpu::selected_impl = nixl::gpu::ucx_impl;
+namespace nixl::gpu { namespace selected_impl = ucx_impl; }
 #else
 #error "No GPU device backend implementation selected"
 #endif
