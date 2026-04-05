@@ -19,6 +19,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cuda_runtime.h>
 #include <thread>
 
 #include "device_proxy/backend_adapter.h"
@@ -116,6 +117,8 @@ TEST_F(ProxyRuntimeTest, DeviceChannelViewsPopulated) {
     for (uint32_t i = 0; i < 3; ++i) {
         EXPECT_EQ(views[i].channel_id, i);
         EXPECT_NE(views[i].work_ring, nullptr);
+        EXPECT_NE(views[i].work_ring->producer_idx, nullptr);
+        EXPECT_NE(views[i].work_ring->consumer_idx, nullptr);
         EXPECT_NE(views[i].completion_slot, nullptr);
         EXPECT_EQ(views[i].work_ring->depth, kDefaultProxyRingDepth);
     }
@@ -125,8 +128,20 @@ TEST_F(ProxyRuntimeTest, WorkRingIndicesStartAtZero) {
     ASSERT_EQ(runtime_.init(&backend_, 2, 1), NIXL_SUCCESS);
     const ProxyChannelView *views = runtime_.deviceChannelViews();
     for (uint32_t i = 0; i < 2; ++i) {
-        EXPECT_EQ(*views[i].work_ring->producer_idx, 0u);
-        EXPECT_EQ(*views[i].work_ring->consumer_idx, 0u);
+        uint32_t producer = 0;
+        uint32_t consumer = 0;
+        ASSERT_EQ(cudaMemcpy(&producer,
+                             views[i].work_ring->producer_idx,
+                             sizeof(producer),
+                             cudaMemcpyDeviceToHost),
+                  cudaSuccess);
+        ASSERT_EQ(cudaMemcpy(&consumer,
+                             views[i].work_ring->consumer_idx,
+                             sizeof(consumer),
+                             cudaMemcpyDeviceToHost),
+                  cudaSuccess);
+        EXPECT_EQ(producer, 0u);
+        EXPECT_EQ(consumer, 0u);
     }
 }
 
@@ -134,8 +149,14 @@ TEST_F(ProxyRuntimeTest, CompletionSlotsInitialized) {
     ASSERT_EQ(runtime_.init(&backend_, 2, 1), NIXL_SUCCESS);
     const ProxyChannelView *views = runtime_.deviceChannelViews();
     for (uint32_t i = 0; i < 2; ++i) {
-        EXPECT_EQ(views[i].completion_slot->completed_idx, 0u);
-        EXPECT_EQ(views[i].completion_slot->next_status, NIXL_IN_PROG);
+        CompletionSlot slot{};
+        ASSERT_EQ(cudaMemcpy(&slot,
+                             views[i].completion_slot,
+                             sizeof(CompletionSlot),
+                             cudaMemcpyDeviceToHost),
+                  cudaSuccess);
+        EXPECT_EQ(slot.completed_idx, 0u);
+        EXPECT_EQ(slot.next_status, NIXL_IN_PROG);
     }
 }
 

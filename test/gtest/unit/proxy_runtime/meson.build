@@ -13,9 +13,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+proxy_runtime_test_deps = []
+if cuda_dep.found()
+    proxy_runtime_test_deps += [cuda_dep]
+endif
+
 proxy_runtime_unit_test_dep = declare_dependency(
     sources: [
         'proxy_runtime.cpp',
     ],
     include_directories: [nixl_inc_dirs, gtest_inc_dirs],
+    dependencies: proxy_runtime_test_deps,
 )

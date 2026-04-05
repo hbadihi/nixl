@@ -45,8 +45,13 @@ struct ChannelState {
 
     WorkRing        *work_ring_       = nullptr;
     ProxySubmission *records_         = nullptr;
-    uint32_t        *producer_idx_    = nullptr;
-    uint32_t        *consumer_idx_    = nullptr;
+    /** Producer count in HBM (cudaMalloc); GPU atomics; host reads via cudaMemcpy. */
+    uint32_t        *producer_idx_   = nullptr;
+    /** Consumer count: host pinned; proxy uses __atomic_* on consumer_idx_host_. */
+    uint32_t        *consumer_idx_host_  = nullptr;
+    /** Same word as consumer_idx_host_, for WorkRing::consumer_idx (GPU-readable). */
+    uint32_t        *consumer_idx_dev_   = nullptr;
+    /** Device pointer (cudaMalloc); publish with cudaMemcpy from the proxy worker. */
     CompletionSlot  *completion_slot_ = nullptr;
 
     ChannelState() = default;

@@ -79,17 +79,37 @@ nixl_status_t
 ChannelState::allocate(uint32_t channel_id, uint32_t depth) {
     if (cudaMallocHost(&work_ring_,       sizeof(WorkRing))                != cudaSuccess
      || cudaMallocHost(&records_,         sizeof(ProxySubmission) * depth) != cudaSuccess
-     || cudaMallocHost(&producer_idx_,    sizeof(uint32_t))                != cudaSuccess
-     || cudaMallocHost(&consumer_idx_,    sizeof(uint32_t))                != cudaSuccess
-     || cudaMallocHost(&completion_slot_, sizeof(CompletionSlot))          != cudaSuccess) {
+     || cudaMallocHost(reinterpret_cast<void **>(&consumer_idx_host_),
+                       sizeof(uint32_t))                                 != cudaSuccess
+     || cudaMalloc(reinterpret_cast<void **>(&producer_idx_),
+                   sizeof(uint32_t))                                     != cudaSuccess
+     || cudaMalloc(&completion_slot_, sizeof(CompletionSlot))             != cudaSuccess) {
         deallocate();
         return NIXL_ERR_BACKEND;
     }
 
-    *producer_idx_    = 0;
-    *consumer_idx_    = 0;
-    *completion_slot_ = CompletionSlot{};
-    *work_ring_       = WorkRing{ records_, producer_idx_, consumer_idx_, depth };
+    void *consumer_dev = nullptr;
+    if (cudaHostGetDevicePointer(&consumer_dev, consumer_idx_host_, 0) != cudaSuccess) {
+        deallocate();
+        return NIXL_ERR_BACKEND;
+    }
+    consumer_idx_dev_ = static_cast<uint32_t *>(consumer_dev);
+
+    if (cudaMemset(producer_idx_, 0, sizeof(uint32_t)) != cudaSuccess) {
+        deallocate();
+        return NIXL_ERR_BACKEND;
+    }
+    __atomic_store_n(consumer_idx_host_, 0, __ATOMIC_RELEASE);
+    if (cudaMemset(completion_slot_, 0, sizeof(CompletionSlot)) != cudaSuccess) {
+        deallocate();
+        return NIXL_ERR_BACKEND;
+    }
+    *work_ring_ = WorkRing{
+        records_,
+        producer_idx_,
+        consumer_idx_dev_,
+        depth,
+    };
     device_view       = ProxyChannelView{ work_ring_, completion_slot_, channel_id };
 
     inflight_requests.clear();
@@ -98,9 +118,16 @@ ChannelState::allocate(uint32_t channel_id, uint32_t depth) {
 
 void
 ChannelState::deallocate() noexcept {
-    if (completion_slot_) { cudaFreeHost(completion_slot_); completion_slot_ = nullptr; }
-    if (consumer_idx_)    { cudaFreeHost(consumer_idx_);    consumer_idx_    = nullptr; }
-    if (producer_idx_)    { cudaFreeHost(producer_idx_);    producer_idx_    = nullptr; }
+    if (completion_slot_) { cudaFree(completion_slot_); completion_slot_ = nullptr; }
+    if (producer_idx_) {
+        cudaFree(producer_idx_);
+        producer_idx_ = nullptr;
+    }
+    if (consumer_idx_host_) {
+        cudaFreeHost(consumer_idx_host_);
+        consumer_idx_host_ = nullptr;
+        consumer_idx_dev_  = nullptr;
+    }
     if (records_)         { cudaFreeHost(records_);         records_         = nullptr; }
     if (work_ring_)       { cudaFreeHost(work_ring_);       work_ring_       = nullptr; }
     device_view = ProxyChannelView{};
@@ -116,13 +143,15 @@ ChannelState::ChannelState(ChannelState &&other) noexcept
       work_ring_(other.work_ring_),
       records_(other.records_),
       producer_idx_(other.producer_idx_),
-      consumer_idx_(other.consumer_idx_),
+      consumer_idx_host_(other.consumer_idx_host_),
+      consumer_idx_dev_(other.consumer_idx_dev_),
       completion_slot_(other.completion_slot_) {
-    other.work_ring_       = nullptr;
-    other.records_         = nullptr;
-    other.producer_idx_    = nullptr;
-    other.consumer_idx_    = nullptr;
-    other.completion_slot_ = nullptr;
+    other.work_ring_          = nullptr;
+    other.records_            = nullptr;
+    other.producer_idx_   = nullptr;
+    other.consumer_idx_host_  = nullptr;
+    other.consumer_idx_dev_   = nullptr;
+    other.completion_slot_    = nullptr;
     other.device_view      = ProxyChannelView{};
 }
 
@@ -132,16 +161,18 @@ ChannelState::operator=(ChannelState &&other) noexcept {
         deallocate();
         device_view       = other.device_view;
         inflight_requests = std::move(other.inflight_requests);
-        work_ring_        = other.work_ring_;
-        records_          = other.records_;
-        producer_idx_     = other.producer_idx_;
-        consumer_idx_     = other.consumer_idx_;
-        completion_slot_  = other.completion_slot_;
-        other.work_ring_       = nullptr;
-        other.records_         = nullptr;
-        other.producer_idx_    = nullptr;
-        other.consumer_idx_    = nullptr;
-        other.completion_slot_ = nullptr;
+        work_ring_           = other.work_ring_;
+        records_             = other.records_;
+        producer_idx_    = other.producer_idx_;
+        consumer_idx_host_   = other.consumer_idx_host_;
+        consumer_idx_dev_    = other.consumer_idx_dev_;
+        completion_slot_     = other.completion_slot_;
+        other.work_ring_          = nullptr;
+        other.records_            = nullptr;
+        other.producer_idx_   = nullptr;
+        other.consumer_idx_host_  = nullptr;
+        other.consumer_idx_dev_   = nullptr;
+        other.completion_slot_    = nullptr;
         other.device_view      = ProxyChannelView{};
     }
     return *this;
