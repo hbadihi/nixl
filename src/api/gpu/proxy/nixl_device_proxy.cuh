@@ -17,10 +17,21 @@
 #ifndef NIXL_SRC_API_GPU_PROXY_NIXL_DEVICE_PROXY_CUH
 #define NIXL_SRC_API_GPU_PROXY_NIXL_DEVICE_PROXY_CUH
 
+#include <cuda/atomic>
+
 #include "../common/nixl_device_types.cuh"
 #include "../../../core/device_proxy/proxy_protocol.h"
 
 struct ProxyDeviceContext;
+
+// Overlay struct written into nixlGpuXferStatusH::storage by enqueue()
+// and read back by pollXferStatus().  Must fit within the 64-byte opaque blob.
+struct ProxyXferStatus {
+    CompletionSlot *slot;  // device pointer to the channel's CompletionSlot
+    uint64_t        op_idx;
+};
+static_assert(sizeof(ProxyXferStatus) <= sizeof(nixlGpuXferStatusH),
+              "ProxyXferStatus must fit in nixlGpuXferStatusH::storage");
 
 // Defined in nixl_device_proxy.cu; written by the host runtime via
 // cudaMemcpyToSymbol after startWorkers() and cleared on shutdown().
@@ -38,19 +49,67 @@ load_proxy_context() {
 
 struct ProxyDeviceContext : ProxyDeviceContextData {
 
+    // Enqueue a transfer submission into the SPSC work ring for the selected
+    // channel, spinning if the ring is full.  Optionally records a completion
+    // token in *xfer_status for later polling via pollXferStatus().
+    //
+    // producer_idx lives in HBM; consumer_idx lives in pinned host memory
+    // (accessible from device via UVA mapped pointer).  Both are accessed with
+    // system-scope atomics so the CPU proxy worker sees the update coherently.
     __device__ inline nixl_status_t
     enqueue(ProxySubmission submission, nixlGpuXferStatusH *xfer_status = nullptr) {
-        (void)submission;
-        (void)xfer_status;
+        if (num_channels == 0) {
+            return NIXL_ERR_INVALID_PARAM;
+        }
 
-        return NIXL_ERR_NOT_SUPPORTED;
+        uint32_t ch = submission.channel_id % num_channels;
+        ProxyChannelView &ch_view = channels[ch];
+        WorkRing         *ring    = ch_view.work_ring;
+
+        cuda::atomic_ref<uint32_t, cuda::thread_scope_system> prod(*ring->producer_idx);
+        cuda::atomic_ref<uint32_t, cuda::thread_scope_system> cons(*ring->consumer_idx);
+
+        uint32_t prod_val = prod.load(cuda::memory_order_relaxed);
+
+        // Spin until there is space in the ring.
+        while (prod_val - cons.load(cuda::memory_order_acquire) >= ring->depth) {
+            prod_val = prod.load(cuda::memory_order_relaxed);
+        }
+
+        // Plain write: ordered by the release store below.
+        ring->records[prod_val % ring->depth] = submission;
+
+        // Publish the new entry to the CPU proxy worker.
+        prod.store(prod_val + 1, cuda::memory_order_release);
+
+        if (xfer_status != nullptr) {
+            ProxyXferStatus pxs{ch_view.completion_slot, submission.op_idx};
+            memcpy(xfer_status->storage, &pxs, sizeof(ProxyXferStatus));
+        }
+
+        return NIXL_SUCCESS;
     }
 
+    // Poll the completion slot recorded by enqueue().  Returns NIXL_SUCCESS
+    // once the CPU proxy worker has published a completion with completed_idx
+    // >= the op_idx stored in xfer_status, otherwise NIXL_IN_PROG.
+    //
+    // The completion_slot lives in HBM; the CPU writes via cudaMemcpy.
+    // An acquire load on completed_idx ensures next_status is also visible.
     __device__ inline nixl_status_t
     pollXferStatus(const nixlGpuXferStatusH &xfer_status) const {
-        (void)xfer_status;
+        const ProxyXferStatus *pxs =
+            reinterpret_cast<const ProxyXferStatus *>(xfer_status.storage);
 
-        return NIXL_ERR_NOT_SUPPORTED;
+        cuda::atomic_ref<uint64_t, cuda::thread_scope_system> cidx(
+            pxs->slot->completed_idx);
+
+        if (cidx.load(cuda::memory_order_acquire) >= pxs->op_idx) {
+            // The acquire above orders the read of next_status.
+            return pxs->slot->next_status;
+        }
+
+        return NIXL_IN_PROG;
     }
 };
 
