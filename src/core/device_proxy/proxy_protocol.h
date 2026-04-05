@@ -46,8 +46,11 @@ struct ProxySubmission {
 };
 
 struct WorkRing {
+    /** Host-accessible (e.g. cudaMallocHost); GPU may read via mapped pointer if needed. */
     ProxySubmission *records = nullptr;
+    /** HBM; GPU advances with CUDA atomics; host reads via cudaMemcpy. */
     uint32_t *producer_idx = nullptr;
+    /** Mapped pinned consumer; host proxy uses __atomic_* on host alias (ChannelState). */
     uint32_t *consumer_idx = nullptr;
     uint32_t depth = 0;
 };
@@ -59,6 +62,7 @@ struct CompletionSlot {
 
 struct ProxyChannelView {
     WorkRing *work_ring = nullptr;
+    /** Device pointer; host updates via cudaMemcpy (or GDRCopy later). */
     CompletionSlot *completion_slot = nullptr;
     uint32_t channel_id = 0;
 };

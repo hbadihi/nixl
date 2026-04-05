@@ -48,7 +48,7 @@ class ProxyWorker {
         driveBackendProgress();
 
         void
-        publishCompletions();
+        publishCompletions(ChannelState &channel);
 
         DeviceProxyBackendAdapter *backend_ = nullptr;
         const ProxyMemViewRegistry *proxy_memview_registry_ = nullptr;
