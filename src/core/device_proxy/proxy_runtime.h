@@ -39,7 +39,7 @@ struct ProxyRequestState {
     bool publish_ready = false;
 };
 
-struct ChannelState {
+struct alignas(64) ChannelState {
     ProxyChannelView device_view{};
     std::vector<ProxyRequestState> inflight_requests;
 

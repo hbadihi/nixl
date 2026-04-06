@@ -22,11 +22,6 @@
 #include <cstdint>
 #include <cuda_runtime.h>
 
-// Defined in src/api/gpu/proxy/nixl_device_proxy.cu (compiled by NVCC).
-// Declared here to avoid including a .cuh from a plain C++ translation unit.
-void nixlProxyPublishContext(ProxyDeviceContextData *ctx);
-void nixlProxyClearContext();
-
 nixl_status_t
 ProxyMemViewRegistry::registerProxyMemView(nixlMemViewH backend_memview,
                                            nixlMemViewH *proxy_memview) {
@@ -211,6 +206,7 @@ ProxyRuntime::init(DeviceProxyBackendAdapter *backend,
         rc = channels_[i].allocate(i, ring_depth_);
         if (rc != NIXL_SUCCESS) {
             channels_.clear();
+            backend_->shutdown();
             backend_ = nullptr;
             return rc;
         }
@@ -219,6 +215,7 @@ ProxyRuntime::init(DeviceProxyBackendAdapter *backend,
     if (cudaMallocHost(&device_channel_views_,
                        sizeof(ProxyChannelView) * channel_count) != cudaSuccess) {
         channels_.clear();
+        backend_->shutdown();
         backend_ = nullptr;
         return NIXL_ERR_BACKEND;
     }
@@ -231,6 +228,7 @@ ProxyRuntime::init(DeviceProxyBackendAdapter *backend,
         cudaFreeHost(device_channel_views_);
         device_channel_views_ = nullptr;
         channels_.clear();
+        backend_->shutdown();
         backend_ = nullptr;
         return NIXL_ERR_BACKEND;
     }
@@ -263,9 +261,10 @@ ProxyRuntime::init(DeviceProxyBackendAdapter *backend,
 nixl_status_t
 ProxyRuntime::loadRemoteConnInfo(const std::string &remote_name,
                                  const nixl_blob_t &conn_info) {
-    (void)remote_name;
-    (void)conn_info;
-    return NIXL_ERR_NOT_SUPPORTED;
+    if (backend_ == nullptr) {
+        return NIXL_ERR_NOT_SUPPORTED;
+    }
+    return backend_->loadRemoteConnInfo(remote_name, conn_info);
 }
 
 nixl_status_t
@@ -308,8 +307,6 @@ ProxyRuntime::startWorkers() {
         });
     }
 
-    nixlProxyPublishContext(device_context_);
-
     return NIXL_SUCCESS;
 }
 
@@ -325,10 +322,14 @@ ProxyRuntime::joinWorkerThreads() noexcept {
 nixl_status_t
 ProxyRuntime::shutdown() {
     shutdown_word_.store(1, std::memory_order_release);
-    nixlProxyClearContext();
 
     joinWorkerThreads();
     worker_threads_.clear();
+
+    nixl_status_t backend_status = NIXL_SUCCESS;
+    if (backend_ != nullptr) {
+        backend_status = backend_->shutdown();
+    }
 
     workers_.clear();
     memview_registry_.clear();
@@ -344,5 +345,5 @@ ProxyRuntime::shutdown() {
 
     channels_.clear();
     backend_ = nullptr;
-    return NIXL_SUCCESS;
+    return backend_status;
 }
