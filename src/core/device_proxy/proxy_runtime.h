@@ -26,8 +26,7 @@
 #include <vector>
 
 #include "proxy_protocol.h"
-
-class DeviceProxyBackendAdapter;
+#include "backend_adapter.h"
 class ProxyWorker;
 
 static constexpr uint32_t kDefaultProxyRingDepth = 256;
@@ -119,6 +118,14 @@ class ProxyRuntime {
 
         nixl_status_t
         unregisterProxyMemView(nixlMemViewH proxy_memview);
+
+        nixl_status_t
+        storeMetadata(nixlMemViewH proxy_memview,
+                      const nixl_meta_dlist_t &dlist);
+
+        nixl_status_t
+        storeMetadata(nixlMemViewH proxy_memview,
+                      const nixl_remote_meta_dlist_t &dlist);
 
         bool
         resolveProxyMemView(nixlMemViewH proxy_memview,
