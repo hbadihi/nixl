@@ -81,6 +81,26 @@ proxyPutKernel(nixl_status_t *out_status)
     *out_status = nixlPut(src, dst, /*size=*/0);
 }
 
+static void
+publishProxyContext(ProxyRuntime &runtime)
+{
+    bool *d_warmup = nullptr;
+    ASSERT_EQ(cudaMalloc(&d_warmup, sizeof(bool)), cudaSuccess);
+    proxyContextKernel<<<1, 1>>>(d_warmup);
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    ASSERT_EQ(cudaGetLastError(), cudaSuccess);
+    ASSERT_EQ(cudaFree(d_warmup), cudaSuccess);
+
+    ASSERT_NE(runtime.deviceContext(), nullptr);
+    ASSERT_EQ(nixlProxyPublishContext(runtime.deviceContext()), cudaSuccess);
+}
+
+static void
+clearProxyContext()
+{
+    ASSERT_EQ(nixlProxyClearContext(), cudaSuccess);
+}
+
 // ---------------------------------------------------------------------------
 // Test fixture
 // ---------------------------------------------------------------------------
@@ -129,6 +149,7 @@ TEST_F(ProxyDeviceApiTest, ContextPublishedAfterStartWorkers)
     ASSERT_EQ(runtime.init(&adapter, /*channel_count=*/1, /*worker_count=*/1),
               NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
+    publishProxyContext(runtime);
 
     bool *d_has_ctx = deviceAlloc<bool>();
     proxyContextKernel<<<1, 1>>>(d_has_ctx);
@@ -138,6 +159,7 @@ TEST_F(ProxyDeviceApiTest, ContextPublishedAfterStartWorkers)
     EXPECT_TRUE(deviceGet(d_has_ctx));
     cudaFree(d_has_ctx);
 
+    clearProxyContext();
     ASSERT_EQ(runtime.shutdown(), NIXL_SUCCESS);
 }
 
@@ -150,7 +172,9 @@ TEST_F(ProxyDeviceApiTest, ContextClearedAfterShutdown)
     ASSERT_EQ(runtime.init(&adapter, /*channel_count=*/1, /*worker_count=*/1),
               NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
+    publishProxyContext(runtime);
     ASSERT_EQ(runtime.shutdown(), NIXL_SUCCESS);
+    clearProxyContext();
 
     bool *d_has_ctx = deviceAlloc<bool>();
     // Initialise to true so a no-op kernel would give a false pass.
@@ -165,9 +189,9 @@ TEST_F(ProxyDeviceApiTest, ContextClearedAfterShutdown)
     cudaFree(d_has_ctx);
 }
 
-// nixlPut() via the proxy backend should return NIXL_ERR_NOT_SUPPORTED while
-// the enqueue() implementation is still a stub.
-TEST_F(ProxyDeviceApiTest, PutReturnsNotSupportedWithStubEnqueue)
+// nixlPut() via the proxy backend should report NIXL_IN_PROG once the
+// submission is accepted into the proxy ring.
+TEST_F(ProxyDeviceApiTest, PutReturnsInProgWhenEnqueued)
 {
     StubProxyBackendAdapter adapter;
     ProxyRuntime runtime;
@@ -175,14 +199,16 @@ TEST_F(ProxyDeviceApiTest, PutReturnsNotSupportedWithStubEnqueue)
     ASSERT_EQ(runtime.init(&adapter, /*channel_count=*/1, /*worker_count=*/1),
               NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
+    publishProxyContext(runtime);
 
     nixl_status_t *d_status = deviceAlloc<nixl_status_t>();
     proxyPutKernel<<<1, 1>>>(d_status);
     ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
     ASSERT_EQ(cudaGetLastError(), cudaSuccess);
 
-    EXPECT_EQ(deviceGet(d_status), NIXL_ERR_NOT_SUPPORTED);
+    EXPECT_EQ(deviceGet(d_status), NIXL_IN_PROG);
     cudaFree(d_status);
 
+    clearProxyContext();
     ASSERT_EQ(runtime.shutdown(), NIXL_SUCCESS);
 }
