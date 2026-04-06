@@ -115,10 +115,12 @@ if proxy_gtest_available
         include_directories : [nixl_inc_dirs, utils_inc_dirs, gtest_inc_dirs,
                                nixl_gpu_proxy_inc_dirs, include_directories('device_api')],
         cpp_args : cpp_flags,
-        dependencies : [nixl_dep, nixl_common_dep, cuda_dep, nixl_gpu_proxy_dep,
+        dependencies : [nixl_dep, nixl_common_dep, cuda_dep,
                         gtest_dep, gmock_dep, absl_strings_dep, absl_time_dep,
                         file_utils_interface],
-        link_with : [nixl_build_lib],
+        # nixl_gpu_proxy_lib must be linked directly so Meson includes
+        # nixl_device_proxy.cu.o in the RDC device-link step for gtest_proxy.
+        link_with : [nixl_build_lib, nixl_gpu_proxy_lib],
         install : false)
 
     test('gtest_proxy', proxy_test_exe, args: [plugin_dirs_arg])
