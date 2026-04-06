@@ -82,12 +82,22 @@ nixl_status_t
 ProxyWorker::dispatch(ChannelState &channel, const ProxySubmission &submission) {
     nixlMemViewH src_memview = nullptr;
     nixlMemViewH dst_memview = nullptr;
-    if (!proxy_memview_registry_->resolveProxyMemViewId(submission.src_proxy_memview_id,
-                                                        src_memview)) {
+    const auto resolve_or_fallback = [this](uint64_t proxy_memview_id,
+                                            nixlMemViewH &out_memview) -> bool {
+        if (proxy_memview_registry_->resolveProxyMemViewId(proxy_memview_id, out_memview)) {
+            return true;
+        }
+        // Fallback for phase-1 wiring: allow direct backend memview handles
+        // encoded as proxy IDs when explicit proxy registration was not used.
+        out_memview = reinterpret_cast<nixlMemViewH>(proxy_memview_id);
+        return out_memview != nullptr;
+    };
+
+    if (!resolve_or_fallback(submission.dst_proxy_memview_id, dst_memview)) {
         return NIXL_ERR_NOT_FOUND;
     }
-    if (!proxy_memview_registry_->resolveProxyMemViewId(submission.dst_proxy_memview_id,
-                                                        dst_memview)) {
+    if ((submission.opcode == ProxyOpcode::PUT)
+        && !resolve_or_fallback(submission.src_proxy_memview_id, src_memview)) {
         return NIXL_ERR_NOT_FOUND;
     }
 
