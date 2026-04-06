@@ -34,18 +34,38 @@
 #include "absl/log/log_sink.h"
 #include "absl/log/log_entry.h"
 
-#ifdef HAVE_CUDA
+#if defined(HAVE_CUDA) || defined(__CUDACC__)
 #include <cuda_runtime.h>
+#include <cstdio>
+#include <cstdlib>
 #endif
 
 namespace gtest {
 
 inline bool
 hasCudaGpu() {
-#ifdef HAVE_CUDA
+#if defined(HAVE_CUDA) || defined(__CUDACC__)
     int count = 0;
     auto err = cudaGetDeviceCount(&count);
-    return (err == cudaSuccess && count > 0);
+    if (err != cudaSuccess) {
+        const char *cvis = std::getenv("CUDA_VISIBLE_DEVICES");
+        std::fprintf(stderr,
+                     "hasCudaGpu(): cudaGetDeviceCount failed: code=%d msg=%s "
+                     "CUDA_VISIBLE_DEVICES=%s\n",
+                     static_cast<int>(err),
+                     cudaGetErrorString(err),
+                     (cvis ? cvis : "<unset>"));
+        return false;
+    }
+    if (count <= 0) {
+        const char *cvis = std::getenv("CUDA_VISIBLE_DEVICES");
+        std::fprintf(stderr,
+                     "hasCudaGpu(): cudaGetDeviceCount returned 0 devices "
+                     "CUDA_VISIBLE_DEVICES=%s\n",
+                     (cvis ? cvis : "<unset>"));
+        return false;
+    }
+    return true;
 #else
     return false;
 #endif
