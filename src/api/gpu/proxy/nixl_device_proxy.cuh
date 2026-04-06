@@ -18,6 +18,7 @@
 #define NIXL_SRC_API_GPU_PROXY_NIXL_DEVICE_PROXY_CUH
 
 #include <cuda/atomic>
+#include <stdio.h>
 
 #include "../common/nixl_device_types.cuh"
 #include "../../../core/device_proxy/proxy_protocol.h"
@@ -33,9 +34,37 @@ struct ProxyXferStatus {
 static_assert(sizeof(ProxyXferStatus) <= sizeof(nixlGpuXferStatusH),
               "ProxyXferStatus must fit in nixlGpuXferStatusH::storage");
 
-// Defined in nixl_device_proxy.cu; written by the host runtime via
-// cudaMemcpyToSymbol after startWorkers() and cleared on shutdown().
+// Defined in nixl_device_proxy.cu and read by device kernels through
+// load_proxy_context().
 extern __device__ ProxyDeviceContext *g_nixl_proxy_ctx;
+
+// Host-callable helpers. Keeping these inline in CUDA translation units avoids
+// cross-DSO symbol ownership issues for g_nixl_proxy_ctx.
+__host__ inline cudaError_t
+nixlProxyPublishContext(ProxyDeviceContextData *ctx) {
+    ProxyDeviceContext *device_ctx = reinterpret_cast<ProxyDeviceContext *>(ctx);
+    cudaError_t err = cudaMemcpyToSymbol(g_nixl_proxy_ctx, &device_ctx, sizeof(ProxyDeviceContext *));
+    if (err != cudaSuccess) {
+        fprintf(stderr,
+                "nixlProxyPublishContext: cudaMemcpyToSymbol failed: code=%d msg=%s\n",
+                static_cast<int>(err),
+                cudaGetErrorString(err));
+    }
+    return err;
+}
+
+__host__ inline cudaError_t
+nixlProxyClearContext() {
+    ProxyDeviceContext *null_ctx = nullptr;
+    cudaError_t err = cudaMemcpyToSymbol(g_nixl_proxy_ctx, &null_ctx, sizeof(ProxyDeviceContext *));
+    if (err != cudaSuccess) {
+        fprintf(stderr,
+                "nixlProxyClearContext: cudaMemcpyToSymbol failed: code=%d msg=%s\n",
+                static_cast<int>(err),
+                cudaGetErrorString(err));
+    }
+    return err;
+}
 
 __device__ inline uint64_t
 proxyMemViewIdFromHandle(nixlMemViewH mvh) {
@@ -77,6 +106,7 @@ struct ProxyDeviceContext : ProxyDeviceContextData {
         }
 
         // Plain write: ordered by the release store below.
+        submission.op_idx = prod_val;
         ring->records[prod_val % ring->depth] = submission;
 
         // Publish the new entry to the CPU proxy worker.
@@ -87,7 +117,7 @@ struct ProxyDeviceContext : ProxyDeviceContextData {
             memcpy(xfer_status->storage, &pxs, sizeof(ProxyXferStatus));
         }
 
-        return NIXL_SUCCESS;
+        return NIXL_IN_PROG;
     }
 
     // Poll the completion slot recorded by enqueue().  Returns NIXL_SUCCESS
