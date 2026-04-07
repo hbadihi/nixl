@@ -19,10 +19,11 @@
 
 #include <cstdint>
 #include <mutex>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
-#include <cuda_runtime.h>
-
+#include "backend/backend_aux.h"
 #include "../../../core/device_proxy/backend_adapter.h"
 
 class nixlUcxEngine;
@@ -53,18 +54,27 @@ class nixlUcxProxyBackend : public DeviceProxyBackendAdapter {
         nixl_status_t
         shutdown() override;
 
+        void
+        storeLocalMeta(nixlMemViewH mvh, const nixl_meta_dlist_t &dlist) override;
+
+        void
+        storeRemoteMeta(nixlMemViewH mvh, const nixl_remote_meta_dlist_t &dlist) override;
+
+        void
+        clearMeta(nixlMemViewH mvh) override;
+
     private:
-        struct ProxyRequestState {
-            bool has_event = false;
-            cudaEvent_t event = nullptr;
-            nixl_status_t status = NIXL_IN_PROG;
+        struct StoredEntry {
+            uintptr_t base_addr = 0;
+            nixlBackendMD *metadataP = nullptr;
         };
 
-        nixl_status_t
-        getLocalAddress(nixlMemViewH memview, size_t index, size_t offset, void *&addr) const;
-
-        nixl_status_t
-        getRemoteAddress(nixlMemViewH memview, size_t index, size_t offset, void *&addr) const;
+        struct MemViewMeta {
+            bool is_remote = false;
+            std::string remote_agent;
+            nixl_mem_t mem_type;
+            std::vector<StoredEntry> entries;
+        };
 
         nixl_status_t
         submitPut(const ResolvedProxySubmission &submission, uint64_t &request_token);
@@ -73,14 +83,15 @@ class nixlUcxProxyBackend : public DeviceProxyBackendAdapter {
         submitAtomicAdd(const ResolvedProxySubmission &submission, uint64_t &request_token);
 
         uint64_t
-        makeRequestToken(ProxyRequestState &&state);
+        trackRequest(nixlBackendReqH *handle);
 
         nixlUcxEngine *engine_ = nullptr;
         uint32_t worker_count_ = 0;
         uint32_t channel_count_ = 0;
-        cudaStream_t stream_ = nullptr;
+        std::mutex meta_mutex_;
+        std::unordered_map<nixlMemViewH, MemViewMeta> meta_store_;
         std::mutex request_mutex_;
-        std::unordered_map<uint64_t, ProxyRequestState> requests_;
+        std::unordered_map<uint64_t, nixlBackendReqH *> tracked_requests_;
         uint64_t next_request_token_ = 1;
 };
 

@@ -22,6 +22,7 @@
 #include <string>
 
 #include <nixl_types.h>
+#include "backend_aux.h"
 #include "proxy_protocol.h"
 
 struct ResolvedProxySubmission {
@@ -64,6 +65,15 @@ class DeviceProxyBackendAdapter {
 
         virtual nixl_status_t
         shutdown() = 0;
+
+        virtual void
+        storeLocalMeta(nixlMemViewH, const nixl_meta_dlist_t &) {}
+
+        virtual void
+        storeRemoteMeta(nixlMemViewH, const nixl_remote_meta_dlist_t &) {}
+
+        virtual void
+        clearMeta(nixlMemViewH) {}
 };
 
 #endif // NIXL_SRC_CORE_DEVICE_PROXY_BACKEND_ADAPTER_H

@@ -16,8 +16,7 @@
  */
 #include "ucx_proxy_backend.h"
 #include "../ucx_backend.h"
-#include <cstddef>
-#include <ucp/api/device/ucp_device_types.h>
+#include "nixl_log.h"
 
 namespace {
 constexpr uint64_t kInvalidToken = 0;
@@ -30,10 +29,6 @@ nixlUcxProxyBackend::init(uint32_t worker_count, uint32_t channel_count) {
     }
     worker_count_ = worker_count;
     channel_count_ = channel_count;
-    if (cudaStreamCreateWithFlags(&stream_, cudaStreamNonBlocking) != cudaSuccess) {
-        stream_ = nullptr;
-        return NIXL_ERR_BACKEND;
-    }
     return NIXL_SUCCESS;
 }
 
@@ -50,6 +45,55 @@ nixlUcxProxyBackend::loadRemoteConnInfo(const std::string &remote_name,
     return engine_->connect(remote_name);
 }
 
+void
+nixlUcxProxyBackend::storeLocalMeta(nixlMemViewH mvh, const nixl_meta_dlist_t &dlist) {
+    MemViewMeta meta;
+    meta.is_remote = false;
+    meta.mem_type = dlist.getType();
+
+    const size_t count = dlist.descCount();
+    meta.entries.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
+        const auto &desc = dlist[i];
+        auto *priv = static_cast<nixlUcxPrivateMetadata *>(desc.metadataP);
+        StoredEntry entry;
+        entry.base_addr = reinterpret_cast<uintptr_t>(priv->getMem().getBase());
+        entry.metadataP = desc.metadataP;
+        meta.entries.push_back(entry);
+    }
+
+    std::lock_guard<std::mutex> lock(meta_mutex_);
+    meta_store_[mvh] = std::move(meta);
+}
+
+void
+nixlUcxProxyBackend::storeRemoteMeta(nixlMemViewH mvh, const nixl_remote_meta_dlist_t &dlist) {
+    MemViewMeta meta;
+    meta.is_remote = true;
+    meta.mem_type = dlist.getType();
+
+    const size_t count = dlist.descCount();
+    for (size_t i = 0; i < count; ++i) {
+        const auto &desc = dlist[i];
+        if (meta.remote_agent.empty() && desc.remoteAgent != nixl_null_agent) {
+            meta.remote_agent = desc.remoteAgent;
+        }
+        StoredEntry entry;
+        entry.base_addr = desc.addr;
+        entry.metadataP = desc.metadataP;
+        meta.entries.push_back(entry);
+    }
+
+    std::lock_guard<std::mutex> lock(meta_mutex_);
+    meta_store_[mvh] = std::move(meta);
+}
+
+void
+nixlUcxProxyBackend::clearMeta(nixlMemViewH mvh) {
+    std::lock_guard<std::mutex> lock(meta_mutex_);
+    meta_store_.erase(mvh);
+}
+
 nixl_status_t
 nixlUcxProxyBackend::submit(const ResolvedProxySubmission &submission, uint64_t &request_token) {
     request_token = kInvalidToken;
@@ -64,206 +108,121 @@ nixlUcxProxyBackend::submit(const ResolvedProxySubmission &submission, uint64_t 
 }
 
 nixl_status_t
+nixlUcxProxyBackend::submitPut(const ResolvedProxySubmission &submission, uint64_t &request_token) {
+    const MemViewMeta *src_meta = nullptr;
+    const MemViewMeta *dst_meta = nullptr;
+
+    {
+        std::lock_guard<std::mutex> lock(meta_mutex_);
+        auto src_it = meta_store_.find(submission.src_memview);
+        auto dst_it = meta_store_.find(submission.dst_memview);
+        if (src_it == meta_store_.end() || dst_it == meta_store_.end()) {
+            NIXL_DEBUG << "nixlUcxProxyBackend::submitPut: metadata not found"
+                       << " src_mvh=" << submission.src_memview
+                       << " dst_mvh=" << submission.dst_memview;
+            return NIXL_ERR_NOT_FOUND;
+        }
+        src_meta = &src_it->second;
+        dst_meta = &dst_it->second;
+    }
+
+    if (submission.src_index >= src_meta->entries.size() ||
+        submission.dst_index >= dst_meta->entries.size()) {
+        NIXL_DEBUG << "nixlUcxProxyBackend::submitPut: index out of range"
+                   << " src_index=" << submission.src_index
+                   << " src_count=" << src_meta->entries.size()
+                   << " dst_index=" << submission.dst_index
+                   << " dst_count=" << dst_meta->entries.size();
+        return NIXL_ERR_INVALID_PARAM;
+    }
+
+    const StoredEntry &src_entry = src_meta->entries[submission.src_index];
+    const StoredEntry &dst_entry = dst_meta->entries[submission.dst_index];
+
+    nixl_meta_dlist_t local_list(src_meta->mem_type);
+    local_list.addDesc(nixlMetaDesc(
+        src_entry.base_addr + submission.src_offset,
+        submission.size,
+        0,
+        src_entry.metadataP));
+
+    nixl_meta_dlist_t remote_list(dst_meta->mem_type);
+    remote_list.addDesc(nixlMetaDesc(
+        dst_entry.base_addr + submission.dst_offset,
+        submission.size,
+        0,
+        dst_entry.metadataP));
+
+    nixlBackendReqH *handle = nullptr;
+    nixl_status_t status = engine_->prepXfer(
+        NIXL_WRITE, local_list, remote_list, dst_meta->remote_agent, handle);
+    if (status != NIXL_SUCCESS) {
+        NIXL_DEBUG << "nixlUcxProxyBackend::submitPut: prepXfer failed status=" << status;
+        return status;
+    }
+
+    status = engine_->postXfer(
+        NIXL_WRITE, local_list, remote_list, dst_meta->remote_agent, handle);
+    if (status != NIXL_SUCCESS && status != NIXL_IN_PROG) {
+        NIXL_DEBUG << "nixlUcxProxyBackend::submitPut: postXfer failed status=" << status;
+        engine_->releaseReqH(handle);
+        return status;
+    }
+
+    request_token = trackRequest(handle);
+    return NIXL_SUCCESS;
+}
+
+nixl_status_t
+nixlUcxProxyBackend::submitAtomicAdd(const ResolvedProxySubmission &,
+                                     uint64_t &) {
+    return NIXL_ERR_NOT_SUPPORTED;
+}
+
+nixl_status_t
 nixlUcxProxyBackend::checkCompletion(uint64_t request_token) {
     std::lock_guard<std::mutex> lock(request_mutex_);
-    const auto it = requests_.find(request_token);
-    if (it == requests_.end()) {
+    const auto it = tracked_requests_.find(request_token);
+    if (it == tracked_requests_.end()) {
         return NIXL_ERR_NOT_FOUND;
     }
 
-    ProxyRequestState &request = it->second;
-    if (!request.has_event) {
-        const nixl_status_t st = request.status;
-        requests_.erase(it);
-        return st;
-    }
-
-    const cudaError_t err = cudaEventQuery(request.event);
-    if (err == cudaSuccess) {
-        cudaEventDestroy(request.event);
-        const nixl_status_t st = request.status;
-        requests_.erase(it);
-        return st;
-    }
-    if (err == cudaErrorNotReady) {
+    nixlBackendReqH *handle = it->second;
+    const nixl_status_t status = engine_->checkXfer(handle);
+    if (status == NIXL_IN_PROG) {
         return NIXL_IN_PROG;
     }
 
-    cudaEventDestroy(request.event);
-    requests_.erase(it);
-    return NIXL_ERR_BACKEND;
+    engine_->releaseReqH(handle);
+    tracked_requests_.erase(it);
+    return status;
 }
 
 size_t
 nixlUcxProxyBackend::progress() {
-    // The fallback phase-1 implementation relies on CUDA stream progress.
-    // Ask UCX to progress as well to keep transport state warm.
     return (engine_ != nullptr) ? static_cast<size_t>(engine_->progress()) : 0;
 }
 
 nixl_status_t
 nixlUcxProxyBackend::shutdown() {
-    std::lock_guard<std::mutex> lock(request_mutex_);
-    for (auto &it : requests_) {
-        if (it.second.has_event && it.second.event != nullptr) {
-            cudaEventDestroy(it.second.event);
+    {
+        std::lock_guard<std::mutex> lock(request_mutex_);
+        for (auto &[token, handle] : tracked_requests_) {
+            engine_->releaseReqH(handle);
         }
+        tracked_requests_.clear();
     }
-    requests_.clear();
-    if (stream_ != nullptr) {
-        cudaStreamSynchronize(stream_);
-        cudaStreamDestroy(stream_);
-        stream_ = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(meta_mutex_);
+        meta_store_.clear();
     }
-    return NIXL_SUCCESS;
-}
-
-nixl_status_t
-nixlUcxProxyBackend::getLocalAddress(nixlMemViewH memview,
-                                     size_t index,
-                                     size_t offset,
-                                     void *&addr) const {
-    addr = nullptr;
-    if (memview == nullptr) {
-        return NIXL_ERR_INVALID_PARAM;
-    }
-
-    ucp_device_local_mem_list_t header{};
-    if (cudaMemcpy(&header, memview, sizeof(header), cudaMemcpyDeviceToHost) != cudaSuccess) {
-        return NIXL_ERR_BACKEND;
-    }
-    if (index >= header.length) {
-        return NIXL_ERR_INVALID_PARAM;
-    }
-
-    uct_device_local_mem_list_elem_t element{};
-    const auto *base = reinterpret_cast<const std::byte *>(memview);
-    const auto *elem_ptr =
-        base + offsetof(ucp_device_local_mem_list_t, mem_elements)
-        + (index * sizeof(uct_device_local_mem_list_elem_t));
-    if (cudaMemcpy(&element,
-                   elem_ptr,
-                   sizeof(element),
-                   cudaMemcpyDeviceToHost)
-        != cudaSuccess) {
-        return NIXL_ERR_BACKEND;
-    }
-
-    addr = static_cast<void *>(static_cast<std::byte *>(element.addr) + offset);
-    return NIXL_SUCCESS;
-}
-
-nixl_status_t
-nixlUcxProxyBackend::getRemoteAddress(nixlMemViewH memview,
-                                      size_t index,
-                                      size_t offset,
-                                      void *&addr) const {
-    addr = nullptr;
-    if (memview == nullptr) {
-        return NIXL_ERR_INVALID_PARAM;
-    }
-
-    ucp_device_remote_mem_list_t header{};
-    if (cudaMemcpy(&header, memview, sizeof(header), cudaMemcpyDeviceToHost) != cudaSuccess) {
-        return NIXL_ERR_BACKEND;
-    }
-    if (index >= header.length) {
-        return NIXL_ERR_INVALID_PARAM;
-    }
-
-    uct_device_remote_mem_list_elem_t element{};
-    const auto *base = reinterpret_cast<const std::byte *>(memview);
-    const auto *elem_ptr =
-        base + offsetof(ucp_device_remote_mem_list_t, mem_elements)
-        + (index * sizeof(uct_device_remote_mem_list_elem_t));
-    if (cudaMemcpy(&element,
-                   elem_ptr,
-                   sizeof(element),
-                   cudaMemcpyDeviceToHost)
-        != cudaSuccess) {
-        return NIXL_ERR_BACKEND;
-    }
-
-    addr = reinterpret_cast<void *>(element.addr + offset);
-    return NIXL_SUCCESS;
-}
-
-nixl_status_t
-nixlUcxProxyBackend::submitPut(const ResolvedProxySubmission &submission, uint64_t &request_token) {
-    if (stream_ == nullptr) {
-        return NIXL_ERR_BACKEND;
-    }
-
-    void *src_addr = nullptr;
-    void *dst_addr = nullptr;
-    nixl_status_t status = getLocalAddress(submission.src_memview,
-                                           submission.src_index,
-                                           submission.src_offset,
-                                           src_addr);
-    if (status != NIXL_SUCCESS) {
-        return status;
-    }
-    status = getRemoteAddress(submission.dst_memview,
-                              submission.dst_index,
-                              submission.dst_offset,
-                              dst_addr);
-    if (status != NIXL_SUCCESS) {
-        return status;
-    }
-
-    if (cudaMemcpyAsync(dst_addr, src_addr, submission.size, cudaMemcpyDefault, stream_)
-        != cudaSuccess) {
-        return NIXL_ERR_BACKEND;
-    }
-
-    ProxyRequestState req{};
-    req.has_event = true;
-    req.status = NIXL_SUCCESS;
-    if (cudaEventCreateWithFlags(&req.event, cudaEventDisableTiming) != cudaSuccess) {
-        return NIXL_ERR_BACKEND;
-    }
-    if (cudaEventRecord(req.event, stream_) != cudaSuccess) {
-        cudaEventDestroy(req.event);
-        req.event = nullptr;
-        return NIXL_ERR_BACKEND;
-    }
-
-    request_token = makeRequestToken(std::move(req));
-    return NIXL_SUCCESS;
-}
-
-nixl_status_t
-nixlUcxProxyBackend::submitAtomicAdd(const ResolvedProxySubmission &submission,
-                                     uint64_t &request_token) {
-    void *dst_addr = nullptr;
-    const nixl_status_t status = getRemoteAddress(submission.dst_memview,
-                                                  submission.dst_index,
-                                                  submission.dst_offset,
-                                                  dst_addr);
-    if (status != NIXL_SUCCESS) {
-        return status;
-    }
-
-    uint64_t current = 0;
-    if (cudaMemcpy(&current, dst_addr, sizeof(current), cudaMemcpyDefault) != cudaSuccess) {
-        return NIXL_ERR_BACKEND;
-    }
-    current += submission.value;
-    if (cudaMemcpy(dst_addr, &current, sizeof(current), cudaMemcpyDefault) != cudaSuccess) {
-        return NIXL_ERR_BACKEND;
-    }
-
-    ProxyRequestState req{};
-    req.has_event = false;
-    req.status = NIXL_SUCCESS;
-    request_token = makeRequestToken(std::move(req));
     return NIXL_SUCCESS;
 }
 
 uint64_t
-nixlUcxProxyBackend::makeRequestToken(ProxyRequestState &&state) {
+nixlUcxProxyBackend::trackRequest(nixlBackendReqH *handle) {
     std::lock_guard<std::mutex> lock(request_mutex_);
     const uint64_t token = next_request_token_++;
-    requests_.emplace(token, std::move(state));
+    tracked_requests_.emplace(token, handle);
     return token;
 }
