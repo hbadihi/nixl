@@ -18,7 +18,6 @@
 #include "proxy_runtime.h"
 #include "backend_adapter.h"
 #include "nixl_log.h"
-#include <cuda_runtime.h>
 
 ProxyWorker::ProxyWorker(DeviceProxyBackendAdapter *backend,
                          const ProxyMemViewRegistry *proxy_memview_registry,
@@ -52,20 +51,12 @@ ProxyWorker::runOnce() {
 
 bool
 ProxyWorker::tryDequeue(ChannelState &channel, ProxySubmission &submission) {
+    if (channel.consumer_idx_host_ == nullptr || channel.producer_idx_host_ == nullptr) {
+        return false;
+    }
+    uint32_t observed_producer_idx =
+        __atomic_load_n(channel.producer_idx_host_, __ATOMIC_ACQUIRE);
     WorkRing *ring = channel.device_view.work_ring;
-    if (channel.consumer_idx_host_ == nullptr || ring->producer_idx == nullptr) {
-        return false;
-    }
-    uint32_t observed_producer_idx = 0;
-    if (cudaMemcpy(&observed_producer_idx,
-                   ring->producer_idx,
-                   sizeof(uint32_t),
-                   cudaMemcpyDeviceToHost)
-        != cudaSuccess) {
-        NIXL_DEBUG << "ProxyWorker::tryDequeue: cudaMemcpy for producer_idx failed"
-                   << " channel=" << channel.device_view.channel_id;
-        return false;
-    }
     uint32_t local_consumer_idx =
         __atomic_load_n(channel.consumer_idx_host_, __ATOMIC_ACQUIRE);
     if (local_consumer_idx == observed_producer_idx) {
@@ -171,19 +162,9 @@ ProxyWorker::publishCompletions(ChannelState &channel) {
                    << " op_idx=" << front.op_idx
                    << " status=" << st
                    << " token=" << front.backend_req_token;
-        CompletionSlot slot{};
-        slot.completed_idx = front.op_idx;
-        slot.next_status = st;
-        if (cudaMemcpy(channel.device_view.completion_slot,
-                       &slot,
-                       sizeof(CompletionSlot),
-                       cudaMemcpyHostToDevice)
-            != cudaSuccess) {
-            NIXL_ERROR << "ProxyWorker::publishCompletions: cudaMemcpy failed"
-                       << " channel=" << channel.device_view.channel_id
-                       << " op_idx=" << front.op_idx;
-            break;
-        }
+        channel.completion_slot_host_->next_status = st;
+        __atomic_store_n(&channel.completion_slot_host_->completed_idx,
+                         front.op_idx, __ATOMIC_RELEASE);
         channel.inflight_requests.erase(channel.inflight_requests.begin());
     }
 }

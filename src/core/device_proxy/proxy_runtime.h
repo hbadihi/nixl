@@ -44,14 +44,18 @@ struct alignas(64) ChannelState {
 
     WorkRing        *work_ring_       = nullptr;
     ProxySubmission *records_         = nullptr;
-    /** Producer count in HBM (cudaMalloc); GPU atomics; host reads via cudaMemcpy. */
-    uint32_t        *producer_idx_   = nullptr;
+    /** Mapped pinned host memory; host proxy uses __atomic_* on host alias. */
+    uint32_t        *producer_idx_host_ = nullptr;
+    /** Device-mapped alias of producer_idx_host_ for WorkRing (GPU-writable). */
+    uint32_t        *producer_idx_dev_  = nullptr;
     /** Consumer count: host pinned; proxy uses __atomic_* on consumer_idx_host_. */
     uint32_t        *consumer_idx_host_  = nullptr;
     /** Same word as consumer_idx_host_, for WorkRing::consumer_idx (GPU-readable). */
     uint32_t        *consumer_idx_dev_   = nullptr;
-    /** Device pointer (cudaMalloc); publish with cudaMemcpy from the proxy worker. */
-    CompletionSlot  *completion_slot_ = nullptr;
+    /** Mapped pinned host memory; proxy worker writes directly via host alias. */
+    CompletionSlot  *completion_slot_host_ = nullptr;
+    /** Device-mapped alias of completion_slot_host_ for ProxyChannelView. */
+    CompletionSlot  *completion_slot_dev_  = nullptr;
 
     ChannelState() = default;
     ~ChannelState();
