@@ -308,7 +308,52 @@ ProxyRuntime::registerProxyMemView(nixlMemViewH backend_memview,
 
 nixl_status_t
 ProxyRuntime::unregisterProxyMemView(nixlMemViewH proxy_memview) {
+    if (backend_ != nullptr) {
+        nixlMemViewH backend_mvh = nullptr;
+        if (memview_registry_.resolveProxyMemView(proxy_memview, backend_mvh)) {
+            NIXL_DEBUG << "ProxyRuntime::unregisterProxyMemView: clearing metadata"
+                       << " proxy_mvh=" << proxy_memview
+                       << " backend_mvh=" << backend_mvh;
+            backend_->clearMeta(backend_mvh);
+        }
+    }
     return memview_registry_.unregisterProxyMemView(proxy_memview);
+}
+
+nixl_status_t
+ProxyRuntime::storeMetadata(nixlMemViewH proxy_memview,
+                            const nixl_meta_dlist_t &dlist) {
+    nixlMemViewH backend_mvh = nullptr;
+    if (!memview_registry_.resolveProxyMemView(proxy_memview, backend_mvh)) {
+        NIXL_ERROR << "ProxyRuntime::storeMetadata(local): proxy_mvh="
+                   << proxy_memview << " not found in registry";
+        return NIXL_ERR_NOT_FOUND;
+    }
+    if (backend_ != nullptr) {
+        backend_->storeLocalMeta(backend_mvh, dlist);
+    }
+    NIXL_DEBUG << "ProxyRuntime::storeMetadata(local): proxy_mvh="
+               << proxy_memview << " backend_mvh=" << backend_mvh
+               << " entries=" << dlist.descCount();
+    return NIXL_SUCCESS;
+}
+
+nixl_status_t
+ProxyRuntime::storeMetadata(nixlMemViewH proxy_memview,
+                            const nixl_remote_meta_dlist_t &dlist) {
+    nixlMemViewH backend_mvh = nullptr;
+    if (!memview_registry_.resolveProxyMemView(proxy_memview, backend_mvh)) {
+        NIXL_ERROR << "ProxyRuntime::storeMetadata(remote): proxy_mvh="
+                   << proxy_memview << " not found in registry";
+        return NIXL_ERR_NOT_FOUND;
+    }
+    if (backend_ != nullptr) {
+        backend_->storeRemoteMeta(backend_mvh, dlist);
+    }
+    NIXL_DEBUG << "ProxyRuntime::storeMetadata(remote): proxy_mvh="
+               << proxy_memview << " backend_mvh=" << backend_mvh
+               << " entries=" << dlist.descCount();
+    return NIXL_SUCCESS;
 }
 
 bool

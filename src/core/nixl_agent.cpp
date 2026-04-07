@@ -1892,11 +1892,13 @@ nixlAgent::prepMemView(const nixl_remote_dlist_t &dlist,
 
     if (data->hasProxyRuntime() && (data->proxyTransportEngine == engine)) {
         nixlMemViewH proxy_mvh = nullptr;
-        const nixl_status_t proxy_status = data->proxyRuntime->registerProxyMemView(mvh, &proxy_mvh);
+        const nixl_status_t proxy_status =
+            data->proxyRuntime->registerProxyMemView(mvh, &proxy_mvh);
         if (proxy_status != NIXL_SUCCESS) {
             engine->releaseMemView(mvh);
             return proxy_status;
         }
+        data->proxyRuntime->storeMetadata(proxy_mvh, remote_meta_dlist);
         mvh = proxy_mvh;
     }
 
@@ -1941,11 +1943,13 @@ nixlAgent::prepMemView(const nixl_local_dlist_t &dlist,
 
     if (data->hasProxyRuntime() && (data->proxyTransportEngine == engine)) {
         nixlMemViewH proxy_mvh = nullptr;
-        const nixl_status_t proxy_status = data->proxyRuntime->registerProxyMemView(mvh, &proxy_mvh);
+        const nixl_status_t proxy_status =
+            data->proxyRuntime->registerProxyMemView(mvh, &proxy_mvh);
         if (proxy_status != NIXL_SUCCESS) {
             engine->releaseMemView(mvh);
             return proxy_status;
         }
+        data->proxyRuntime->storeMetadata(proxy_mvh, meta_dlist);
         mvh = proxy_mvh;
     }
 
