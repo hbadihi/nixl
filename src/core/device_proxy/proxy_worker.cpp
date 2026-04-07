@@ -17,10 +17,8 @@
 #include "proxy_worker.h"
 #include "proxy_runtime.h"
 #include "backend_adapter.h"
+#include "nixl_log.h"
 #include <cuda_runtime.h>
-
-// Shape-only handoff: worker dispatch is expected to resolve proxy memview IDs
-// to backend memviews before submitting through the backend adapter.
 
 ProxyWorker::ProxyWorker(DeviceProxyBackendAdapter *backend,
                          const ProxyMemViewRegistry *proxy_memview_registry,
@@ -64,6 +62,8 @@ ProxyWorker::tryDequeue(ChannelState &channel, ProxySubmission &submission) {
                    sizeof(uint32_t),
                    cudaMemcpyDeviceToHost)
         != cudaSuccess) {
+        NIXL_DEBUG << "ProxyWorker::tryDequeue: cudaMemcpy for producer_idx failed"
+                   << " channel=" << channel.device_view.channel_id;
         return false;
     }
     uint32_t local_consumer_idx =
@@ -75,6 +75,12 @@ ProxyWorker::tryDequeue(ChannelState &channel, ProxySubmission &submission) {
     __atomic_store_n(channel.consumer_idx_host_,
                      local_consumer_idx + 1,
                      __ATOMIC_RELEASE);
+    NIXL_DEBUG << "ProxyWorker::tryDequeue: channel=" << channel.device_view.channel_id
+               << " consumer=" << local_consumer_idx
+               << " producer=" << observed_producer_idx
+               << " opcode=" << static_cast<int>(submission.opcode)
+               << " op_idx=" << submission.op_idx
+               << " size=" << submission.size;
     return true;
 }
 
@@ -94,12 +100,24 @@ ProxyWorker::dispatch(ChannelState &channel, const ProxySubmission &submission) 
     };
 
     if (!resolve_or_fallback(submission.dst_proxy_memview_id, dst_memview)) {
+        NIXL_DEBUG << "ProxyWorker::dispatch: dst memview resolution failed"
+                   << " dst_proxy_id=" << submission.dst_proxy_memview_id;
         return NIXL_ERR_NOT_FOUND;
     }
     if ((submission.opcode == ProxyOpcode::PUT)
         && !resolve_or_fallback(submission.src_proxy_memview_id, src_memview)) {
+        NIXL_DEBUG << "ProxyWorker::dispatch: src memview resolution failed"
+                   << " src_proxy_id=" << submission.src_proxy_memview_id;
         return NIXL_ERR_NOT_FOUND;
     }
+
+    NIXL_DEBUG << "ProxyWorker::dispatch: op_idx=" << submission.op_idx
+               << " opcode=" << static_cast<int>(submission.opcode)
+               << " channel=" << submission.channel_id
+               << " src_mvh=" << src_memview << " dst_mvh=" << dst_memview
+               << " src_off=" << submission.src_offset
+               << " dst_off=" << submission.dst_offset
+               << " size=" << submission.size;
 
     ResolvedProxySubmission resolved_submission = {
         .op_idx = submission.op_idx,
@@ -119,9 +137,13 @@ ProxyWorker::dispatch(ChannelState &channel, const ProxySubmission &submission) 
     uint64_t request_token = 0;
     nixl_status_t status = backend_->submit(resolved_submission, request_token);
     if (status != NIXL_SUCCESS) {
+        NIXL_ERROR << "ProxyWorker::dispatch: backend submit failed"
+                   << " status=" << status << " op_idx=" << submission.op_idx;
         return status;
     }
 
+    NIXL_DEBUG << "ProxyWorker::dispatch: submitted op_idx=" << submission.op_idx
+               << " request_token=" << request_token;
     ProxyRequestState inflight{};
     inflight.op_idx = submission.op_idx;
     inflight.backend_req_token = request_token;
@@ -144,6 +166,11 @@ ProxyWorker::publishCompletions(ChannelState &channel) {
         if (st == NIXL_IN_PROG) {
             break;
         }
+        NIXL_DEBUG << "ProxyWorker::publishCompletions: channel="
+                   << channel.device_view.channel_id
+                   << " op_idx=" << front.op_idx
+                   << " status=" << st
+                   << " token=" << front.backend_req_token;
         CompletionSlot slot{};
         slot.completed_idx = front.op_idx;
         slot.next_status = st;
@@ -152,6 +179,9 @@ ProxyWorker::publishCompletions(ChannelState &channel) {
                        sizeof(CompletionSlot),
                        cudaMemcpyHostToDevice)
             != cudaSuccess) {
+            NIXL_ERROR << "ProxyWorker::publishCompletions: cudaMemcpy failed"
+                       << " channel=" << channel.device_view.channel_id
+                       << " op_idx=" << front.op_idx;
             break;
         }
         channel.inflight_requests.erase(channel.inflight_requests.begin());

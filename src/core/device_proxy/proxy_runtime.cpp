@@ -18,6 +18,7 @@
 #include "backend_adapter.h"
 #include "nixl_types.h"
 #include "proxy_worker.h"
+#include "nixl_log.h"
 #include <algorithm>
 #include <cstdint>
 #include <cuda_runtime.h>
@@ -31,6 +32,9 @@ ProxyMemViewRegistry::registerProxyMemView(nixlMemViewH backend_memview,
     }
     backend_memview_by_proxy_id_.push_back(backend_memview);
     *proxy_memview = reinterpret_cast<nixlMemViewH>(next_proxy_memview_id_++);
+    NIXL_DEBUG << "ProxyMemViewRegistry::register: backend_mvh="
+               << backend_memview << " -> proxy_id="
+               << (next_proxy_memview_id_ - 1);
     return NIXL_SUCCESS;
 }
 
@@ -72,6 +76,8 @@ ProxyMemViewRegistry::clear() noexcept {
 
 nixl_status_t
 ChannelState::allocate(uint32_t channel_id, uint32_t depth) {
+    NIXL_INFO << "ChannelState::allocate: channel_id=" << channel_id
+              << " depth=" << depth;
     if (cudaMallocHost(&work_ring_,       sizeof(WorkRing))                != cudaSuccess
      || cudaMallocHost(&records_,         sizeof(ProxySubmission) * depth) != cudaSuccess
      || cudaMallocHost(reinterpret_cast<void **>(&consumer_idx_host_),
@@ -79,6 +85,8 @@ ChannelState::allocate(uint32_t channel_id, uint32_t depth) {
      || cudaMalloc(reinterpret_cast<void **>(&producer_idx_),
                    sizeof(uint32_t))                                     != cudaSuccess
      || cudaMalloc(&completion_slot_, sizeof(CompletionSlot))             != cudaSuccess) {
+        NIXL_ERROR << "ChannelState::allocate: CUDA allocation failed for channel "
+                   << channel_id;
         deallocate();
         return NIXL_ERR_BACKEND;
     }
@@ -108,6 +116,13 @@ ChannelState::allocate(uint32_t channel_id, uint32_t depth) {
     device_view       = ProxyChannelView{ work_ring_, completion_slot_, channel_id };
 
     inflight_requests.clear();
+    NIXL_INFO << "ChannelState::allocate: channel " << channel_id << " ready"
+              << " work_ring=" << work_ring_
+              << " records=" << records_
+              << " producer_idx(VRAM)=" << producer_idx_
+              << " consumer_idx(host)=" << consumer_idx_host_
+              << " consumer_idx(dev)=" << consumer_idx_dev_
+              << " completion_slot(VRAM)=" << completion_slot_;
     return NIXL_SUCCESS;
 }
 
@@ -185,7 +200,11 @@ nixl_status_t
 ProxyRuntime::init(DeviceProxyBackendAdapter *backend,
                    uint32_t channel_count,
                    uint32_t worker_count) {
+    NIXL_INFO << "ProxyRuntime::init: channel_count=" << channel_count
+              << " worker_count=" << worker_count
+              << " backend=" << backend;
     if (backend == nullptr || channel_count == 0 || worker_count == 0) {
+        NIXL_ERROR << "ProxyRuntime::init: invalid params";
         return NIXL_ERR_INVALID_PARAM;
     }
 
@@ -194,9 +213,12 @@ ProxyRuntime::init(DeviceProxyBackendAdapter *backend,
     memview_registry_.clear();
 
     worker_count = std::min(worker_count, channel_count);
+    NIXL_INFO << "ProxyRuntime::init: effective worker_count=" << worker_count
+              << " (clamped to channel_count)";
 
     nixl_status_t rc = backend_->init(worker_count, channel_count);
     if (rc != NIXL_SUCCESS) {
+        NIXL_ERROR << "ProxyRuntime::init: backend init failed: " << rc;
         backend_ = nullptr;
         return rc;
     }
@@ -246,6 +268,8 @@ ProxyRuntime::init(DeviceProxyBackendAdapter *backend,
         uint32_t end_ch   = ((w + 1) * channel_count) / worker_count;
         uint32_t n_ch     = end_ch - first_ch;
 
+        NIXL_INFO << "ProxyRuntime::init: worker " << w
+                  << " assigned channels [" << first_ch << ", " << end_ch << ")";
         workers_.push_back(std::make_unique<ProxyWorker>(
             backend_,
             &memview_registry_,
@@ -255,16 +279,25 @@ ProxyRuntime::init(DeviceProxyBackendAdapter *backend,
     }
 
     worker_threads_.clear();
+    NIXL_INFO << "ProxyRuntime::init: complete — "
+              << channel_count << " channels, "
+              << worker_count << " workers, "
+              << "device_context=" << device_context_;
     return NIXL_SUCCESS;
 }
 
 nixl_status_t
 ProxyRuntime::loadRemoteConnInfo(const std::string &remote_name,
                                  const nixl_blob_t &conn_info) {
+    NIXL_INFO << "ProxyRuntime::loadRemoteConnInfo: remote='" << remote_name
+              << "' conn_info_size=" << conn_info.size();
     if (backend_ == nullptr) {
+        NIXL_ERROR << "ProxyRuntime::loadRemoteConnInfo: no backend";
         return NIXL_ERR_NOT_SUPPORTED;
     }
-    return backend_->loadRemoteConnInfo(remote_name, conn_info);
+    nixl_status_t rc = backend_->loadRemoteConnInfo(remote_name, conn_info);
+    NIXL_INFO << "ProxyRuntime::loadRemoteConnInfo: result=" << rc;
+    return rc;
 }
 
 nixl_status_t
@@ -292,6 +325,8 @@ ProxyRuntime::resolveProxyMemViewId(uint64_t proxy_memview_id,
 
 nixl_status_t
 ProxyRuntime::startWorkers() {
+    NIXL_INFO << "ProxyRuntime::startWorkers: launching "
+              << workers_.size() << " worker thread(s)";
     shutdown_word_.store(1, std::memory_order_release);
     joinWorkerThreads();
     worker_threads_.clear();
@@ -299,14 +334,19 @@ ProxyRuntime::startWorkers() {
     shutdown_word_.store(0, std::memory_order_relaxed);
 
     worker_threads_.reserve(workers_.size());
+    uint32_t idx = 0;
     for (auto &worker : workers_) {
-        worker_threads_.emplace_back([this, w = worker.get()]() {
+        worker_threads_.emplace_back([this, w = worker.get(), idx]() {
+            NIXL_INFO << "ProxyWorker thread " << idx << " started";
             while (!shutdown_word_.load(std::memory_order_acquire)) {
                 w->runOnce();
             }
+            NIXL_INFO << "ProxyWorker thread " << idx << " exiting";
         });
+        ++idx;
     }
 
+    NIXL_INFO << "ProxyRuntime::startWorkers: all threads launched";
     return NIXL_SUCCESS;
 }
 
@@ -321,14 +361,18 @@ ProxyRuntime::joinWorkerThreads() noexcept {
 
 nixl_status_t
 ProxyRuntime::shutdown() {
+    NIXL_INFO << "ProxyRuntime::shutdown: signalling workers to stop";
     shutdown_word_.store(1, std::memory_order_release);
 
     joinWorkerThreads();
     worker_threads_.clear();
+    NIXL_INFO << "ProxyRuntime::shutdown: all worker threads joined";
 
     nixl_status_t backend_status = NIXL_SUCCESS;
     if (backend_ != nullptr) {
+        NIXL_INFO << "ProxyRuntime::shutdown: shutting down backend";
         backend_status = backend_->shutdown();
+        NIXL_INFO << "ProxyRuntime::shutdown: backend shutdown status=" << backend_status;
     }
 
     workers_.clear();
@@ -345,5 +389,6 @@ ProxyRuntime::shutdown() {
 
     channels_.clear();
     backend_ = nullptr;
+    NIXL_INFO << "ProxyRuntime::shutdown: complete";
     return backend_status;
 }
