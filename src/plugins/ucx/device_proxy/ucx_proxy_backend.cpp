@@ -62,6 +62,9 @@ nixlUcxProxyBackend::storeLocalMeta(nixlMemViewH mvh, const nixl_meta_dlist_t &d
         meta.entries.push_back(entry);
     }
 
+    NIXL_DEBUG << "nixlUcxProxyBackend::storeLocalMeta: mvh=" << mvh
+               << " entries=" << count << " mem_type=" << static_cast<int>(meta.mem_type);
+
     std::lock_guard<std::mutex> lock(meta_mutex_);
     meta_store_[mvh] = std::move(meta);
 }
@@ -84,12 +87,18 @@ nixlUcxProxyBackend::storeRemoteMeta(nixlMemViewH mvh, const nixl_remote_meta_dl
         meta.entries.push_back(entry);
     }
 
+    NIXL_DEBUG << "nixlUcxProxyBackend::storeRemoteMeta: mvh=" << mvh
+               << " entries=" << count
+               << " remote_agent='" << meta.remote_agent << "'"
+               << " mem_type=" << static_cast<int>(meta.mem_type);
+
     std::lock_guard<std::mutex> lock(meta_mutex_);
     meta_store_[mvh] = std::move(meta);
 }
 
 void
 nixlUcxProxyBackend::clearMeta(nixlMemViewH mvh) {
+    NIXL_DEBUG << "nixlUcxProxyBackend::clearMeta: mvh=" << mvh;
     std::lock_guard<std::mutex> lock(meta_mutex_);
     meta_store_.erase(mvh);
 }
@@ -170,6 +179,14 @@ nixlUcxProxyBackend::submitPut(const ResolvedProxySubmission &submission, uint64
     }
 
     request_token = trackRequest(handle);
+    NIXL_DEBUG << "nixlUcxProxyBackend::submitPut: posted RDMA write"
+               << " src_addr=0x" << std::hex
+               << (src_entry.base_addr + submission.src_offset) << std::dec
+               << " dst_addr=0x" << std::hex
+               << (dst_entry.base_addr + submission.dst_offset) << std::dec
+               << " size=" << submission.size
+               << " remote_agent='" << dst_meta->remote_agent << "'"
+               << " token=" << request_token;
     return NIXL_SUCCESS;
 }
 
@@ -193,6 +210,8 @@ nixlUcxProxyBackend::checkCompletion(uint64_t request_token) {
         return NIXL_IN_PROG;
     }
 
+    NIXL_DEBUG << "nixlUcxProxyBackend::checkCompletion: token=" << request_token
+               << " status=" << status;
     engine_->releaseReqH(handle);
     tracked_requests_.erase(it);
     return status;
@@ -205,6 +224,9 @@ nixlUcxProxyBackend::progress() {
 
 nixl_status_t
 nixlUcxProxyBackend::shutdown() {
+    NIXL_INFO << "nixlUcxProxyBackend::shutdown: releasing "
+              << tracked_requests_.size() << " tracked request(s) and "
+              << meta_store_.size() << " stored metadata entries";
     {
         std::lock_guard<std::mutex> lock(request_mutex_);
         for (auto &[token, handle] : tracked_requests_) {
