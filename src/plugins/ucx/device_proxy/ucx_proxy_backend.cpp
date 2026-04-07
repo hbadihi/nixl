@@ -38,9 +38,11 @@ nixlUcxProxyBackend::loadRemoteConnInfo(const std::string &remote_name,
     if (engine_ == nullptr) {
         return NIXL_ERR_NOT_SUPPORTED;
     }
-    const nixl_status_t ret = engine_->loadRemoteConnInfo(remote_name, conn_info);
-    if (ret != NIXL_SUCCESS) {
-        return ret;
+    if (engine_->checkConn(remote_name) != NIXL_SUCCESS) {
+        const nixl_status_t ret = engine_->loadRemoteConnInfo(remote_name, conn_info);
+        if (ret != NIXL_SUCCESS) {
+            return ret;
+        }
     }
     return engine_->connect(remote_name);
 }
