@@ -106,8 +106,9 @@ struct ProxyDeviceContext : ProxyDeviceContextData {
         }
 
         // Plain write: ordered by the release store below.
-        submission.op_idx = prod_val;
-        ring->records[prod_val % ring->depth] = submission;
+        cuda::atomic_ref<uint64_t, cuda::thread_scope_system> op_idx(ring->running_op_idx);
+        submission.op_idx = op_idx.fetch_add(1, cuda::memory_order_relaxed);
+        ring->records[prod_val % ring->depth] = submission; // TODO: Do we need a fence here?
 
         // Publish the new entry to the CPU proxy worker.
         prod.store(prod_val + 1, cuda::memory_order_release);
@@ -131,10 +132,10 @@ struct ProxyDeviceContext : ProxyDeviceContextData {
         const ProxyXferStatus *pxs =
             reinterpret_cast<const ProxyXferStatus *>(xfer_status.storage);
 
-        cuda::atomic_ref<uint64_t, cuda::thread_scope_system> cidx(
+        cuda::atomic_ref<uint64_t, cuda::thread_scope_system> comp_idx(
             pxs->slot->completed_idx);
 
-        if (cidx.load(cuda::memory_order_acquire) >= pxs->op_idx) {
+        if (comp_idx.load(cuda::memory_order_acquire) >= pxs->op_idx) {
             // The acquire above orders the read of next_status.
             return pxs->slot->next_status;
         }

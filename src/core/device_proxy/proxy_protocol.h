@@ -52,7 +52,9 @@ struct WorkRing {
     uint32_t *producer_idx = nullptr;
     /** Mapped pinned consumer; host proxy uses __atomic_* on host alias (ChannelState). */
     uint32_t *consumer_idx = nullptr;
+    /** The depth of the work ring. */
     uint32_t depth = 0;
+    uint64_t running_op_idx = 0;
 };
 
 struct CompletionSlot {
