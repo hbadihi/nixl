@@ -22,7 +22,6 @@
 #include <cstdint>
 #include <cuda_runtime.h>
 
-
 nixl_status_t
 ProxyMemViewRegistry::registerProxyMemView(nixlMemViewH backend_memview,
                                            nixlMemViewH *proxy_memview) {
@@ -75,17 +74,37 @@ nixl_status_t
 ChannelState::allocate(uint32_t channel_id, uint32_t depth) {
     if (cudaMallocHost(&work_ring_,       sizeof(WorkRing))                != cudaSuccess
      || cudaMallocHost(&records_,         sizeof(ProxySubmission) * depth) != cudaSuccess
-     || cudaMallocHost(&producer_idx_,    sizeof(uint32_t))                != cudaSuccess
-     || cudaMallocHost(&consumer_idx_,    sizeof(uint32_t))                != cudaSuccess
-     || cudaMallocHost(&completion_slot_, sizeof(CompletionSlot))          != cudaSuccess) {
+     || cudaMallocHost(reinterpret_cast<void **>(&consumer_idx_host_),
+                       sizeof(uint32_t))                                 != cudaSuccess
+     || cudaMalloc(reinterpret_cast<void **>(&producer_idx_),
+                   sizeof(uint32_t))                                     != cudaSuccess
+     || cudaMalloc(&completion_slot_, sizeof(CompletionSlot))             != cudaSuccess) {
         deallocate();
         return NIXL_ERR_BACKEND;
     }
 
-    *producer_idx_    = 0;
-    *consumer_idx_    = 0;
-    *completion_slot_ = CompletionSlot{};
-    *work_ring_       = WorkRing{ records_, producer_idx_, consumer_idx_, depth };
+    void *consumer_dev = nullptr;
+    if (cudaHostGetDevicePointer(&consumer_dev, consumer_idx_host_, 0) != cudaSuccess) {
+        deallocate();
+        return NIXL_ERR_BACKEND;
+    }
+    consumer_idx_dev_ = static_cast<uint32_t *>(consumer_dev);
+
+    if (cudaMemset(producer_idx_, 0, sizeof(uint32_t)) != cudaSuccess) {
+        deallocate();
+        return NIXL_ERR_BACKEND;
+    }
+    __atomic_store_n(consumer_idx_host_, 0, __ATOMIC_RELEASE);
+    if (cudaMemset(completion_slot_, 0, sizeof(CompletionSlot)) != cudaSuccess) {
+        deallocate();
+        return NIXL_ERR_BACKEND;
+    }
+    *work_ring_ = WorkRing{
+        records_,
+        producer_idx_,
+        consumer_idx_dev_,
+        depth,
+    };
     device_view       = ProxyChannelView{ work_ring_, completion_slot_, channel_id };
 
     inflight_requests.clear();
@@ -94,9 +113,16 @@ ChannelState::allocate(uint32_t channel_id, uint32_t depth) {
 
 void
 ChannelState::deallocate() noexcept {
-    if (completion_slot_) { cudaFreeHost(completion_slot_); completion_slot_ = nullptr; }
-    if (consumer_idx_)    { cudaFreeHost(consumer_idx_);    consumer_idx_    = nullptr; }
-    if (producer_idx_)    { cudaFreeHost(producer_idx_);    producer_idx_    = nullptr; }
+    if (completion_slot_) { cudaFree(completion_slot_); completion_slot_ = nullptr; }
+    if (producer_idx_) {
+        cudaFree(producer_idx_);
+        producer_idx_ = nullptr;
+    }
+    if (consumer_idx_host_) {
+        cudaFreeHost(consumer_idx_host_);
+        consumer_idx_host_ = nullptr;
+        consumer_idx_dev_  = nullptr;
+    }
     if (records_)         { cudaFreeHost(records_);         records_         = nullptr; }
     if (work_ring_)       { cudaFreeHost(work_ring_);       work_ring_       = nullptr; }
     device_view = ProxyChannelView{};
@@ -112,13 +138,15 @@ ChannelState::ChannelState(ChannelState &&other) noexcept
       work_ring_(other.work_ring_),
       records_(other.records_),
       producer_idx_(other.producer_idx_),
-      consumer_idx_(other.consumer_idx_),
+      consumer_idx_host_(other.consumer_idx_host_),
+      consumer_idx_dev_(other.consumer_idx_dev_),
       completion_slot_(other.completion_slot_) {
-    other.work_ring_       = nullptr;
-    other.records_         = nullptr;
-    other.producer_idx_    = nullptr;
-    other.consumer_idx_    = nullptr;
-    other.completion_slot_ = nullptr;
+    other.work_ring_          = nullptr;
+    other.records_            = nullptr;
+    other.producer_idx_   = nullptr;
+    other.consumer_idx_host_  = nullptr;
+    other.consumer_idx_dev_   = nullptr;
+    other.completion_slot_    = nullptr;
     other.device_view      = ProxyChannelView{};
 }
 
@@ -128,16 +156,18 @@ ChannelState::operator=(ChannelState &&other) noexcept {
         deallocate();
         device_view       = other.device_view;
         inflight_requests = std::move(other.inflight_requests);
-        work_ring_        = other.work_ring_;
-        records_          = other.records_;
-        producer_idx_     = other.producer_idx_;
-        consumer_idx_     = other.consumer_idx_;
-        completion_slot_  = other.completion_slot_;
-        other.work_ring_       = nullptr;
-        other.records_         = nullptr;
-        other.producer_idx_    = nullptr;
-        other.consumer_idx_    = nullptr;
-        other.completion_slot_ = nullptr;
+        work_ring_           = other.work_ring_;
+        records_             = other.records_;
+        producer_idx_    = other.producer_idx_;
+        consumer_idx_host_   = other.consumer_idx_host_;
+        consumer_idx_dev_    = other.consumer_idx_dev_;
+        completion_slot_     = other.completion_slot_;
+        other.work_ring_          = nullptr;
+        other.records_            = nullptr;
+        other.producer_idx_   = nullptr;
+        other.consumer_idx_host_  = nullptr;
+        other.consumer_idx_dev_   = nullptr;
+        other.completion_slot_    = nullptr;
         other.device_view      = ProxyChannelView{};
     }
     return *this;
@@ -176,6 +206,7 @@ ProxyRuntime::init(DeviceProxyBackendAdapter *backend,
         rc = channels_[i].allocate(i, ring_depth_);
         if (rc != NIXL_SUCCESS) {
             channels_.clear();
+            backend_->shutdown();
             backend_ = nullptr;
             return rc;
         }
@@ -184,6 +215,7 @@ ProxyRuntime::init(DeviceProxyBackendAdapter *backend,
     if (cudaMallocHost(&device_channel_views_,
                        sizeof(ProxyChannelView) * channel_count) != cudaSuccess) {
         channels_.clear();
+        backend_->shutdown();
         backend_ = nullptr;
         return NIXL_ERR_BACKEND;
     }
@@ -196,6 +228,7 @@ ProxyRuntime::init(DeviceProxyBackendAdapter *backend,
         cudaFreeHost(device_channel_views_);
         device_channel_views_ = nullptr;
         channels_.clear();
+        backend_->shutdown();
         backend_ = nullptr;
         return NIXL_ERR_BACKEND;
     }
@@ -205,6 +238,22 @@ ProxyRuntime::init(DeviceProxyBackendAdapter *backend,
         reinterpret_cast<uint32_t *>(&shutdown_word_)
     };
 
+    workers_.clear();
+    workers_.reserve(worker_count);
+
+    for (uint32_t w = 0; w < worker_count; ++w) {
+        uint32_t first_ch = (w * channel_count) / worker_count;
+        uint32_t end_ch   = ((w + 1) * channel_count) / worker_count;
+        uint32_t n_ch     = end_ch - first_ch;
+
+        workers_.push_back(std::make_unique<ProxyWorker>(
+            backend_,
+            &memview_registry_,
+            &shutdown_word_,
+            &channels_[first_ch],
+            n_ch));
+    }
+
     worker_threads_.clear();
     return NIXL_SUCCESS;
 }
@@ -212,9 +261,10 @@ ProxyRuntime::init(DeviceProxyBackendAdapter *backend,
 nixl_status_t
 ProxyRuntime::loadRemoteConnInfo(const std::string &remote_name,
                                  const nixl_blob_t &conn_info) {
-    (void)remote_name;
-    (void)conn_info;
-    return NIXL_ERR_NOT_SUPPORTED;
+    if (backend_ == nullptr) {
+        return NIXL_ERR_NOT_SUPPORTED;
+    }
+    return backend_->loadRemoteConnInfo(remote_name, conn_info);
 }
 
 nixl_status_t
@@ -248,6 +298,15 @@ ProxyRuntime::startWorkers() {
 
     shutdown_word_.store(0, std::memory_order_relaxed);
 
+    worker_threads_.reserve(workers_.size());
+    for (auto &worker : workers_) {
+        worker_threads_.emplace_back([this, w = worker.get()]() {
+            while (!shutdown_word_.load(std::memory_order_acquire)) {
+                w->runOnce();
+            }
+        });
+    }
+
     return NIXL_SUCCESS;
 }
 
@@ -267,6 +326,11 @@ ProxyRuntime::shutdown() {
     joinWorkerThreads();
     worker_threads_.clear();
 
+    nixl_status_t backend_status = NIXL_SUCCESS;
+    if (backend_ != nullptr) {
+        backend_status = backend_->shutdown();
+    }
+
     workers_.clear();
     memview_registry_.clear();
 
@@ -281,5 +345,5 @@ ProxyRuntime::shutdown() {
 
     channels_.clear();
     backend_ = nullptr;
-    return NIXL_SUCCESS;
+    return backend_status;
 }

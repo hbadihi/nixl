@@ -18,6 +18,7 @@
 #define NIXL_SRC_CORE_DEVICE_PROXY_PROXY_WORKER_H
 
 #include <atomic>
+#include <cstdint>
 #include "proxy_protocol.h"
 
 class DeviceProxyBackendAdapter;
@@ -47,7 +48,7 @@ class ProxyWorker {
         driveBackendProgress();
 
         void
-        publishCompletions();
+        publishCompletions(ChannelState &channel);
 
         DeviceProxyBackendAdapter *backend_ = nullptr;
         const ProxyMemViewRegistry *proxy_memview_registry_ = nullptr;
