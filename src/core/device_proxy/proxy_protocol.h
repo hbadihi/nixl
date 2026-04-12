@@ -60,7 +60,7 @@ struct WorkRing {
     uint64_t running_op_idx = 1;
 };
 
-struct CompletionSlot {
+struct alignas(16) CompletionSlot {
     uint64_t completed_idx = 0;
     nixl_status_t next_status = NIXL_IN_PROG;
 };
