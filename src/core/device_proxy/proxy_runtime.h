@@ -17,8 +17,8 @@
 #ifndef NIXL_SRC_CORE_DEVICE_PROXY_PROXY_RUNTIME_H
 #define NIXL_SRC_CORE_DEVICE_PROXY_PROXY_RUNTIME_H
 
-#include <atomic>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -40,7 +40,8 @@ struct ProxyRequestState {
 
 struct alignas(64) ChannelState {
     ProxyChannelView device_view{};
-    std::vector<ProxyRequestState> inflight_requests;
+    std::deque<ProxyRequestState> inflight_requests;
+    bool error_latched = false;
 
     WorkRing        *work_ring_       = nullptr;
     ProxySubmission *records_         = nullptr;
@@ -168,7 +169,8 @@ class ProxyRuntime {
         std::vector<std::thread> worker_threads_;
         ProxyMemViewRegistry memview_registry_;
         DeviceProxyBackendAdapter *backend_ = nullptr;
-        std::atomic<uint32_t> shutdown_word_{0};
+        uint32_t *shutdown_word_host_ = nullptr;
+        uint32_t *shutdown_word_dev_  = nullptr;
         uint32_t ring_depth_ = kDefaultProxyRingDepth;
 };
 

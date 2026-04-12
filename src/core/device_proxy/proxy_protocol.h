@@ -54,7 +54,9 @@ struct WorkRing {
     uint32_t *consumer_idx = nullptr;
     /** The depth of the work ring. */
     uint32_t depth = 0;
-    uint64_t running_op_idx = 0;
+    /** Monotonic 64-bit counter; starts at 1 so completed_idx==0 means
+     *  "no operation completed yet" and the first op_idx is never 0. */
+    uint64_t running_op_idx = 1;
 };
 
 struct CompletionSlot {

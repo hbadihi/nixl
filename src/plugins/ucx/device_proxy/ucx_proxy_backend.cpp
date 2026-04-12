@@ -120,8 +120,8 @@ nixlUcxProxyBackend::submit(const ResolvedProxySubmission &submission, uint64_t 
 
 nixl_status_t
 nixlUcxProxyBackend::submitPut(const ResolvedProxySubmission &submission, uint64_t &request_token) {
-    const MemViewMeta *src_meta = nullptr;
-    const MemViewMeta *dst_meta = nullptr;
+    MemViewMeta src_meta;
+    MemViewMeta dst_meta;
 
     {
         std::lock_guard<std::mutex> lock(meta_mutex_);
@@ -133,31 +133,31 @@ nixlUcxProxyBackend::submitPut(const ResolvedProxySubmission &submission, uint64
                        << " dst_mvh=" << submission.dst_memview;
             return NIXL_ERR_NOT_FOUND;
         }
-        src_meta = &src_it->second;
-        dst_meta = &dst_it->second;
+        src_meta = src_it->second;
+        dst_meta = dst_it->second;
     }
 
-    if (submission.src_index >= src_meta->entries.size() ||
-        submission.dst_index >= dst_meta->entries.size()) {
+    if (submission.src_index >= src_meta.entries.size() ||
+        submission.dst_index >= dst_meta.entries.size()) {
         NIXL_DEBUG << "nixlUcxProxyBackend::submitPut: index out of range"
                    << " src_index=" << submission.src_index
-                   << " src_count=" << src_meta->entries.size()
+                   << " src_count=" << src_meta.entries.size()
                    << " dst_index=" << submission.dst_index
-                   << " dst_count=" << dst_meta->entries.size();
+                   << " dst_count=" << dst_meta.entries.size();
         return NIXL_ERR_INVALID_PARAM;
     }
 
-    const StoredEntry &src_entry = src_meta->entries[submission.src_index];
-    const StoredEntry &dst_entry = dst_meta->entries[submission.dst_index];
+    const StoredEntry &src_entry = src_meta.entries[submission.src_index];
+    const StoredEntry &dst_entry = dst_meta.entries[submission.dst_index];
 
-    nixl_meta_dlist_t local_list(src_meta->mem_type);
+    nixl_meta_dlist_t local_list(src_meta.mem_type);
     local_list.addDesc(nixlMetaDesc(
         src_entry.base_addr + submission.src_offset,
         submission.size,
         0,
         src_entry.metadataP));
 
-    nixl_meta_dlist_t remote_list(dst_meta->mem_type);
+    nixl_meta_dlist_t remote_list(dst_meta.mem_type);
     remote_list.addDesc(nixlMetaDesc(
         dst_entry.base_addr + submission.dst_offset,
         submission.size,
@@ -166,14 +166,14 @@ nixlUcxProxyBackend::submitPut(const ResolvedProxySubmission &submission, uint64
 
     nixlBackendReqH *handle = nullptr;
     nixl_status_t status = engine_->prepXfer(
-        NIXL_WRITE, local_list, remote_list, dst_meta->remote_agent, handle);
+        NIXL_WRITE, local_list, remote_list, dst_meta.remote_agent, handle);
     if (status != NIXL_SUCCESS) {
         NIXL_DEBUG << "nixlUcxProxyBackend::submitPut: prepXfer failed status=" << status;
         return status;
     }
 
     status = engine_->postXfer(
-        NIXL_WRITE, local_list, remote_list, dst_meta->remote_agent, handle);
+        NIXL_WRITE, local_list, remote_list, dst_meta.remote_agent, handle);
     if (status != NIXL_SUCCESS && status != NIXL_IN_PROG) {
         NIXL_DEBUG << "nixlUcxProxyBackend::submitPut: postXfer failed status=" << status;
         engine_->releaseReqH(handle);
@@ -187,7 +187,7 @@ nixlUcxProxyBackend::submitPut(const ResolvedProxySubmission &submission, uint64
                << " dst_addr=0x" << std::hex
                << (dst_entry.base_addr + submission.dst_offset) << std::dec
                << " size=" << submission.size
-               << " remote_agent='" << dst_meta->remote_agent << "'"
+               << " remote_agent='" << dst_meta.remote_agent << "'"
                << " token=" << request_token;
     return NIXL_SUCCESS;
 }

@@ -234,8 +234,24 @@ ProxyRuntime::init(DeviceProxyBackendAdapter *backend,
     }
 
     backend_ = backend;
-    shutdown_word_.store(0, std::memory_order_relaxed);
     memview_registry_.clear();
+
+    if (cudaMallocHost(reinterpret_cast<void **>(&shutdown_word_host_),
+                       sizeof(uint32_t)) != cudaSuccess) {
+        NIXL_ERROR << "ProxyRuntime::init: failed to allocate shutdown_word";
+        shutdown_word_host_ = nullptr;
+        backend_ = nullptr;
+        return NIXL_ERR_BACKEND;
+    }
+    void *shutdown_dev = nullptr;
+    if (cudaHostGetDevicePointer(&shutdown_dev, shutdown_word_host_, 0) != cudaSuccess) {
+        cudaFreeHost(shutdown_word_host_);
+        shutdown_word_host_ = nullptr;
+        backend_ = nullptr;
+        return NIXL_ERR_BACKEND;
+    }
+    shutdown_word_dev_ = static_cast<uint32_t *>(shutdown_dev);
+    __atomic_store_n(shutdown_word_host_, uint32_t{0}, __ATOMIC_RELEASE);
 
     worker_count = std::min(worker_count, channel_count);
     NIXL_INFO << "ProxyRuntime::init: effective worker_count=" << worker_count
@@ -244,6 +260,9 @@ ProxyRuntime::init(DeviceProxyBackendAdapter *backend,
     nixl_status_t rc = backend_->init(worker_count, channel_count);
     if (rc != NIXL_SUCCESS) {
         NIXL_ERROR << "ProxyRuntime::init: backend init failed: " << rc;
+        cudaFreeHost(shutdown_word_host_);
+        shutdown_word_host_ = nullptr;
+        shutdown_word_dev_  = nullptr;
         backend_ = nullptr;
         return rc;
     }
@@ -254,6 +273,9 @@ ProxyRuntime::init(DeviceProxyBackendAdapter *backend,
         if (rc != NIXL_SUCCESS) {
             channels_.clear();
             backend_->shutdown();
+            cudaFreeHost(shutdown_word_host_);
+            shutdown_word_host_ = nullptr;
+            shutdown_word_dev_  = nullptr;
             backend_ = nullptr;
             return rc;
         }
@@ -263,6 +285,9 @@ ProxyRuntime::init(DeviceProxyBackendAdapter *backend,
                        sizeof(ProxyChannelView) * channel_count) != cudaSuccess) {
         channels_.clear();
         backend_->shutdown();
+        cudaFreeHost(shutdown_word_host_);
+        shutdown_word_host_ = nullptr;
+        shutdown_word_dev_  = nullptr;
         backend_ = nullptr;
         return NIXL_ERR_BACKEND;
     }
@@ -276,13 +301,16 @@ ProxyRuntime::init(DeviceProxyBackendAdapter *backend,
         device_channel_views_ = nullptr;
         channels_.clear();
         backend_->shutdown();
+        cudaFreeHost(shutdown_word_host_);
+        shutdown_word_host_ = nullptr;
+        shutdown_word_dev_  = nullptr;
         backend_ = nullptr;
         return NIXL_ERR_BACKEND;
     }
     *device_context_ = ProxyDeviceContextData{
         device_channel_views_,
         channel_count,
-        reinterpret_cast<uint32_t *>(&shutdown_word_)
+        shutdown_word_dev_
     };
 
     workers_.clear();
@@ -298,7 +326,7 @@ ProxyRuntime::init(DeviceProxyBackendAdapter *backend,
         workers_.push_back(std::make_unique<ProxyWorker>(
             backend_,
             &memview_registry_,
-            &shutdown_word_,
+            shutdown_word_host_,
             &channels_[first_ch],
             n_ch));
     }
@@ -397,18 +425,26 @@ nixl_status_t
 ProxyRuntime::startWorkers() {
     NIXL_INFO << "ProxyRuntime::startWorkers: launching "
               << workers_.size() << " worker thread(s)";
-    shutdown_word_.store(1, std::memory_order_release);
+    if (shutdown_word_host_ == nullptr) {
+        NIXL_ERROR << "ProxyRuntime::startWorkers: runtime not initialized";
+        return NIXL_ERR_NOT_SUPPORTED;
+    }
+    __atomic_store_n(shutdown_word_host_, uint32_t{1}, __ATOMIC_RELEASE);
     joinWorkerThreads();
+    for (auto &channel : channels_) {
+        channel.inflight_requests.clear();
+        channel.error_latched = false;
+    }
     worker_threads_.clear();
 
-    shutdown_word_.store(0, std::memory_order_relaxed);
+    __atomic_store_n(shutdown_word_host_, uint32_t{0}, __ATOMIC_RELEASE);
 
     worker_threads_.reserve(workers_.size());
     uint32_t idx = 0;
     for (auto &worker : workers_) {
         worker_threads_.emplace_back([this, w = worker.get(), idx]() {
             NIXL_INFO << "ProxyWorker thread " << idx << " started";
-            while (!shutdown_word_.load(std::memory_order_acquire)) {
+            while (!__atomic_load_n(shutdown_word_host_, __ATOMIC_ACQUIRE)) {
                 w->runOnce();
             }
             NIXL_INFO << "ProxyWorker thread " << idx << " exiting";
@@ -432,7 +468,9 @@ ProxyRuntime::joinWorkerThreads() noexcept {
 nixl_status_t
 ProxyRuntime::shutdown() {
     NIXL_INFO << "ProxyRuntime::shutdown: signalling workers to stop";
-    shutdown_word_.store(1, std::memory_order_release);
+    if (shutdown_word_host_ != nullptr) {
+        __atomic_store_n(shutdown_word_host_, uint32_t{1}, __ATOMIC_RELEASE);
+    }
 
     joinWorkerThreads();
     worker_threads_.clear();
@@ -451,6 +489,11 @@ ProxyRuntime::shutdown() {
     if (device_context_) {
         cudaFreeHost(device_context_);
         device_context_ = nullptr;
+    }
+    if (shutdown_word_host_) {
+        cudaFreeHost(shutdown_word_host_);
+        shutdown_word_host_ = nullptr;
+        shutdown_word_dev_  = nullptr;
     }
     if (device_channel_views_) {
         cudaFreeHost(device_channel_views_);

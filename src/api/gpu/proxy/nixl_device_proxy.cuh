@@ -76,6 +76,11 @@ load_proxy_context() {
     return g_nixl_proxy_ctx;
 }
 
+static_assert(sizeof(WorkRing::running_op_idx) == 8,
+              "running_op_idx must be 64-bit to avoid wrap-around false completions");
+static_assert(sizeof(CompletionSlot::completed_idx) == 8,
+              "completed_idx must be 64-bit to match running_op_idx");
+
 struct ProxyDeviceContext : ProxyDeviceContextData {
 
     // Enqueue a transfer submission into the MPSC work ring for the selected
@@ -97,11 +102,15 @@ struct ProxyDeviceContext : ProxyDeviceContextData {
 
         cuda::atomic_ref<uint32_t, cuda::thread_scope_system> prod(*ring->producer_idx);
         cuda::atomic_ref<uint32_t, cuda::thread_scope_system> cons(*ring->consumer_idx);
+        cuda::atomic_ref<uint32_t, cuda::thread_scope_system> shut(*shutdown_word);
 
         uint32_t prod_val = prod.load(cuda::memory_order_relaxed);
 
-        // Spin until there is space in the ring.
+        // Spin until there is space in the ring, bailing out on shutdown.
         while (prod_val - cons.load(cuda::memory_order_acquire) >= ring->depth) {
+            if (shut.load(cuda::memory_order_acquire)) {
+                return NIXL_ERR_BACKEND;
+            }
             prod_val = prod.load(cuda::memory_order_relaxed);
         }
 

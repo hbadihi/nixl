@@ -21,7 +21,7 @@
 
 ProxyWorker::ProxyWorker(DeviceProxyBackendAdapter *backend,
                          const ProxyMemViewRegistry *proxy_memview_registry,
-                         std::atomic<uint32_t> *shutdown_word,
+                         uint32_t *shutdown_word,
                          ChannelState *assigned_channels,
                          uint32_t assigned_channel_count) noexcept
     : backend_(backend),
@@ -86,6 +86,8 @@ ProxyWorker::dispatch(ChannelState &channel, const ProxySubmission &submission) 
                                                         dst_memview)) {
         NIXL_DEBUG << "ProxyWorker::dispatch: dst memview resolution failed"
                    << " dst_proxy_id=" << submission.dst_proxy_memview_id;
+        channel.inflight_requests.push_back(
+            {submission.op_idx, 0, NIXL_ERR_NOT_FOUND, true});
         return NIXL_ERR_NOT_FOUND;
     }
     if ((submission.opcode == ProxyOpcode::PUT)
@@ -93,6 +95,8 @@ ProxyWorker::dispatch(ChannelState &channel, const ProxySubmission &submission) 
             submission.src_proxy_memview_id, src_memview)) {
         NIXL_DEBUG << "ProxyWorker::dispatch: src memview resolution failed"
                    << " src_proxy_id=" << submission.src_proxy_memview_id;
+        channel.inflight_requests.push_back(
+            {submission.op_idx, 0, NIXL_ERR_NOT_FOUND, true});
         return NIXL_ERR_NOT_FOUND;
     }
 
@@ -127,7 +131,7 @@ ProxyWorker::dispatch(ChannelState &channel, const ProxySubmission &submission) 
     if (status != NIXL_SUCCESS) {
         // backend submit failed, set the status and publish_ready to true
         NIXL_ERROR << "ProxyWorker::dispatch: backend submit failed"
-                   << " status=" << status << " op_idx=" << submission.op_idx 
+                   << " status=" << status << " op_idx=" << submission.op_idx
                    << " request_token=" << request_token;
         inflight.status = status;
         inflight.publish_ready = true;
@@ -149,11 +153,19 @@ ProxyWorker::driveBackendProgress() {
 
 void
 ProxyWorker::publishCompletions(ChannelState &channel) {
+    if (channel.error_latched) {
+        return;
+    }
     while (!channel.inflight_requests.empty()) {
         ProxyRequestState &front = channel.inflight_requests.front();
-        nixl_status_t st = backend_->checkCompletion(front.backend_req_token);
-        if (st == NIXL_IN_PROG) {
-            break;
+        nixl_status_t st;
+        if (front.publish_ready) {
+            st = front.status;
+        } else {
+            st = backend_->checkCompletion(front.backend_req_token);
+            if (st == NIXL_IN_PROG) {
+                break;
+            }
         }
         NIXL_DEBUG << "ProxyWorker::publishCompletions: channel="
                    << channel.device_view.channel_id
@@ -163,6 +175,10 @@ ProxyWorker::publishCompletions(ChannelState &channel) {
         channel.completion_slot_host_->next_status = st;
         __atomic_store_n(&channel.completion_slot_host_->completed_idx,
                          front.op_idx, __ATOMIC_RELEASE);
-        channel.inflight_requests.erase(channel.inflight_requests.begin());
+        channel.inflight_requests.pop_front();
+        if (st != NIXL_SUCCESS) {
+            channel.error_latched = true;
+            break;
+        }
     }
 }
