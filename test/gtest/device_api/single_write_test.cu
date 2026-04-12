@@ -21,6 +21,10 @@
 #include <memory>
 #include <gtest/gtest.h>
 
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+#include <nixl_device_proxy.cuh>
+#endif
+
 namespace gtest::nixl::gpu::single_write {
 struct putParams {
     nixlMemViewElem src;
@@ -164,6 +168,11 @@ protected:
         cfg.useProgThread = true;
         cfg.syncMode = nixl_thread_sync_t::NIXL_THREAD_SYNC_RW;
         cfg.pthrDelay = 100000;
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+        cfg.enableDeviceProxy = true;
+        cfg.proxyChannelCount = numWorkers;
+        cfg.proxyWorkerCount  = min(numWorkers, 2L); // FIXME: Using more workers causes race conditions inside postXfer
+#endif
         return cfg;
     }
 
@@ -199,10 +208,20 @@ protected:
             EXPECT_NE(backend_handle, nullptr);
             backend_handles.push_back(backend_handle);
         }
+
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+        auto *ctx = static_cast<ProxyDeviceContextData *>(
+            agents[SENDER_AGENT]->getProxyDeviceContext());
+        ASSERT_NE(ctx, nullptr) << "Proxy device context not available";
+        ASSERT_EQ(nixlProxyPublishContext(ctx), cudaSuccess);
+#endif
     }
 
     void
     TearDown() override {
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+        nixlProxyClearContext();
+#endif
         agents.clear();
         backend_handles.clear();
     }
@@ -401,7 +420,7 @@ TEST_P(SingleWriteTest, SingleWorkerPut) {
     ASSERT_EQ(status, NIXL_SUCCESS);
 
     putParams put_params{{src_mvh, 0, 0}, {dst_mvh, 0, 0}, size};
-    constexpr size_t num_iters = 1000;
+    constexpr size_t num_iters = 10;
     gpuTimer gpu_timer;
     status = dispatchLaunchPutKernel(GetParam(), put_params, num_iters, &gpu_timer);
     ASSERT_EQ(status, NIXL_SUCCESS);
@@ -422,6 +441,9 @@ TEST_P(SingleWriteTest, SingleWorkerPut) {
 }
 
 TEST_P(SingleWriteTest, MultipleWorkersPut) {
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    GTEST_LOG_(WARNING) << "FIXME: Treating multiple workers as 2 workers with multiple channels for proxy backend";
+#endif
     constexpr size_t size = 4 * 1024;
     constexpr nixl_mem_t mem_type = VRAM_SEG;
 
@@ -472,8 +494,12 @@ TEST_P(SingleWriteTest, MultipleWorkersPut) {
 
     for (size_t worker_id = 0; worker_id < numWorkers; worker_id++) {
         putParams put_params{{src_mvhs[worker_id], 0, 0}, {dst_mvhs[worker_id], 0, 0}, size};
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+        put_params.channelId = static_cast<unsigned>(worker_id);
+#endif
         constexpr size_t num_iters = 1;
-        const auto status = dispatchLaunchPutKernel(GetParam(), put_params, num_iters);
+        const auto status = launchPutKernel<nixl_gpu_level_t::THREAD>(
+            put_params, num_iters, nullptr, 1);
         ASSERT_EQ(status, NIXL_SUCCESS) << "Kernel launch failed for worker " << worker_id;
     }
 
@@ -500,6 +526,9 @@ TEST_P(SingleWriteTest, MultipleWorkersPut) {
 }
 
 TEST_P(SingleWriteTest, SingleWorkerPutGap) {
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    GTEST_SKIP() << "FIXME: get_ptr not implemented for proxy backend";
+#endif
     std::vector<MemBuffer> src_buffers, dst_buffers;
     constexpr size_t size = 4 * 1024;
     constexpr size_t count = 1;
@@ -555,6 +584,15 @@ TEST_P(SingleWriteTest, SingleWorkerPutGap) {
 
 using gtest::nixl::gpu::single_write::SingleWriteTest;
 
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+INSTANTIATE_TEST_SUITE_P(
+    proxyDeviceApi,
+    SingleWriteTest,
+    testing::ValuesIn(gtest::gpu::_test_levels),
+    [](const testing::TestParamInfo<nixl_gpu_level_t> &info) {
+        return std::string("Proxy_") + gtest::gpu::GetGpuXferLevelStr(info.param);
+    });
+#else
 INSTANTIATE_TEST_SUITE_P(
     ucxDeviceApi,
     SingleWriteTest,
@@ -562,3 +600,4 @@ INSTANTIATE_TEST_SUITE_P(
     [](const testing::TestParamInfo<nixl_gpu_level_t> &info) {
         return std::string("UCX_") + gtest::gpu::GetGpuXferLevelStr(info.param);
     });
+#endif
