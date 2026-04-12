@@ -145,6 +145,21 @@ TEST_F(ProxyRuntimeTest, WorkRingIndicesStartAtZero) {
     }
 }
 
+TEST_F(ProxyRuntimeTest, CompletionSlotsInitialized) {
+    ASSERT_EQ(runtime_.init(&backend_, 2, 1), NIXL_SUCCESS);
+    const ProxyChannelView *views = runtime_.deviceChannelViews();
+    for (uint32_t i = 0; i < 2; ++i) {
+        CompletionSlot slot{};
+        ASSERT_EQ(cudaMemcpy(&slot,
+                             views[i].completion_slot,
+                             sizeof(CompletionSlot),
+                             cudaMemcpyDeviceToHost),
+                  cudaSuccess);
+        EXPECT_EQ(slot.completed_idx, 0u);
+        EXPECT_EQ(slot.next_status, NIXL_IN_PROG);
+    }
+}
+
 TEST_F(ProxyRuntimeTest, WorkerCountClampedToChannels) {
     ASSERT_EQ(runtime_.init(&backend_, 2, 8), NIXL_SUCCESS);
     EXPECT_EQ(runtime_.channelCount(), 2u);

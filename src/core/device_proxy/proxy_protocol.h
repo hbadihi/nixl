@@ -41,6 +41,7 @@ struct ProxySubmission {
     size_t dst_index = 0;
     size_t dst_offset = 0;
 
+    uint32_t ready_flag = 0;
     size_t size = 0;
     uint64_t value = 0;
 };
@@ -48,21 +49,25 @@ struct ProxySubmission {
 struct WorkRing {
     /** Host-accessible (e.g. cudaMallocHost); GPU may read via mapped pointer if needed. */
     ProxySubmission *records = nullptr;
-    /** HBM; GPU advances with CUDA atomics; host reads via cudaMemcpy. */
+    /** Mapped pinned producer; GPU advances with CUDA atomics; host reads via __atomic_*. */
     uint32_t *producer_idx = nullptr;
     /** Mapped pinned consumer; host proxy uses __atomic_* on host alias (ChannelState). */
     uint32_t *consumer_idx = nullptr;
+    /** The depth of the work ring. */
     uint32_t depth = 0;
+    /** Monotonic 64-bit counter; starts at 1 so completed_idx==0 means
+     *  "no operation completed yet" and the first op_idx is never 0. */
+    uint64_t running_op_idx = 1;
 };
 
-struct CompletionSlot {
+struct alignas(16) CompletionSlot {
     uint64_t completed_idx = 0;
     nixl_status_t next_status = NIXL_IN_PROG;
 };
 
 struct ProxyChannelView {
     WorkRing *work_ring = nullptr;
-    /** Device pointer; host updates via cudaMemcpy (or GDRCopy later). */
+    /** Mapped pinned host memory (device alias); host writes via host pointer with atomics. */
     CompletionSlot *completion_slot = nullptr;
     uint32_t channel_id = 0;
 };

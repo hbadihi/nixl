@@ -17,8 +17,8 @@
 #ifndef NIXL_SRC_CORE_DEVICE_PROXY_PROXY_RUNTIME_H
 #define NIXL_SRC_CORE_DEVICE_PROXY_PROXY_RUNTIME_H
 
-#include <atomic>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -27,8 +27,7 @@
 
 #include "backend_aux.h"
 #include "proxy_protocol.h"
-
-class DeviceProxyBackendAdapter;
+#include "backend_adapter.h"
 class ProxyWorker;
 
 static constexpr uint32_t kDefaultProxyRingDepth = 256;
@@ -42,18 +41,23 @@ struct ProxyRequestState {
 
 struct alignas(64) ChannelState {
     ProxyChannelView device_view{};
-    std::vector<ProxyRequestState> inflight_requests;
+    std::deque<ProxyRequestState> inflight_requests;
+    bool error_latched = false;
 
     WorkRing        *work_ring_       = nullptr;
     ProxySubmission *records_         = nullptr;
-    /** Producer count in HBM (cudaMalloc); GPU atomics; host reads via cudaMemcpy. */
-    uint32_t        *producer_idx_   = nullptr;
+    /** Mapped pinned host memory; host proxy uses __atomic_* on host alias. */
+    uint32_t        *producer_idx_host_ = nullptr;
+    /** Device-mapped alias of producer_idx_host_ for WorkRing (GPU-writable). */
+    uint32_t        *producer_idx_dev_  = nullptr;
     /** Consumer count: host pinned; proxy uses __atomic_* on consumer_idx_host_. */
     uint32_t        *consumer_idx_host_  = nullptr;
     /** Same word as consumer_idx_host_, for WorkRing::consumer_idx (GPU-readable). */
     uint32_t        *consumer_idx_dev_   = nullptr;
-    /** Device pointer (cudaMalloc); publish with cudaMemcpy from the proxy worker. */
-    CompletionSlot  *completion_slot_ = nullptr;
+    /** Mapped pinned host memory; proxy worker writes directly via host alias. */
+    CompletionSlot  *completion_slot_host_ = nullptr;
+    /** Device-mapped alias of completion_slot_host_ for ProxyChannelView. */
+    CompletionSlot  *completion_slot_dev_  = nullptr;
 
     ChannelState() = default;
     ~ChannelState();
@@ -166,7 +170,8 @@ class ProxyRuntime {
         std::vector<std::thread> worker_threads_;
         ProxyMemViewRegistry memview_registry_;
         DeviceProxyBackendAdapter *backend_ = nullptr;
-        std::atomic<uint32_t> shutdown_word_{0};
+        uint32_t *shutdown_word_host_ = nullptr;
+        uint32_t *shutdown_word_dev_  = nullptr;
         uint32_t ring_depth_ = kDefaultProxyRingDepth;
 };
 

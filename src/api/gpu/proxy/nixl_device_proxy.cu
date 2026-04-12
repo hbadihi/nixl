@@ -20,3 +20,8 @@
 #include "nixl_device_proxy.cuh"
 
 __device__ ProxyDeviceContext *g_nixl_proxy_ctx = nullptr;
+
+// Scratch word in HBM for get_xfer_status<GRID> to broadcast the poll
+// result from global lane 0 to all blocks via device-scope atomics.
+// Safe as a singleton because cooperative grid launches are serialized.
+__device__ int32_t g_nixl_proxy_grid_scratch = 0;
