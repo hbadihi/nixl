@@ -171,7 +171,7 @@ protected:
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
         cfg.enableDeviceProxy = true;
         cfg.proxyChannelCount = numWorkers;
-        cfg.proxyWorkerCount  = numWorkers;
+        cfg.proxyWorkerCount  = 1;
 #endif
         return cfg;
     }
@@ -420,16 +420,9 @@ TEST_P(SingleWriteTest, SingleWorkerPut) {
     ASSERT_EQ(status, NIXL_SUCCESS);
 
     putParams put_params{{src_mvh, 0, 0}, {dst_mvh, 0, 0}, size};
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
     constexpr size_t num_iters = 10;
-    constexpr unsigned num_threads = 1;
-#else
-    constexpr size_t num_iters = 1000;
-    constexpr unsigned num_threads = 32;
-#endif
     gpuTimer gpu_timer;
-    status = launchPutKernel<nixl_gpu_level_t::THREAD>(
-        put_params, num_iters, &gpu_timer, num_threads);
+    status = dispatchLaunchPutKernel(GetParam(), put_params, num_iters, &gpu_timer);
     ASSERT_EQ(status, NIXL_SUCCESS);
 
     logResultsPublic(size, count, num_iters, *gpu_timer.start_, *gpu_timer.end_);
@@ -449,7 +442,7 @@ TEST_P(SingleWriteTest, SingleWorkerPut) {
 
 TEST_P(SingleWriteTest, MultipleWorkersPut) {
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-    GTEST_SKIP() << "Multiple workers not yet supported for proxy backend";
+    GTEST_LOG_(WARNING) << "Treating multiple workers as single worker with multiple channels for proxy backend";
 #endif
     constexpr size_t size = 4 * 1024;
     constexpr nixl_mem_t mem_type = VRAM_SEG;

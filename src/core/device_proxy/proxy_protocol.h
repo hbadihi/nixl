@@ -41,6 +41,7 @@ struct ProxySubmission {
     size_t dst_index = 0;
     size_t dst_offset = 0;
 
+    uint32_t ready_flag = 0;
     size_t size = 0;
     uint64_t value = 0;
 };

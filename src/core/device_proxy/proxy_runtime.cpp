@@ -112,6 +112,9 @@ ChannelState::allocate(uint32_t channel_id, uint32_t depth) {
     }
     completion_slot_dev_ = static_cast<CompletionSlot *>(completion_dev);
 
+    for (uint32_t i = 0; i < depth; ++i) {
+        records_[i] = ProxySubmission{};
+    }
     __atomic_store_n(producer_idx_host_, 0, __ATOMIC_RELEASE);
     __atomic_store_n(consumer_idx_host_, 0, __ATOMIC_RELEASE);
     completion_slot_host_->next_status = NIXL_IN_PROG;

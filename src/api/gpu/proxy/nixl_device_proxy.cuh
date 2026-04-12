@@ -18,6 +18,7 @@
 #define NIXL_SRC_API_GPU_PROXY_NIXL_DEVICE_PROXY_CUH
 
 #include <cuda/atomic>
+#include <cooperative_groups.h>
 #include <stdio.h>
 
 #include "../common/nixl_device_types.cuh"
@@ -37,6 +38,7 @@ static_assert(sizeof(ProxyXferStatus) <= sizeof(nixlGpuXferStatusH),
 // Defined in nixl_device_proxy.cu and read by device kernels through
 // load_proxy_context().
 extern __device__ ProxyDeviceContext *g_nixl_proxy_ctx;
+extern __device__ int32_t g_nixl_proxy_grid_scratch;
 
 // Host-callable helpers. Keeping these inline in CUDA translation units avoids
 // cross-DSO symbol ownership issues for g_nixl_proxy_ctx.
@@ -81,6 +83,56 @@ static_assert(sizeof(WorkRing::running_op_idx) == 8,
 static_assert(sizeof(CompletionSlot::completed_idx) == 8,
               "completed_idx must be 64-bit to match running_op_idx");
 
+/**
+* Initialize the lane_id and num_lanes variables for the given level.
+* @param level The level to initialize the lane_id and num_lanes for.
+* @param lane_id The lane_id variable to initialize.
+* @param num_lanes The num_lanes variable to initialize.
+*/
+template<nixl_gpu_level_t level>
+__device__ inline void nixlProxyExecInit(uint32_t &lane_id, uint32_t &num_lanes) {
+    switch (level) {
+    case nixl_gpu_level_t::THREAD:
+        lane_id = 0;
+        num_lanes = 1;
+        break;
+    case nixl_gpu_level_t::WARP:
+        lane_id = threadIdx.x % warpSize;
+        num_lanes = warpSize;
+        break;
+    case nixl_gpu_level_t::BLOCK:
+        lane_id = threadIdx.x;
+        num_lanes = blockDim.x;
+        break;
+    case nixl_gpu_level_t::GRID:
+        lane_id = threadIdx.x + blockIdx.x * blockDim.x;
+        num_lanes = blockDim.x * gridDim.x;
+        break;
+    }
+}
+
+/**
+* Synchronize the threads at the given level.
+* @param level The level to synchronize the threads for.
+*/
+template<nixl_gpu_level_t level>
+__device__ inline void nixlProxySync() {
+    switch (level) {
+    case nixl_gpu_level_t::THREAD:
+        break;
+    case nixl_gpu_level_t::WARP:
+        __syncwarp();
+        break;
+    case nixl_gpu_level_t::BLOCK:
+        __syncthreads();
+        break;
+    case nixl_gpu_level_t::GRID:
+        auto g = cooperative_groups::this_grid();
+        g.sync();
+        break;
+    }
+}
+
 struct ProxyDeviceContext : ProxyDeviceContextData {
 
     // Enqueue a transfer submission into the MPSC work ring for the selected
@@ -104,23 +156,26 @@ struct ProxyDeviceContext : ProxyDeviceContextData {
         cuda::atomic_ref<uint32_t, cuda::thread_scope_system> cons(*ring->consumer_idx);
         cuda::atomic_ref<uint32_t, cuda::thread_scope_system> shut(*shutdown_word);
 
-        uint32_t prod_val = prod.load(cuda::memory_order_relaxed);
+        // Atomically claim a unique slot in the ring.
+        uint32_t my_slot = prod.fetch_add(1, cuda::memory_order_relaxed);
 
-        // Spin until there is space in the ring, bailing out on shutdown.
-        while (prod_val - cons.load(cuda::memory_order_acquire) >= ring->depth) {
+        // Spin until the claimed slot has space (consumer has freed it).
+        while (my_slot - cons.load(cuda::memory_order_acquire) >= ring->depth) {
             if (shut.load(cuda::memory_order_acquire)) {
                 return NIXL_ERR_BACKEND;
             }
-            prod_val = prod.load(cuda::memory_order_relaxed);
         }
 
-        // Plain write: ordered by the release store below.
         cuda::atomic_ref<uint64_t, cuda::thread_scope_system> op_idx(ring->running_op_idx);
         submission.op_idx = op_idx.fetch_add(1, cuda::memory_order_relaxed);
-        ring->records[prod_val % ring->depth] = submission; // TODO: Do we need a fence here?
+        ring->records[my_slot % ring->depth] = submission;
 
-        // Publish the new entry to the CPU proxy worker.
-        prod.store(prod_val + 1, cuda::memory_order_release);
+        // Signal this slot is ready for the consumer.  The release
+        // guarantees the record write above is visible before the
+        // consumer reads it via an acquire load on ready_flag.
+        cuda::atomic_ref<uint32_t, cuda::thread_scope_system> ready(
+            ring->records[my_slot % ring->depth].ready_flag);
+        ready.store(1, cuda::memory_order_release);
 
         if (xfer_status != nullptr) {
             ProxyXferStatus pxs{ch_view.completion_slot, submission.op_idx};

@@ -54,24 +54,27 @@ ProxyWorker::runOnce() {
 
 bool
 ProxyWorker::tryDequeue(ChannelState &channel, ProxySubmission &submission) {
-    if (channel.consumer_idx_host_ == nullptr || channel.producer_idx_host_ == nullptr) {
-        return false;
-    }
-    uint32_t observed_producer_idx =
-        __atomic_load_n(channel.producer_idx_host_, __ATOMIC_ACQUIRE);
     WorkRing *ring = channel.device_view.work_ring;
-    uint32_t local_consumer_idx =
-        __atomic_load_n(channel.consumer_idx_host_, __ATOMIC_ACQUIRE);
-    if (local_consumer_idx == observed_producer_idx) {
+    if (ring == nullptr || channel.consumer_idx_host_ == nullptr) {
         return false;
     }
-    submission = ring->records[local_consumer_idx % ring->depth];
+    // Sole writer of consumer_idx on host — relaxed load is sufficient.
+    uint32_t local_consumer_idx =
+        __atomic_load_n(channel.consumer_idx_host_, __ATOMIC_RELAXED);
+    uint32_t slot = local_consumer_idx % ring->depth;
+    // ready_flag is the GPU-to-CPU signal that the record is written
+    // (pairs with release store in device enqueue).  No producer_idx
+    // read on host — it is GPU-internal for slot allocation.
+    if (!__atomic_load_n(&ring->records[slot].ready_flag, __ATOMIC_ACQUIRE)) {
+        return false;
+    }
+    submission = ring->records[slot];
+    __atomic_store_n(&ring->records[slot].ready_flag, 0, __ATOMIC_RELAXED);
     __atomic_store_n(channel.consumer_idx_host_,
                      local_consumer_idx + 1,
                      __ATOMIC_RELEASE);
     NIXL_DEBUG << "ProxyWorker::tryDequeue: channel=" << channel.device_view.channel_id
                << " consumer=" << local_consumer_idx
-               << " producer=" << observed_producer_idx
                << " opcode=" << static_cast<int>(submission.opcode)
                << " op_idx=" << submission.op_idx
                << " size=" << submission.size;
