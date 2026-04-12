@@ -171,7 +171,7 @@ protected:
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
         cfg.enableDeviceProxy = true;
         cfg.proxyChannelCount = numWorkers;
-        cfg.proxyWorkerCount  = 1;
+        cfg.proxyWorkerCount  = min(numWorkers, 2L); // FIXME: Using more workers causes race conditions inside postXfer
 #endif
         return cfg;
     }
@@ -442,7 +442,7 @@ TEST_P(SingleWriteTest, SingleWorkerPut) {
 
 TEST_P(SingleWriteTest, MultipleWorkersPut) {
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-    GTEST_LOG_(WARNING) << "Treating multiple workers as single worker with multiple channels for proxy backend";
+    GTEST_LOG_(WARNING) << "FIXME: Treating multiple workers as 2 workers with multiple channels for proxy backend";
 #endif
     constexpr size_t size = 4 * 1024;
     constexpr nixl_mem_t mem_type = VRAM_SEG;
@@ -527,7 +527,7 @@ TEST_P(SingleWriteTest, MultipleWorkersPut) {
 
 TEST_P(SingleWriteTest, SingleWorkerPutGap) {
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-    GTEST_SKIP() << "get_ptr not implemented for proxy backend";
+    GTEST_SKIP() << "FIXME: get_ptr not implemented for proxy backend";
 #endif
     std::vector<MemBuffer> src_buffers, dst_buffers;
     constexpr size_t size = 4 * 1024;

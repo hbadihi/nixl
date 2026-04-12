@@ -221,8 +221,8 @@ nixlUcxProxyBackend::checkCompletion(uint64_t request_token) {
 
 size_t
 nixlUcxProxyBackend::progress() {
-    // TODO: progress each UCX worker.
-    return (engine_ != nullptr) ? static_cast<size_t>(engine_->progress()) : 0;
+    // UCX backend handles progress internally, so we don't need to do anything here.
+    return 0;
 }
 
 nixl_status_t
