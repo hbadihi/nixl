@@ -278,6 +278,32 @@ ProxyRuntime::unregisterProxyMemView(nixlMemViewH proxy_memview) {
     return memview_registry_.unregisterProxyMemView(proxy_memview);
 }
 
+nixl_status_t
+ProxyRuntime::storeMetadata(nixlMemViewH proxy_memview,
+                            const nixl_meta_dlist_t &dlist) {
+    nixlMemViewH backend_mvh = nullptr;
+    if (!memview_registry_.resolveProxyMemView(proxy_memview, backend_mvh)) {
+        return NIXL_ERR_NOT_FOUND;
+    }
+    if (backend_ != nullptr) {
+        backend_->storeLocalMeta(backend_mvh, dlist);
+    }
+    return NIXL_SUCCESS;
+}
+
+nixl_status_t
+ProxyRuntime::storeMetadata(nixlMemViewH proxy_memview,
+                            const nixl_remote_meta_dlist_t &dlist) {
+    nixlMemViewH backend_mvh = nullptr;
+    if (!memview_registry_.resolveProxyMemView(proxy_memview, backend_mvh)) {
+        return NIXL_ERR_NOT_FOUND;
+    }
+    if (backend_ != nullptr) {
+        backend_->storeRemoteMeta(backend_mvh, dlist);
+    }
+    return NIXL_SUCCESS;
+}
+
 bool
 ProxyRuntime::resolveProxyMemView(nixlMemViewH proxy_memview,
                                   nixlMemViewH &backend_memview) const {

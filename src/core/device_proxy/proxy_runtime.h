@@ -25,6 +25,7 @@
 #include <thread>
 #include <vector>
 
+#include "backend_aux.h"
 #include "proxy_protocol.h"
 
 class DeviceProxyBackendAdapter;
@@ -119,6 +120,14 @@ class ProxyRuntime {
 
         nixl_status_t
         unregisterProxyMemView(nixlMemViewH proxy_memview);
+
+        nixl_status_t
+        storeMetadata(nixlMemViewH proxy_memview,
+                      const nixl_meta_dlist_t &dlist);
+
+        nixl_status_t
+        storeMetadata(nixlMemViewH proxy_memview,
+                      const nixl_remote_meta_dlist_t &dlist);
 
         bool
         resolveProxyMemView(nixlMemViewH proxy_memview,
