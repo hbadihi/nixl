@@ -351,6 +351,33 @@ if get_option('static_plugins') != ''
     endforeach
 endif
 
+# When UCX is statically linked into libnixl.so, libnixl.so directly references
+# UCX symbols (e.g. ucp_device_* from the device proxy). Modern ld defaults to
+# --no-copy-dt-needed-entries, so every binary that links libnixl.so must also
+# put libucp/libucs/libuct on its own link line — meson's declare_dependency
+# link_args do not propagate from a shared link_with target into executables.
+# Apply the UCX link flags project-wide to cover all consumers (examples,
+# tests, python bindings, etc.). Also bake ucx_path into RUNPATH so the loader
+# resolves libucp.so.0 from the custom UCX install instead of any system UCX
+# that happens to be in /etc/ld.so.cache.
+if 'UCX' in static_plugins and ucx_path != ''
+    # Plain c++ link line: -Wl,-rpath,... works directly.
+    add_project_link_arguments(
+        '-L' + ucx_path + '/lib',
+        '-Wl,-rpath,' + ucx_path + '/lib',
+        '-lucp', '-lucs', '-luct',
+        language: ['cpp'])
+    # nvcc (used as the linker for cuda-language targets like the gtest
+    # proxy binaries) does not accept -Wl,... directly. -Xcompiler can't be
+    # used here either because nvcc splits its argument on commas. Pass
+    # -rpath through -Xlinker (each token forwarded verbatim to ld).
+    add_project_link_arguments(
+        '-L' + ucx_path + '/lib',
+        '-Xlinker=-rpath', '-Xlinker=' + ucx_path + '/lib',
+        '-lucp', '-lucs', '-luct',
+        language: ['cuda'])
+endif
+
 # Define a specific plugin directory
 plugin_install_dir = join_paths(get_option('libdir'), 'plugins')
 plugin_build_dir = meson.current_build_dir()
