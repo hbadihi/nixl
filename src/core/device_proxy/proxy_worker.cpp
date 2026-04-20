@@ -112,7 +112,7 @@ ProxyWorker::submitToBackend(ChannelState &channel, const ProxySubmission &submi
                    << " op_idx=" << submission.op_idx
                    << " status=" << status;
         channel.inflight_requests.push_back(
-            {submission.op_idx, 0, status, true});
+            {submission.op_idx, 0, status});
         return status;
     }
 
@@ -130,15 +130,12 @@ ProxyWorker::submitToBackend(ChannelState &channel, const ProxySubmission &submi
     status = backend_->submit(prepared_submission, request_token);
     inflight.backend_req_token = request_token;
     if (status != NIXL_SUCCESS) {
-        // backend submit failed, set the status and publish_ready to true
+        // backend submit failed, so status is already terminal and can be
+        // published without polling the backend.
         NIXL_ERROR << "ProxyWorker::submitToBackend: backend submit failed"
                    << " status=" << status << " op_idx=" << submission.op_idx
                    << " request_token=" << request_token;
         inflight.status = status;
-        inflight.publish_ready = true;
-    } else {
-        status = NIXL_IN_PROG;
-        inflight.publish_ready = false;
     }
 
     NIXL_DEBUG << "ProxyWorker::submitToBackend: submitted op_idx=" << submission.op_idx
@@ -160,7 +157,7 @@ ProxyWorker::publishCompletions(ChannelState &channel) {
     while (!channel.inflight_requests.empty()) {
         ProxyRequestState &front = channel.inflight_requests.front();
         nixl_status_t st;
-        if (front.publish_ready) {
+        if (front.status != NIXL_IN_PROG) {
             st = front.status;
         } else {
             st = backend_->checkCompletion(front.backend_req_token);

@@ -34,7 +34,6 @@ struct ProxyRequestState {
     uint64_t op_idx = 0;
     uint64_t backend_req_token = 0;
     nixl_status_t status = NIXL_IN_PROG;
-    bool publish_ready = false;
 };
 
 struct alignas(64) ChannelState {
