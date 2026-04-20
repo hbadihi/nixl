@@ -26,7 +26,6 @@
 nixl_status_t
 ProxyMemViewRegistry::registerProxyMemView(nixlMemViewH backend_memview,
                                            nixlMemViewH *proxy_memview) {
-    std::lock_guard<std::mutex> guard(mutex_);
     if (proxy_memview == nullptr) {
         return NIXL_ERR_INVALID_PARAM;
     }
@@ -40,7 +39,6 @@ ProxyMemViewRegistry::registerProxyMemView(nixlMemViewH backend_memview,
 
 nixl_status_t
 ProxyMemViewRegistry::unregisterProxyMemView(nixlMemViewH proxy_memview) {
-    std::lock_guard<std::mutex> guard(mutex_);
     auto proxy_memview_id = reinterpret_cast<uint64_t>(proxy_memview);
     if (proxy_memview_id < 1 || proxy_memview_id >= next_proxy_memview_id_) {
         return NIXL_ERR_INVALID_PARAM;
@@ -59,7 +57,6 @@ ProxyMemViewRegistry::resolveProxyMemView(nixlMemViewH proxy_memview,
 bool
 ProxyMemViewRegistry::resolveProxyMemViewId(uint64_t proxy_memview_id,
                                             nixlMemViewH &backend_memview) const {
-    std::lock_guard<std::mutex> guard(mutex_);
     if (proxy_memview_id < 1 || proxy_memview_id >= next_proxy_memview_id_) {
         return false;
     }
@@ -69,9 +66,8 @@ ProxyMemViewRegistry::resolveProxyMemViewId(uint64_t proxy_memview_id,
 
 void
 ProxyMemViewRegistry::clear() noexcept {
-    std::lock_guard<std::mutex> guard(mutex_);
+    // Clear the vector but keep the running index intact
     backend_memview_by_proxy_id_.clear();
-    next_proxy_memview_id_ = 1;
 }
 
 nixl_status_t
@@ -271,8 +267,8 @@ ProxyRuntime::init(DeviceProxyBackendAdapter *backend,
     }
 
     channels_.resize(channel_count);
-    for (uint32_t i = 0; i < channel_count; ++i) {
-        rc = channels_[i].allocate(i, ring_depth_);
+    for (uint32_t channel_id = 0; channel_id < channel_count; ++channel_id) {
+        rc = channels_[channel_id].allocate(channel_id, ring_depth_);
         if (rc != NIXL_SUCCESS) {
             channels_.clear();
             backend_->shutdown();
@@ -294,8 +290,8 @@ ProxyRuntime::init(DeviceProxyBackendAdapter *backend,
         backend_ = nullptr;
         return NIXL_ERR_BACKEND;
     }
-    for (uint32_t i = 0; i < channel_count; ++i) {
-        device_channel_views_[i] = channels_[i].device_view;
+    for (uint32_t channel_id = 0; channel_id < channel_count; ++channel_id) {
+        device_channel_views_[channel_id] = channels_[channel_id].device_view;
     }
 
     if (cudaMallocHost(&device_context_,

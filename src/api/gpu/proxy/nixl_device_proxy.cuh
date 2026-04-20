@@ -144,13 +144,12 @@ struct ProxyDeviceContext : ProxyDeviceContextData {
     // system-scope atomics so the CPU proxy worker sees the update coherently.
     __device__ inline nixl_status_t
     enqueue(ProxySubmission submission, nixlGpuXferStatusH *xfer_status = nullptr) {
-        if (num_channels == 0) {
+        if (submission.channel_id >= num_channels) {
             return NIXL_ERR_INVALID_PARAM;
         }
 
-        uint32_t ch = submission.channel_id % num_channels;
-        ProxyChannelView &ch_view = channels[ch];
-        WorkRing         *ring    = ch_view.work_ring;
+        ProxyChannelView &channel_view = channels[submission.channel_id];
+        WorkRing         *ring    = channel_view.work_ring;
 
         cuda::atomic_ref<uint32_t, cuda::thread_scope_system> prod(*ring->producer_idx);
         cuda::atomic_ref<uint32_t, cuda::thread_scope_system> cons(*ring->consumer_idx);
@@ -178,7 +177,7 @@ struct ProxyDeviceContext : ProxyDeviceContextData {
         ready.store(1, cuda::memory_order_release);
 
         if (xfer_status != nullptr) {
-            ProxyXferStatus pxs{ch_view.completion_slot, submission.op_idx};
+            ProxyXferStatus pxs{channel_view.completion_slot, submission.op_idx};
             memcpy(xfer_status->storage, &pxs, sizeof(ProxyXferStatus));
         }
 

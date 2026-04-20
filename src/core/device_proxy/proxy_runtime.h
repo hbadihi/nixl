@@ -94,7 +94,6 @@ class ProxyMemViewRegistry {
         clear() noexcept;
 
     private:
-        mutable std::mutex mutex_;
         std::vector<nixlMemViewH> backend_memview_by_proxy_id_;
         uint64_t next_proxy_memview_id_ = 1;
 };
