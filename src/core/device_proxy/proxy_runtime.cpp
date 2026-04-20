@@ -330,7 +330,6 @@ ProxyRuntime::init(DeviceProxyBackendAdapter *backend,
             n_ch));
     }
 
-    worker_threads_.clear();
     NIXL_INFO << "ProxyRuntime::init: complete — "
               << channel_count << " channels, "
               << worker_count << " workers, "
@@ -434,19 +433,12 @@ ProxyRuntime::startWorkers() {
         channel.inflight_requests.clear();
         channel.error_latched = false;
     }
-    worker_threads_.clear();
 
     __atomic_store_n(shutdown_word_host_, uint32_t{0}, __ATOMIC_RELEASE);
 
     uint32_t idx = 0;
     for (auto &worker : workers_) {
-        worker_threads_.emplace_back([this, w = worker.get(), idx]() {
-            NIXL_INFO << "ProxyWorker thread " << idx << " started";
-            while (!__atomic_load_n(shutdown_word_host_, __ATOMIC_ACQUIRE)) {
-                w->runOnce();
-            }
-            NIXL_INFO << "ProxyWorker thread " << idx << " exiting";
-        });
+        worker->start(idx);
         ++idx;
     }
 
@@ -456,10 +448,8 @@ ProxyRuntime::startWorkers() {
 
 void
 ProxyRuntime::joinWorkerThreads() noexcept {
-    for (auto &worker_thread : worker_threads_) {
-        if (worker_thread.joinable()) {
-            worker_thread.join();
-        }
+    for (auto &worker : workers_) {
+        worker->join();
     }
 }
 
@@ -471,7 +461,6 @@ ProxyRuntime::shutdown() {
     }
 
     joinWorkerThreads();
-    worker_threads_.clear();
     NIXL_INFO << "ProxyRuntime::shutdown: all worker threads joined";
 
     nixl_status_t backend_status = NIXL_SUCCESS;

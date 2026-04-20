@@ -20,9 +20,7 @@
 #include <cstdint>
 #include <deque>
 #include <memory>
-#include <mutex>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include "backend_aux.h"
@@ -166,7 +164,6 @@ class ProxyRuntime {
         ProxyChannelView       *device_channel_views_ = nullptr;
         ProxyDeviceContextData *device_context_       = nullptr;
         std::vector<std::unique_ptr<ProxyWorker>> workers_;
-        std::vector<std::thread> worker_threads_;
         ProxyMemViewRegistry memview_registry_;
         DeviceProxyBackendAdapter *backend_ = nullptr;
         uint32_t *shutdown_word_host_ = nullptr;

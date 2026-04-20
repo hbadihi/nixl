@@ -31,6 +31,28 @@ ProxyWorker::ProxyWorker(DeviceProxyBackendAdapter *backend,
       assigned_channels_(assigned_channels),
       assigned_channel_count_(assigned_channel_count) {}
 
+ProxyWorker::~ProxyWorker() {
+    join();
+}
+
+void
+ProxyWorker::start(uint32_t worker_idx) {
+    thread_ = std::thread([this, worker_idx]() {
+        NIXL_INFO << "ProxyWorker thread " << worker_idx << " started";
+        while (!__atomic_load_n(shutdown_word_, __ATOMIC_ACQUIRE)) {
+            runOnce();
+        }
+        NIXL_INFO << "ProxyWorker thread " << worker_idx << " exiting";
+    });
+}
+
+void
+ProxyWorker::join() noexcept {
+    if (thread_.joinable()) {
+        thread_.join();
+    }
+}
+
 void
 ProxyWorker::runOnce() {
     for (uint32_t i = 0; i < assigned_channel_count_; i++) {
@@ -55,10 +77,7 @@ ProxyWorker::runOnce() {
 
 bool
 ProxyWorker::tryDequeue(ChannelState &channel, ProxySubmission &submission) {
-    WorkRing *ring = channel.device_view.work_ring;
-    if (ring == nullptr || channel.consumer_idx_host_ == nullptr) {
-        return false;
-    }
+    WorkRing *ring = channel.work_ring_;
     // Sole writer of consumer_idx on host — relaxed load is sufficient.
     uint32_t local_consumer_idx =
         __atomic_load_n(channel.consumer_idx_host_, __ATOMIC_RELAXED);
