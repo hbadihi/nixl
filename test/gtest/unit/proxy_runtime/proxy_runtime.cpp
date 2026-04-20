@@ -20,6 +20,8 @@
 #include <chrono>
 #include <cstdint>
 #include <cuda_runtime.h>
+#include <mutex>
+#include <string>
 #include <thread>
 
 #include "device_proxy/backend_adapter.h"
@@ -27,6 +29,11 @@
 
 namespace gtest {
 namespace proxy_runtime {
+
+class DummyBackendMD : public nixlBackendMD {
+    public:
+        DummyBackendMD() : nixlBackendMD(false) {}
+};
 
 class StubBackend : public DeviceProxyBackendAdapter {
     public:
@@ -44,7 +51,12 @@ class StubBackend : public DeviceProxyBackendAdapter {
         }
 
         nixl_status_t
-        submit(const ResolvedProxySubmission &, uint64_t &) override {
+        submit(const PreparedProxySubmission &submission, uint64_t &request_token) override {
+            {
+                std::lock_guard<std::mutex> lock(submit_mutex_);
+                submissions_.push_back(submission);
+            }
+            request_token = ++next_request_token_;
             return NIXL_SUCCESS;
         }
 
@@ -69,6 +81,9 @@ class StubBackend : public DeviceProxyBackendAdapter {
         uint32_t init_channel_count_ = 0;
         nixl_status_t init_rc_ = NIXL_SUCCESS;
         std::atomic<uint64_t> progress_calls_{0};
+        mutable std::mutex submit_mutex_;
+        std::vector<PreparedProxySubmission> submissions_;
+        uint64_t next_request_token_ = 0;
 };
 
 class ProxyRuntimeTest : public testing::Test {
@@ -249,6 +264,79 @@ TEST_F(ProxyRuntimeTest, ManyChannelsManyWorkers) {
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
 
     ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
+}
+
+TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedTransportDescriptors) {
+    DummyBackendMD local_md;
+    DummyBackendMD remote_md;
+
+    ASSERT_EQ(runtime_.init(&backend_, 1, 1), NIXL_SUCCESS);
+
+    nixlMemViewH src_proxy = nullptr;
+    nixlMemViewH dst_proxy = nullptr;
+    ASSERT_EQ(runtime_.registerProxyMemView(reinterpret_cast<nixlMemViewH>(uintptr_t{0x10}),
+                                           &src_proxy),
+              NIXL_SUCCESS);
+    ASSERT_EQ(runtime_.registerProxyMemView(reinterpret_cast<nixlMemViewH>(uintptr_t{0x20}),
+                                           &dst_proxy),
+              NIXL_SUCCESS);
+
+    nixl_meta_dlist_t local_dlist(DRAM_SEG);
+    local_dlist.addDesc(nixlMetaDesc(0x1000, 64, 0, &local_md));
+    ASSERT_EQ(runtime_.storeMetadata(src_proxy, local_dlist), NIXL_SUCCESS);
+
+    nixl_remote_meta_dlist_t remote_dlist(DRAM_SEG);
+    nixlRemoteMetaDesc remote_desc("peer");
+    remote_desc.addr = 0x2000;
+    remote_desc.len = 64;
+    remote_desc.devId = 0;
+    remote_desc.metadataP = &remote_md;
+    remote_dlist.addDesc(remote_desc);
+    ASSERT_EQ(runtime_.storeMetadata(dst_proxy, remote_dlist), NIXL_SUCCESS);
+
+    ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
+
+    ProxySubmission submission{};
+    submission.op_idx = 11;
+    submission.opcode = ProxyOpcode::PUT;
+    submission.channel_id = 0;
+    submission.src_proxy_memview_id = reinterpret_cast<uint64_t>(src_proxy);
+    submission.src_offset = 4;
+    submission.dst_proxy_memview_id = reinterpret_cast<uint64_t>(dst_proxy);
+    submission.dst_offset = 8;
+    submission.size = 32;
+
+    auto *ring = runtime_.deviceChannelViews()[0].work_ring;
+    ring->records[0] = submission;
+    __atomic_store_n(&ring->records[0].ready_flag, 1u, __ATOMIC_RELEASE);
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
+    while (std::chrono::steady_clock::now() < deadline) {
+        {
+            std::lock_guard<std::mutex> lock(backend_.submit_mutex_);
+            if (!backend_.submissions_.empty()) {
+                break;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
+
+    std::lock_guard<std::mutex> lock(backend_.submit_mutex_);
+    ASSERT_EQ(backend_.submissions_.size(), 1u);
+    const auto &prepared = backend_.submissions_.front();
+    EXPECT_EQ(prepared.op_idx, 11u);
+    EXPECT_EQ(prepared.channel_id, 0u);
+    EXPECT_EQ(prepared.local.mem_type, DRAM_SEG);
+    EXPECT_EQ(prepared.local.desc.addr, 0x1004u);
+    EXPECT_EQ(prepared.local.desc.len, 32u);
+    EXPECT_EQ(prepared.local.desc.metadataP, &local_md);
+    EXPECT_EQ(prepared.remote.mem_type, DRAM_SEG);
+    EXPECT_EQ(prepared.remote.desc.addr, 0x2008u);
+    EXPECT_EQ(prepared.remote.desc.len, 32u);
+    EXPECT_EQ(prepared.remote.desc.metadataP, &remote_md);
+    EXPECT_EQ(prepared.remote_agent, "peer");
 }
 
 } // namespace proxy_runtime

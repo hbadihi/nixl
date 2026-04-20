@@ -18,10 +18,8 @@
 #define NIXL_SRC_PLUGINS_UCX_DEVICE_PROXY_UCX_PROXY_BACKEND_H
 
 #include <cstdint>
-#include <mutex>
 #include <string>
 #include <unordered_map>
-#include <vector>
 
 #include "backend/backend_aux.h"
 #include "../../../core/device_proxy/backend_adapter.h"
@@ -43,7 +41,7 @@ class nixlUcxProxyBackend : public DeviceProxyBackendAdapter {
                            const nixl_blob_t &conn_info) override;
 
         nixl_status_t
-        submit(const ResolvedProxySubmission &submission, uint64_t &request_token) override;
+        submit(const PreparedProxySubmission &submission, uint64_t &request_token) override;
 
         nixl_status_t
         checkCompletion(uint64_t request_token) override;
@@ -54,33 +52,12 @@ class nixlUcxProxyBackend : public DeviceProxyBackendAdapter {
         nixl_status_t
         shutdown() override;
 
-        void
-        storeLocalMeta(nixlMemViewH mvh, const nixl_meta_dlist_t &dlist) override;
-
-        void
-        storeRemoteMeta(nixlMemViewH mvh, const nixl_remote_meta_dlist_t &dlist) override;
-
-        void
-        clearMeta(nixlMemViewH mvh) override;
-
     private:
-        struct StoredEntry {
-            uintptr_t base_addr = 0;
-            nixlBackendMD *metadataP = nullptr;
-        };
-
-        struct MemViewMeta {
-            bool is_remote = false;
-            std::string remote_agent;
-            nixl_mem_t mem_type = {};
-            std::vector<StoredEntry> entries;
-        };
+        nixl_status_t
+        submitPut(const PreparedProxySubmission &submission, uint64_t &request_token);
 
         nixl_status_t
-        submitPut(const ResolvedProxySubmission &submission, uint64_t &request_token);
-
-        nixl_status_t
-        submitAtomicAdd(const ResolvedProxySubmission &submission, uint64_t &request_token);
+        submitAtomicAdd(const PreparedProxySubmission &submission, uint64_t &request_token);
 
         uint64_t
         trackRequest(nixlBackendReqH *handle);
@@ -88,8 +65,6 @@ class nixlUcxProxyBackend : public DeviceProxyBackendAdapter {
         nixlUcxEngine *engine_ = nullptr;
         uint32_t worker_count_ = 0;
         uint32_t channel_count_ = 0;
-        std::mutex meta_mutex_;
-        std::unordered_map<nixlMemViewH, MemViewMeta> meta_store_;
         std::mutex request_mutex_;
         std::unordered_map<uint64_t, nixlBackendReqH *> tracked_requests_;
         uint64_t next_request_token_ = 1;

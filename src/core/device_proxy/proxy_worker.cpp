@@ -103,53 +103,30 @@ ProxyWorker::tryDequeue(ChannelState &channel, ProxySubmission &submission) {
 
 nixl_status_t
 ProxyWorker::dispatch(ChannelState &channel, const ProxySubmission &submission) {
-    nixlMemViewH src_memview = nullptr;
-    nixlMemViewH dst_memview = nullptr;
-    if (!proxy_memview_registry_->resolveProxyMemViewId(submission.dst_proxy_memview_id,
-                                                        dst_memview)) {
-        NIXL_DEBUG << "ProxyWorker::dispatch: dst memview resolution failed"
-                   << " dst_proxy_id=" << submission.dst_proxy_memview_id;
+    PreparedProxySubmission prepared_submission;
+    nixl_status_t status =
+        proxy_memview_registry_->prepareSubmission(submission, prepared_submission);
+    if (status != NIXL_SUCCESS) {
+        NIXL_DEBUG << "ProxyWorker::dispatch: submission preparation failed"
+                   << " op_idx=" << submission.op_idx
+                   << " status=" << status;
         channel.inflight_requests.push_back(
-            {submission.op_idx, 0, NIXL_ERR_NOT_FOUND, true});
-        return NIXL_ERR_NOT_FOUND;
-    }
-    if ((submission.opcode == ProxyOpcode::PUT)
-        && !proxy_memview_registry_->resolveProxyMemViewId(
-            submission.src_proxy_memview_id, src_memview)) {
-        NIXL_DEBUG << "ProxyWorker::dispatch: src memview resolution failed"
-                   << " src_proxy_id=" << submission.src_proxy_memview_id;
-        channel.inflight_requests.push_back(
-            {submission.op_idx, 0, NIXL_ERR_NOT_FOUND, true});
-        return NIXL_ERR_NOT_FOUND;
+            {submission.op_idx, 0, status, true});
+        return status;
     }
 
     NIXL_DEBUG << "ProxyWorker::dispatch: op_idx=" << submission.op_idx
                << " opcode=" << static_cast<int>(submission.opcode)
                << " channel=" << submission.channel_id
-               << " src_mvh=" << src_memview << " dst_mvh=" << dst_memview
-               << " src_off=" << submission.src_offset
-               << " dst_off=" << submission.dst_offset
-               << " size=" << submission.size;
-
-    ResolvedProxySubmission resolved_submission = {
-        .op_idx = submission.op_idx,
-        .opcode = submission.opcode,
-        .channel_id = submission.channel_id,
-        .flags = submission.flags,
-        .src_memview = src_memview,
-        .src_index = submission.src_index,
-        .src_offset = submission.src_offset,
-        .dst_memview = dst_memview,
-        .dst_index = submission.dst_index,
-        .dst_offset = submission.dst_offset,
-        .size = submission.size,
-        .value = submission.value,
-    };
+               << " local_addr=0x" << std::hex << prepared_submission.local.desc.addr
+               << " remote_addr=0x" << prepared_submission.remote.desc.addr << std::dec
+               << " size=" << submission.size
+               << " remote_agent='" << prepared_submission.remote_agent << "'";
 
     uint64_t request_token = 0;
     ProxyRequestState inflight{};
     inflight.op_idx = submission.op_idx;
-    nixl_status_t status = backend_->submit(resolved_submission, request_token);
+    status = backend_->submit(prepared_submission, request_token);
     inflight.backend_req_token = request_token;
     if (status != NIXL_SUCCESS) {
         // backend submit failed, set the status and publish_ready to true

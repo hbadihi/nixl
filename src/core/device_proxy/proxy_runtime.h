@@ -73,12 +73,26 @@ struct alignas(64) ChannelState {
 
 class ProxyMemViewRegistry {
     public:
+        enum class EntryState : uint8_t {
+            Allocated,
+            Ready,
+            Retired,
+        };
+
         nixl_status_t
         registerProxyMemView(nixlMemViewH backend_memview,
                              nixlMemViewH *proxy_memview = nullptr);
 
         nixl_status_t
         unregisterProxyMemView(nixlMemViewH proxy_memview);
+
+        nixl_status_t
+        storeMetadata(nixlMemViewH proxy_memview,
+                      const nixl_meta_dlist_t &dlist);
+
+        nixl_status_t
+        storeMetadata(nixlMemViewH proxy_memview,
+                      const nixl_remote_meta_dlist_t &dlist);
 
         bool
         resolveProxyMemView(nixlMemViewH proxy_memview,
@@ -88,11 +102,65 @@ class ProxyMemViewRegistry {
         resolveProxyMemViewId(uint64_t proxy_memview_id,
                               nixlMemViewH &backend_memview) const;
 
+        nixl_status_t
+        prepareSubmission(const ProxySubmission &submission,
+                          PreparedProxySubmission &prepared_submission) const;
+
         void
         clear() noexcept;
 
     private:
-        std::vector<nixlMemViewH> backend_memview_by_proxy_id_;
+        struct StoredEntry {
+            uintptr_t base_addr = 0;
+            nixlBackendMD *metadata = nullptr;
+        };
+
+        struct LocalMetadata {
+            nixl_mem_t mem_type = DRAM_SEG;
+            std::vector<StoredEntry> entries;
+        };
+
+        struct RemoteMetadata {
+            nixl_mem_t mem_type = DRAM_SEG;
+            std::string remote_agent;
+            std::vector<StoredEntry> entries;
+        };
+
+        enum class MetadataKind : uint8_t {
+            None,
+            Local,
+            Remote,
+        };
+
+        struct RegistryEntry {
+            uint64_t proxy_memview_id = 0;
+            nixlMemViewH proxy_memview = nullptr;
+            nixlMemViewH backend_memview = nullptr;
+            EntryState state = EntryState::Allocated;
+            MetadataKind metadata_kind = MetadataKind::None;
+            LocalMetadata local_metadata{};
+            RemoteMetadata remote_metadata{};
+        };
+
+        RegistryEntry *
+        getEntryForHandle(nixlMemViewH proxy_memview);
+
+        const RegistryEntry *
+        getEntryForHandle(nixlMemViewH proxy_memview) const;
+
+        RegistryEntry *
+        getEntryForId(uint64_t proxy_memview_id);
+
+        const RegistryEntry *
+        getEntryForId(uint64_t proxy_memview_id) const;
+
+        static void
+        fillLocalMetadata(const nixl_meta_dlist_t &dlist, LocalMetadata &out);
+
+        static void
+        fillRemoteMetadata(const nixl_remote_meta_dlist_t &dlist, RemoteMetadata &out);
+
+        std::vector<RegistryEntry> entries_;
         uint64_t next_proxy_memview_id_ = 1;
 };
 

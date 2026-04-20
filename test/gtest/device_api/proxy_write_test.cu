@@ -55,7 +55,7 @@ public:
     }
 
     nixl_status_t
-    submit(const ResolvedProxySubmission &, uint64_t &token) override
+    submit(const PreparedProxySubmission &, uint64_t &token) override
     {
         token = 0;
         return NIXL_SUCCESS;
@@ -88,7 +88,7 @@ public:
     }
 
     nixl_status_t
-    submit(const ResolvedProxySubmission &submission, uint64_t &token) override
+    submit(const PreparedProxySubmission &submission, uint64_t &token) override
     {
         std::lock_guard<std::mutex> lk(mu_);
         token = next_token_++;
@@ -191,7 +191,7 @@ public:
     }
 
     nixl_status_t
-    submit(const ResolvedProxySubmission &, uint64_t &token) override
+    submit(const PreparedProxySubmission &, uint64_t &token) override
     {
         token = 0;
         return NIXL_SUCCESS;
@@ -223,7 +223,7 @@ public:
     }
 
     nixl_status_t
-    submit(const ResolvedProxySubmission &, uint64_t &) override
+    submit(const PreparedProxySubmission &, uint64_t &) override
     {
         ++submit_calls_;
         return NIXL_ERR_BACKEND;
@@ -246,6 +246,19 @@ public:
     std::atomic<uint64_t> check_completion_calls_{0};
 };
 
+class DummyBackendMD : public nixlBackendMD {
+public:
+    DummyBackendMD() : nixlBackendMD(false) {}
+};
+
+struct DummyProxyMemViews {
+    nixlMemViewH src = nullptr;
+    nixlMemViewH dst = nullptr;
+};
+
+static DummyProxyMemViews
+registerDummyMemViews(ProxyRuntime &runtime);
+
 // ---------------------------------------------------------------------------
 // Device kernels
 // ---------------------------------------------------------------------------
@@ -259,9 +272,11 @@ proxyContextKernel(bool *out_has_ctx)
 
 // Calls nixlPut with zero-initialised operands and records the status.
 __global__ void
-proxyPutKernel(nixl_status_t *out_status)
+proxyPutKernel(nixlMemViewH src_mvh,
+               nixlMemViewH dst_mvh,
+               nixl_status_t *out_status)
 {
-    nixlMemViewElem src{}, dst{};
+    nixlMemViewElem src{src_mvh, 0, 0}, dst{dst_mvh, 0, 0};
     *out_status = nixlPut(src, dst, /*size=*/0);
 }
 
@@ -399,9 +414,10 @@ TEST_F(ProxyDeviceApiTest, PutReturnsInProgWhenEnqueued)
               NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
+    const auto mvhs = registerDummyMemViews(runtime);
 
     nixl_status_t *d_status = deviceAlloc<nixl_status_t>();
-    proxyPutKernel<<<1, 1>>>(d_status);
+    proxyPutKernel<<<1, 1>>>(mvhs.src, mvhs.dst, d_status);
     ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
     ASSERT_EQ(cudaGetLastError(), cudaSuccess);
 
@@ -476,17 +492,35 @@ proxyPollOnceKernel(nixlGpuXferStatusH *xfer_status,
 // Completion round-trip helpers
 // ---------------------------------------------------------------------------
 
-// Register a dummy proxy memview so the worker can resolve the proxy ID
-// during dispatch.  The backend stub never dereferences the handle, so
-// any non-null sentinel works.
-static nixlMemViewH
-registerDummyMemView(ProxyRuntime &runtime)
+// Register one local and one remote proxy memview so dispatch can prepare
+// transport-ready descriptors before submit().
+static DummyProxyMemViews
+registerDummyMemViews(ProxyRuntime &runtime)
 {
-    nixlMemViewH proxy_mvh = nullptr;
-    nixlMemViewH dummy_backend = reinterpret_cast<nixlMemViewH>(uintptr_t{0xBEEF});
-    auto rc = runtime.registerProxyMemView(dummy_backend, &proxy_mvh);
-    EXPECT_EQ(rc, NIXL_SUCCESS);
-    return proxy_mvh;
+    static DummyBackendMD local_md;
+    static DummyBackendMD remote_md;
+
+    DummyProxyMemViews handles;
+    nixlMemViewH dummy_local_backend = reinterpret_cast<nixlMemViewH>(uintptr_t{0xBEEF});
+    nixlMemViewH dummy_remote_backend = reinterpret_cast<nixlMemViewH>(uintptr_t{0xFEED});
+
+    EXPECT_EQ(runtime.registerProxyMemView(dummy_local_backend, &handles.src), NIXL_SUCCESS);
+    EXPECT_EQ(runtime.registerProxyMemView(dummy_remote_backend, &handles.dst), NIXL_SUCCESS);
+
+    nixl_meta_dlist_t local_dlist(DRAM_SEG);
+    local_dlist.addDesc(nixlMetaDesc(0x1000, 64, 0, &local_md));
+    EXPECT_EQ(runtime.storeMetadata(handles.src, local_dlist), NIXL_SUCCESS);
+
+    nixl_remote_meta_dlist_t remote_dlist(DRAM_SEG);
+    nixlRemoteMetaDesc remote_desc("peer");
+    remote_desc.addr = 0x2000;
+    remote_desc.len = 64;
+    remote_desc.devId = 0;
+    remote_desc.metadataP = &remote_md;
+    remote_dlist.addDesc(remote_desc);
+    EXPECT_EQ(runtime.storeMetadata(handles.dst, remote_dlist), NIXL_SUCCESS);
+
+    return handles;
 }
 
 static void
@@ -517,12 +551,12 @@ TEST_F(ProxyDeviceApiTest, PutCompletionRoundTrip)
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
 
-    nixlMemViewH mvh = registerDummyMemView(runtime);
+    const auto mvhs = registerDummyMemViews(runtime);
 
     nixl_status_t *d_put_status  = deviceAlloc<nixl_status_t>();
     nixl_status_t *d_poll_status = deviceAlloc<nixl_status_t>();
 
-    proxyPutAndPollKernel<<<1, 1>>>(mvh, mvh, 0, d_put_status, d_poll_status);
+    proxyPutAndPollKernel<<<1, 1>>>(mvhs.src, mvhs.dst, 0, d_put_status, d_poll_status);
     ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
     ASSERT_EQ(cudaGetLastError(), cudaSuccess);
 
@@ -547,13 +581,13 @@ TEST_F(ProxyDeviceApiTest, CompletionNotVisibleUntilPublished)
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
 
-    nixlMemViewH mvh = registerDummyMemView(runtime);
+    const auto mvhs = registerDummyMemViews(runtime);
 
     nixl_status_t *d_put_status  = deviceAlloc<nixl_status_t>();
     nixl_status_t *d_poll_status = deviceAlloc<nixl_status_t>();
 
     // Launch async — kernel will spin on pollXferStatus.
-    proxyPutAndPollKernel<<<1, 1>>>(mvh, mvh, 0, d_put_status, d_poll_status);
+    proxyPutAndPollKernel<<<1, 1>>>(mvhs.src, mvhs.dst, 0, d_put_status, d_poll_status);
 
     // Give the worker time to pick up and submit the request.
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -589,7 +623,7 @@ TEST_F(ProxyDeviceApiTest, MultipleSubmissionsCompletionFrontier)
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
 
-    nixlMemViewH mvh = registerDummyMemView(runtime);
+    const auto mvhs = registerDummyMemViews(runtime);
 
     constexpr int kOps = 3;
     nixl_status_t     *d_put_status[kOps];
@@ -605,7 +639,7 @@ TEST_F(ProxyDeviceApiTest, MultipleSubmissionsCompletionFrontier)
 
     // Enqueue 3 operations sequentially (each kernel returns after enqueue).
     for (int i = 0; i < kOps; i++) {
-        proxyPutAsyncKernel<<<1, 1>>>(mvh, mvh, 0, d_put_status[i],
+        proxyPutAsyncKernel<<<1, 1>>>(mvhs.src, mvhs.dst, 0, d_put_status[i],
                                       d_xfer_status[i]);
         ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
         ASSERT_EQ(cudaGetLastError(), cudaSuccess);
@@ -656,12 +690,12 @@ TEST_F(ProxyDeviceApiTest, CompletionPropagatesErrorStatus)
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
 
-    nixlMemViewH mvh = registerDummyMemView(runtime);
+    const auto mvhs = registerDummyMemViews(runtime);
 
     nixl_status_t *d_put_status  = deviceAlloc<nixl_status_t>();
     nixl_status_t *d_poll_status = deviceAlloc<nixl_status_t>();
 
-    proxyPutAndPollKernel<<<1, 1>>>(mvh, mvh, 0, d_put_status, d_poll_status);
+    proxyPutAndPollKernel<<<1, 1>>>(mvhs.src, mvhs.dst, 0, d_put_status, d_poll_status);
     ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
     ASSERT_EQ(cudaGetLastError(), cudaSuccess);
 
@@ -678,6 +712,7 @@ TEST_F(ProxyDeviceApiTest, CompletionPropagatesErrorStatus)
 // transfer status, without going through checkCompletion().
 TEST_F(ProxyDeviceApiTest, SubmitFailurePropagatesErrorStatus)
 {
+    const gtest::LogIgnoreGuard lig("ProxyWorker::dispatch: backend submit failed");
     SubmitErrorStubAdapter adapter;
     ProxyRuntime runtime;
 
@@ -686,12 +721,12 @@ TEST_F(ProxyDeviceApiTest, SubmitFailurePropagatesErrorStatus)
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
 
-    nixlMemViewH mvh = registerDummyMemView(runtime);
+    const auto mvhs = registerDummyMemViews(runtime);
 
     nixl_status_t *d_put_status  = deviceAlloc<nixl_status_t>();
     nixl_status_t *d_poll_status = deviceAlloc<nixl_status_t>();
 
-    proxyPutAndPollKernel<<<1, 1>>>(mvh, mvh, 0, d_put_status, d_poll_status);
+    proxyPutAndPollKernel<<<1, 1>>>(mvhs.src, mvhs.dst, 0, d_put_status, d_poll_status);
     ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
     ASSERT_EQ(cudaGetLastError(), cudaSuccess);
 
@@ -761,7 +796,7 @@ TEST_F(ProxyDeviceApiTest, ChannelCompletionsAdvanceIndependently)
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
 
-    nixlMemViewH mvh = registerDummyMemView(runtime);
+    const auto mvhs = registerDummyMemViews(runtime);
 
     nixl_status_t *d_put_status[2];
     nixlGpuXferStatusH *d_xfer_status[2];
@@ -773,9 +808,9 @@ TEST_F(ProxyDeviceApiTest, ChannelCompletionsAdvanceIndependently)
                   cudaSuccess);
     }
 
-    proxyPutAsyncKernel<<<1, 1>>>(mvh, mvh, 0, d_put_status[0], d_xfer_status[0]);
+    proxyPutAsyncKernel<<<1, 1>>>(mvhs.src, mvhs.dst, 0, d_put_status[0], d_xfer_status[0]);
     ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
-    proxyPutAsyncKernel<<<1, 1>>>(mvh, mvh, 1, d_put_status[1], d_xfer_status[1]);
+    proxyPutAsyncKernel<<<1, 1>>>(mvhs.src, mvhs.dst, 1, d_put_status[1], d_xfer_status[1]);
     ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
     ASSERT_EQ(cudaGetLastError(), cudaSuccess);
 
