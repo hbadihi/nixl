@@ -160,7 +160,8 @@ struct ProxyDeviceContext : ProxyDeviceContextData {
 
         // Spin until the claimed slot has space (consumer has freed it).
         while (my_slot - cons.load(cuda::memory_order_acquire) >= ring->depth) {
-            if (shut.load(cuda::memory_order_acquire)) {
+            if (shut.load(cuda::memory_order_acquire)
+                == static_cast<uint32_t>(ProxyControlState::Shutdown)) {
                 return NIXL_ERR_BACKEND;
             }
         }

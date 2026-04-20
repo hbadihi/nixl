@@ -39,7 +39,8 @@ void
 ProxyWorker::start(uint32_t worker_idx) {
     thread_ = std::thread([this, worker_idx]() {
         NIXL_INFO << "ProxyWorker thread " << worker_idx << " started";
-        while (!__atomic_load_n(shutdown_word_, __ATOMIC_ACQUIRE)) {
+        while (__atomic_load_n(shutdown_word_, __ATOMIC_ACQUIRE)
+               == static_cast<uint32_t>(ProxyControlState::Running)) {
             runOnce();
         }
         NIXL_INFO << "ProxyWorker thread " << worker_idx << " exiting";

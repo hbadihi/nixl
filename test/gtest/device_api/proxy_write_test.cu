@@ -539,7 +539,9 @@ signalProxyShutdown(ProxyRuntime &runtime)
               cudaSuccess);
     ASSERT_NE(attrs.hostPointer, nullptr);
     auto *shutdown_host = static_cast<uint32_t *>(attrs.hostPointer);
-    __atomic_store_n(shutdown_host, uint32_t{1}, __ATOMIC_RELEASE);
+    __atomic_store_n(shutdown_host,
+                     static_cast<uint32_t>(ProxyControlState::Shutdown),
+                     __ATOMIC_RELEASE);
 }
 
 // ---------------------------------------------------------------------------

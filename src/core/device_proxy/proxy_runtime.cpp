@@ -416,7 +416,9 @@ ProxyRuntime::init(DeviceProxyBackendAdapter *backend,
         return NIXL_ERR_BACKEND;
     }
     shutdown_word_dev_ = static_cast<uint32_t *>(shutdown_dev);
-    __atomic_store_n(shutdown_word_host_, uint32_t{0}, __ATOMIC_RELEASE);
+    __atomic_store_n(shutdown_word_host_,
+                     static_cast<uint32_t>(ProxyControlState::Running),
+                     __ATOMIC_RELEASE);
 
     worker_count = std::min(worker_count, channel_count);
     NIXL_INFO << "ProxyRuntime::init: effective worker_count=" << worker_count
@@ -560,14 +562,18 @@ ProxyRuntime::startWorkers() {
         NIXL_ERROR << "ProxyRuntime::startWorkers: runtime not initialized";
         return NIXL_ERR_NOT_SUPPORTED;
     }
-    __atomic_store_n(shutdown_word_host_, uint32_t{1}, __ATOMIC_RELEASE);
+    __atomic_store_n(shutdown_word_host_,
+                     static_cast<uint32_t>(ProxyControlState::Shutdown),
+                     __ATOMIC_RELEASE);
     joinWorkerThreads();
     for (auto &channel : channels_) {
         channel.inflight_requests.clear();
         channel.error_latched = false;
     }
 
-    __atomic_store_n(shutdown_word_host_, uint32_t{0}, __ATOMIC_RELEASE);
+    __atomic_store_n(shutdown_word_host_,
+                     static_cast<uint32_t>(ProxyControlState::Running),
+                     __ATOMIC_RELEASE);
 
     uint32_t idx = 0;
     for (auto &worker : workers_) {
@@ -590,7 +596,9 @@ nixl_status_t
 ProxyRuntime::shutdown() {
     NIXL_INFO << "ProxyRuntime::shutdown: signalling workers to stop";
     if (shutdown_word_host_ != nullptr) {
-        __atomic_store_n(shutdown_word_host_, uint32_t{1}, __ATOMIC_RELEASE);
+        __atomic_store_n(shutdown_word_host_,
+                         static_cast<uint32_t>(ProxyControlState::Shutdown),
+                         __ATOMIC_RELEASE);
     }
 
     joinWorkerThreads();

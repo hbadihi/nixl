@@ -27,6 +27,11 @@ enum class ProxyOpcode : uint32_t {
     ATOMIC_ADD = 1,
 };
 
+enum class ProxyControlState : uint32_t {
+    Running = 0,
+    Shutdown = 1,
+};
+
 struct ProxySubmission {
     uint64_t op_idx = 0;
     ProxyOpcode opcode = ProxyOpcode::PUT;
