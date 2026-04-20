@@ -184,12 +184,14 @@ struct ProxyDeviceContext : ProxyDeviceContextData {
         return NIXL_IN_PROG;
     }
 
-    // Poll the completion slot recorded by enqueue().  Returns NIXL_SUCCESS
-    // once the CPU proxy worker has published a completion with completed_idx
-    // >= the op_idx stored in xfer_status, otherwise NIXL_IN_PROG.
+    // Poll the completion slot recorded by enqueue().
     //
-    // The completion_slot lives in HBM; the CPU writes via cudaMemcpy.
-    // An acquire load on completed_idx ensures next_status is also visible.
+    // The completion slot implements collapsed-CQ semantics:
+    // - completed_idx > op_idx  => this op completed earlier, so it succeeded
+    // - completed_idx == op_idx => next_status is this op's terminal status
+    // - completed_idx < op_idx  => this op is still pending, unless an earlier
+    //                              completion published a terminal error and
+    //                              latched the channel
     __device__ inline nixl_status_t
     pollXferStatus(const nixlGpuXferStatusH &xfer_status) const {
         const ProxyXferStatus *pxs =
@@ -198,9 +200,20 @@ struct ProxyDeviceContext : ProxyDeviceContextData {
         cuda::atomic_ref<uint64_t, cuda::thread_scope_system> comp_idx(
             pxs->slot->completed_idx);
 
-        if (comp_idx.load(cuda::memory_order_acquire) >= pxs->op_idx) {
-            // The acquire above orders the read of next_status.
-            return pxs->slot->next_status;
+        const uint64_t completed_idx = comp_idx.load(cuda::memory_order_acquire);
+        const nixl_status_t current_status = pxs->slot->next_status;
+
+        if (completed_idx > pxs->op_idx) {
+            // The success frontier has advanced past this op.
+            return NIXL_SUCCESS;
+        }
+        if (completed_idx == pxs->op_idx) {
+            return current_status;
+        }
+        if (current_status < 0) {
+            // An earlier terminal error latched the channel, so later queued
+            // ops observe the same error instead of spinning forever.
+            return current_status;
         }
 
         return NIXL_IN_PROG;

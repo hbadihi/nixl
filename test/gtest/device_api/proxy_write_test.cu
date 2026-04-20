@@ -101,9 +101,11 @@ public:
     checkCompletion(uint64_t token) override
     {
         std::lock_guard<std::mutex> lk(mu_);
-        if (completed_.count(token)) {
-            completed_.erase(token);
-            return NIXL_SUCCESS;
+        auto it = completed_.find(token);
+        if (it != completed_.end()) {
+            nixl_status_t status = it->second;
+            completed_.erase(it);
+            return status;
         }
         return NIXL_IN_PROG;
     }
@@ -117,9 +119,15 @@ public:
     void
     markComplete(uint64_t token)
     {
+        markCompleteWithStatus(token, NIXL_SUCCESS);
+    }
+
+    void
+    markCompleteWithStatus(uint64_t token, nixl_status_t status)
+    {
         std::lock_guard<std::mutex> lk(mu_);
         pending_.erase(token);
-        completed_.insert(token);
+        completed_[token] = status;
     }
 
     bool
@@ -157,7 +165,7 @@ public:
             auto it = token_channel_.find(pending_token);
             if (it != token_channel_.end() && it->second == channel_id) {
                 pending_.erase(pending_token);
-                completed_.insert(pending_token);
+                completed_[pending_token] = NIXL_SUCCESS;
                 if (token != nullptr) {
                     *token = pending_token;
                 }
@@ -171,7 +179,7 @@ private:
     mutable std::mutex mu_;
     uint64_t next_token_ = 1;
     std::set<uint64_t> pending_;
-    std::set<uint64_t> completed_;
+    std::map<uint64_t, nixl_status_t> completed_;
     std::map<uint64_t, uint32_t> token_channel_;
 };
 
@@ -671,6 +679,114 @@ TEST_F(ProxyDeviceApiTest, MultipleSubmissionsCompletionFrontier)
 
     cudaFree(d_poll);
     for (int i = 0; i < kOps; i++) {
+        cudaFree(d_put_status[i]);
+        cudaFree(d_xfer_status[i]);
+    }
+    clearProxyContext();
+    ASSERT_EQ(runtime.shutdown(), NIXL_SUCCESS);
+}
+
+// Once a later op publishes an error, an earlier op whose op_idx is already
+// behind the completion frontier must still observe NIXL_SUCCESS.
+TEST_F(ProxyDeviceApiTest, EarlierCompletionStaysSuccessfulAfterLaterError)
+{
+    ControllableStubAdapter adapter;
+    ProxyRuntime runtime;
+
+    ASSERT_EQ(runtime.init(&adapter, /*channel_count=*/1, /*worker_count=*/1),
+              NIXL_SUCCESS);
+    ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
+    publishProxyContext(runtime);
+
+    const auto mvhs = registerDummyMemViews(runtime);
+
+    nixl_status_t      *d_put_status[2];
+    nixlGpuXferStatusH *d_xfer_status[2];
+    for (int i = 0; i < 2; ++i) {
+        d_put_status[i] = deviceAlloc<nixl_status_t>();
+        ASSERT_EQ(cudaMalloc(&d_xfer_status[i], sizeof(nixlGpuXferStatusH)),
+                  cudaSuccess);
+        ASSERT_EQ(cudaMemset(d_xfer_status[i], 0, sizeof(nixlGpuXferStatusH)),
+                  cudaSuccess);
+        proxyPutAsyncKernel<<<1, 1>>>(mvhs.src, mvhs.dst, 0, d_put_status[i],
+                                      d_xfer_status[i]);
+        ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+        ASSERT_EQ(cudaGetLastError(), cudaSuccess);
+        EXPECT_EQ(deviceGet(d_put_status[i]), NIXL_IN_PROG);
+    }
+
+    ASSERT_TRUE(waitForCondition([&]() { return adapter.pendingCount() == 2; }));
+
+    nixl_status_t *d_poll = deviceAlloc<nixl_status_t>();
+    adapter.markCompleteWithStatus(1, NIXL_SUCCESS);
+    ASSERT_TRUE(waitForCondition([&]() {
+        proxyPollOnceKernel<<<1, 1>>>(d_xfer_status[0], d_poll);
+        return cudaDeviceSynchronize() == cudaSuccess && deviceGet(d_poll) == NIXL_SUCCESS;
+    }));
+
+    adapter.markCompleteWithStatus(2, NIXL_ERR_BACKEND);
+    ASSERT_TRUE(waitForCondition([&]() {
+        proxyPollOnceKernel<<<1, 1>>>(d_xfer_status[1], d_poll);
+        return cudaDeviceSynchronize() == cudaSuccess && deviceGet(d_poll) == NIXL_ERR_BACKEND;
+    }));
+
+    proxyPollOnceKernel<<<1, 1>>>(d_xfer_status[0], d_poll);
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    EXPECT_EQ(deviceGet(d_poll), NIXL_SUCCESS);
+
+    cudaFree(d_poll);
+    for (int i = 0; i < 2; ++i) {
+        cudaFree(d_put_status[i]);
+        cudaFree(d_xfer_status[i]);
+    }
+    clearProxyContext();
+    ASSERT_EQ(runtime.shutdown(), NIXL_SUCCESS);
+}
+
+// Once an earlier op publishes a terminal error, later queued ops must also
+// observe that error instead of spinning forever.
+TEST_F(ProxyDeviceApiTest, EarlierErrorPropagatesToLaterQueuedOp)
+{
+    ControllableStubAdapter adapter;
+    ProxyRuntime runtime;
+
+    ASSERT_EQ(runtime.init(&adapter, /*channel_count=*/1, /*worker_count=*/1),
+              NIXL_SUCCESS);
+    ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
+    publishProxyContext(runtime);
+
+    const auto mvhs = registerDummyMemViews(runtime);
+
+    nixl_status_t      *d_put_status[2];
+    nixlGpuXferStatusH *d_xfer_status[2];
+    for (int i = 0; i < 2; ++i) {
+        d_put_status[i] = deviceAlloc<nixl_status_t>();
+        ASSERT_EQ(cudaMalloc(&d_xfer_status[i], sizeof(nixlGpuXferStatusH)),
+                  cudaSuccess);
+        ASSERT_EQ(cudaMemset(d_xfer_status[i], 0, sizeof(nixlGpuXferStatusH)),
+                  cudaSuccess);
+        proxyPutAsyncKernel<<<1, 1>>>(mvhs.src, mvhs.dst, 0, d_put_status[i],
+                                      d_xfer_status[i]);
+        ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+        ASSERT_EQ(cudaGetLastError(), cudaSuccess);
+        EXPECT_EQ(deviceGet(d_put_status[i]), NIXL_IN_PROG);
+    }
+
+    ASSERT_TRUE(waitForCondition([&]() { return adapter.pendingCount() == 2; }));
+
+    nixl_status_t *d_poll = deviceAlloc<nixl_status_t>();
+    adapter.markCompleteWithStatus(1, NIXL_ERR_BACKEND);
+    ASSERT_TRUE(waitForCondition([&]() {
+        proxyPollOnceKernel<<<1, 1>>>(d_xfer_status[1], d_poll);
+        return cudaDeviceSynchronize() == cudaSuccess && deviceGet(d_poll) == NIXL_ERR_BACKEND;
+    }));
+
+    proxyPollOnceKernel<<<1, 1>>>(d_xfer_status[0], d_poll);
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    EXPECT_EQ(deviceGet(d_poll), NIXL_ERR_BACKEND);
+
+    cudaFree(d_poll);
+    for (int i = 0; i < 2; ++i) {
         cudaFree(d_put_status[i]);
         cudaFree(d_xfer_status[i]);
     }
