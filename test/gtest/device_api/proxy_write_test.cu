@@ -828,7 +828,7 @@ TEST_F(ProxyDeviceApiTest, CompletionPropagatesErrorStatus)
 // transfer status, without going through checkCompletion().
 TEST_F(ProxyDeviceApiTest, SubmitFailurePropagatesErrorStatus)
 {
-    const gtest::LogIgnoreGuard lig("ProxyWorker::dispatch: backend submit failed");
+    const gtest::LogIgnoreGuard lig("ProxyWorker::submitToBackend: backend submit failed");
     SubmitErrorStubAdapter adapter;
     ProxyRuntime runtime;
 

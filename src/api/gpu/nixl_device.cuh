@@ -26,7 +26,7 @@
 #ifndef NIXL_SRC_API_GPU_NIXL_DEVICE_CUH
 #define NIXL_SRC_API_GPU_NIXL_DEVICE_CUH
 
-#include "common/nixl_device_dispatch.cuh"
+#include "common/nixl_device_api.cuh"
 #include "common/nixl_device_wrappers.cuh"
 
 #endif // NIXL_SRC_API_GPU_NIXL_DEVICE_CUH

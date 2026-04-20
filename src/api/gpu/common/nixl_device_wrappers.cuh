@@ -20,7 +20,7 @@
 // This file must be included AFTER nixl::gpu::selected_impl has been aliased
 // to the desired backend namespace (ucx_impl, proxy_impl, etc.).  It is
 // included automatically by each backend-specific nixl_device.cuh facade and
-// by the generic dispatch header; callers should not include it directly.
+// by the generic GPU API header; callers should not include it directly.
 
 #ifndef NIXL_SRC_API_GPU_COMMON_NIXL_DEVICE_WRAPPERS_CUH
 #define NIXL_SRC_API_GPU_COMMON_NIXL_DEVICE_WRAPPERS_CUH

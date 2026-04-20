@@ -14,8 +14,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#ifndef NIXL_SRC_API_GPU_COMMON_NIXL_DEVICE_DISPATCH_CUH
-#define NIXL_SRC_API_GPU_COMMON_NIXL_DEVICE_DISPATCH_CUH
+#ifndef NIXL_SRC_API_GPU_COMMON_NIXL_DEVICE_API_CUH
+#define NIXL_SRC_API_GPU_COMMON_NIXL_DEVICE_API_CUH
 
 #include "nixl_device_types.cuh"
 
@@ -29,7 +29,7 @@ namespace nixl::gpu { namespace selected_impl = ucx_impl; }
 #error "No GPU device backend implementation selected"
 #endif
 
-namespace nixl::gpu::dispatch {
+namespace nixl::gpu::api {
 
 template<nixl_gpu_level_t level = nixl_gpu_level_t::THREAD>
 __device__ inline nixl_status_t
@@ -64,6 +64,6 @@ get_ptr(nixlMemViewH mvh,
     return selected_impl::get_ptr(mvh, index);
 }
 
-} // namespace nixl::gpu::dispatch
+} // namespace nixl::gpu::api
 
-#endif // NIXL_SRC_API_GPU_COMMON_NIXL_DEVICE_DISPATCH_CUH
+#endif // NIXL_SRC_API_GPU_COMMON_NIXL_DEVICE_API_CUH

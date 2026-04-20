@@ -45,7 +45,7 @@ class ProxyWorker {
         tryDequeue(ChannelState &channel, ProxySubmission &submission);
 
         nixl_status_t
-        dispatch(ChannelState &channel, const ProxySubmission &submission);
+        submitToBackend(ChannelState &channel, const ProxySubmission &submission);
 
         void
         driveBackendProgress();

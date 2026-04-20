@@ -59,7 +59,7 @@ ProxyWorker::runOnce() {
         ChannelState &channel = assigned_channels_[i];
         ProxySubmission submission;
         while (tryDequeue(channel, submission)) {
-            nixl_status_t status = dispatch(channel, submission);
+            nixl_status_t status = submitToBackend(channel, submission);
             if (status != NIXL_SUCCESS) {
                 NIXL_ERROR << "ProxyWorker::runOnce: channel=" << channel.device_view.channel_id
                            << " submission failed op_idx=" << submission.op_idx
@@ -102,12 +102,12 @@ ProxyWorker::tryDequeue(ChannelState &channel, ProxySubmission &submission) {
 }
 
 nixl_status_t
-ProxyWorker::dispatch(ChannelState &channel, const ProxySubmission &submission) {
+ProxyWorker::submitToBackend(ChannelState &channel, const ProxySubmission &submission) {
     PreparedProxySubmission prepared_submission;
     nixl_status_t status =
         proxy_memview_registry_->prepareSubmission(submission, prepared_submission);
     if (status != NIXL_SUCCESS) {
-        NIXL_DEBUG << "ProxyWorker::dispatch: submission preparation failed"
+        NIXL_DEBUG << "ProxyWorker::submitToBackend: submission preparation failed"
                    << " op_idx=" << submission.op_idx
                    << " status=" << status;
         channel.inflight_requests.push_back(
@@ -115,7 +115,7 @@ ProxyWorker::dispatch(ChannelState &channel, const ProxySubmission &submission) 
         return status;
     }
 
-    NIXL_DEBUG << "ProxyWorker::dispatch: op_idx=" << submission.op_idx
+    NIXL_DEBUG << "ProxyWorker::submitToBackend: op_idx=" << submission.op_idx
                << " opcode=" << static_cast<int>(submission.opcode)
                << " channel=" << submission.channel_id
                << " local_addr=0x" << std::hex << prepared_submission.local.desc.addr
@@ -130,7 +130,7 @@ ProxyWorker::dispatch(ChannelState &channel, const ProxySubmission &submission) 
     inflight.backend_req_token = request_token;
     if (status != NIXL_SUCCESS) {
         // backend submit failed, set the status and publish_ready to true
-        NIXL_ERROR << "ProxyWorker::dispatch: backend submit failed"
+        NIXL_ERROR << "ProxyWorker::submitToBackend: backend submit failed"
                    << " status=" << status << " op_idx=" << submission.op_idx
                    << " request_token=" << request_token;
         inflight.status = status;
@@ -140,7 +140,7 @@ ProxyWorker::dispatch(ChannelState &channel, const ProxySubmission &submission) 
         inflight.publish_ready = false;
     }
 
-    NIXL_DEBUG << "ProxyWorker::dispatch: submitted op_idx=" << submission.op_idx
+    NIXL_DEBUG << "ProxyWorker::submitToBackend: submitted op_idx=" << submission.op_idx
                << " request_token=" << request_token << " status=" << status;
     channel.inflight_requests.push_back(inflight);
     return NIXL_SUCCESS;
