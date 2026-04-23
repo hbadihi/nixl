@@ -81,7 +81,9 @@ NIXL_LOG_LEVEL=INFO ./scripts/profile_overhead.sh sweep
 | `KILL_STALE`      | `0` — set to `1` to auto-kill leftover bench procs at start |
 | `RECV_WAIT_S`     | `30` — max seconds to wait for the receiver before killing  |
 | `NIXL_LOG_LEVEL`  | `FATAL` — silences `prepMemView` setup-loop noise           |
-| `NIXL_PROXY_STATS`| `1` — set to `0` to disable per-stage proxy worker stats    |
+| `NIXL_PROXY_STATS`| `1` — exported by the script so `[proxy-stats]` reliably    |
+|                   | lands in the `*_send.err` / `*_recv.err` files.  Set to `0` |
+|                   | (or `false`/`off`/`no`) to disable.                         |
 | `BUILD_DIR`       | `<repo>/build`                                              |
 | `BIN_DIR`         | `$BUILD_DIR/examples/device/pingpong`                       |
 | `OUT_DIR`         | `<repo>/profile_results/<timestamp>`                        |
@@ -145,11 +147,78 @@ the cost is in UCX/network — improving the proxy itself won't help much. If
 `prep+submit` dominates, the proxy submission path is the bottleneck.
 
 These stats are written to **stderr regardless of `NIXL_LOG_LEVEL`**, so they
-appear in `*_send.err` / `*_recv.err`. Disable with `NIXL_PROXY_STATS=0`.
+appear in `*_send.err` / `*_recv.err`. The script exports `NIXL_PROXY_STATS=1`
+on your behalf; disable with `NIXL_PROXY_STATS=0`. The predicate also accepts
+`false`/`off`/`no` (case-insensitive) as disable values.
+
+The `[proxy-stats]` block is only emitted at worker-thread shutdown (when the
+agent is destroyed), so a `.err` file inspected while the run is still
+in progress will not yet contain it. Wait for the run to finish (or for the
+matching `_send.out` to contain its `RTT=` line) before grepping.
+
+### NVTX ranges in the proxy worker
+
+`ProxyWorker` is instrumented with NVTX 3 ranges (header-only, no link
+dependency — they're near-free when no profiler is attached). When you capture
+with `profile_overhead.sh nsys`, the resulting `.nsys-rep` will contain:
+
+| Range          | Bracketed code                                                         |
+|----------------|------------------------------------------------------------------------|
+| `prx:submit`   | per-op `submitToBackend` (prepareSubmission + `backend->submit`)       |
+| `prx:progress` | `backend->progress()`, only when at least one channel has in-flight work (skipped during pure-idle spinning to keep the report sane) |
+| `prx:complete` | mark — instant where the worker first observed a completion           |
+| `prx:publish`  | atomic store of `completed_idx` back to the GPU completion slot        |
+
+These ranges show up in both Nsight Systems' GUI timeline and in the
+`nvtx_pushpop_sum` / `nvtx_pushpop_trace` reports of `nsys stats`.
+
+## analyze_nsys.sh
+
+Turns a capture directory (or a single `.nsys-rep`) into a one-shot text
+report: sweep summary, per-capture RTT, `[proxy-stats]` lines, and the most
+useful `nsys stats` reports.
+
+```bash
+# Most recent run under profile_results/
+./scripts/analyze_nsys.sh
+
+# A specific run dir (everything under it is analyzed)
+./scripts/analyze_nsys.sh profile_results/20260423-112226
+
+# A single capture
+./scripts/analyze_nsys.sh profile_results/20260423-112226/nsys_proxy_8192.nsys-rep
+```
+
+Output is written to `<run_dir>/analysis.txt` and also printed to stderr (the
+script echoes the file path on stdout so it composes with shell pipelines).
+
+### Tunables
+
+| Var            | Default                                                                                |
+|----------------|----------------------------------------------------------------------------------------|
+| `TOP_N`        | `10` rows kept per nsys report                                                         |
+| `REPORTS`      | `nvtx_pushpop_sum cuda_api_sum cuda_gpu_kern_sum osrt_sum cuda_gpu_mem_time_sum`       |
+| `OUT_FILE`     | `<run_dir>/analysis.txt`                                                               |
+| `RESULTS_ROOT` | `<repo>/profile_results`                                                               |
+
+### What to look for
+
+1. `nvtx_pushpop_sum` should show `prx:progress` taking the bulk of the worker
+   thread's time when in-flight work exists — that's UCX waiting for the
+   completion. `prx:submit` and `prx:publish` should be small.
+2. Diff the `cuda_api_sum` between the UCX-direct and proxy captures; new
+   high-volume entries on the proxy side (`cuStreamAddCallback`, `cuEventQuery`)
+   are the cost of host↔device coordination.
+3. Cross-check the `inflight` value from `[proxy-stats]` against the
+   sweep `delta_us`. If `inflight` ≈ `delta_us`, the bottleneck is UCX
+   itself, not the proxy bookkeeping.
 
 ### Going further
 
-1. Add NVTX ranges around each stage of `ProxyWorker::runOnce` and re-run
-   `nsys` mode for visual confirmation in the timeline.
+1. Add NVTX ranges around the GPU-side `do_put_async` path in
+   `bench_kernel.cu` (they need to be NVTX-CUDA, not regular NVTX — see
+   `<nvtx3/nvToolsExtCuda.h>`).
 2. Bracket `do_put_async` and the wait loop in `bench_kernel.cu` with
    `clock64()` to attribute time inside the GPU kernel.
+3. Re-export captures to SQLite (`nsys export -t sqlite foo.nsys-rep`) and
+   query with `sqlite3` for fully programmatic analysis.

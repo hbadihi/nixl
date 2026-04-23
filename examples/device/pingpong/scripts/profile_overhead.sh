@@ -73,6 +73,12 @@ DEFAULT_WARMUP=200
 # Override by exporting NIXL_LOG_LEVEL before running the script.
 export NIXL_LOG_LEVEL="${NIXL_LOG_LEVEL:-FATAL}"
 
+# Force the proxy worker's per-stage stats on by default.  The C++ predicate
+# accepts any value other than the explicit disable shortcuts; we set "1" so
+# the [proxy-stats] lines reliably end up in the *_send.err / *_recv.err
+# files that analyze_nsys.sh consumes.  Set NIXL_PROXY_STATS=0 to disable.
+export NIXL_PROXY_STATS="${NIXL_PROXY_STATS:-1}"
+
 OUT_DIR="${OUT_DIR:-${REPO_ROOT}/profile_results/$(date +%Y%m%d-%H%M%S)}"
 mkdir -p "${OUT_DIR}"
 

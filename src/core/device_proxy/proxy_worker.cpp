@@ -21,6 +21,36 @@
 #include <cuda_runtime.h>
 #include <cstdlib>
 
+// NVTX 3 is fully header-only — the inline shim lazy-loads the implementation
+// at runtime when a profiler attaches and is otherwise a near no-op.  No link
+// against libnvToolsExt is required.  Guarded so builds without CUDA headers
+// still compile.
+#if defined(__has_include)
+#  if __has_include(<nvtx3/nvToolsExt.h>)
+#    include <nvtx3/nvToolsExt.h>
+#    define NIXL_NVTX_ENABLED 1
+#  endif
+#endif
+
+#ifdef NIXL_NVTX_ENABLED
+namespace {
+struct NvtxScopedRange {
+    explicit NvtxScopedRange(const char *name) noexcept { nvtxRangePushA(name); }
+    ~NvtxScopedRange() noexcept { nvtxRangePop(); }
+    NvtxScopedRange(const NvtxScopedRange &) = delete;
+    NvtxScopedRange &operator=(const NvtxScopedRange &) = delete;
+};
+} // namespace
+#  define NIXL_NVTX_CONCAT2(a, b) a##b
+#  define NIXL_NVTX_CONCAT(a, b)  NIXL_NVTX_CONCAT2(a, b)
+#  define NIXL_NVTX_RANGE(name)                                               \
+      NvtxScopedRange NIXL_NVTX_CONCAT(_nvtx_range_, __LINE__)(name)
+#  define NIXL_NVTX_MARK(name)  nvtxMarkA(name)
+#else
+#  define NIXL_NVTX_RANGE(name) ((void)0)
+#  define NIXL_NVTX_MARK(name)  ((void)0)
+#endif
+
 namespace {
 
 using steady_clock = std::chrono::steady_clock;
@@ -35,10 +65,24 @@ bool
 statsEnabled() {
     static const bool enabled = []() {
         const char *env = std::getenv("NIXL_PROXY_STATS");
-        // Default ON; explicit "0"/"false"/"off" disables.
-        if (env == nullptr) return true;
-        return !(env[0] == '0' || env[0] == 'f' || env[0] == 'F' ||
-                 env[0] == 'o' || env[0] == 'O' || env[0] == 'n' || env[0] == 'N');
+        // Default ON.  Disable explicitly with: 0, false/False/FALSE,
+        // off/Off/OFF, no/No/NO.  Anything else (1, on, true, yes, ...) keeps
+        // stats on.  The previous shortcut treated any 'o*' as disable, which
+        // accidentally silenced "on"/"On"/"ON" — fixed by checking full prefixes.
+        if (env == nullptr || env[0] == '\0') return true;
+        auto eq_ci = [](const char *a, const char *b) {
+            for (; *a && *b; ++a, ++b) {
+                const char ca = (*a >= 'A' && *a <= 'Z') ? char(*a + 32) : *a;
+                const char cb = (*b >= 'A' && *b <= 'Z') ? char(*b + 32) : *b;
+                if (ca != cb) return false;
+            }
+            return *a == '\0' && *b == '\0';
+        };
+        if (env[0] == '0' && env[1] == '\0') return false;
+        if (eq_ci(env, "false") || eq_ci(env, "off") || eq_ci(env, "no")) {
+            return false;
+        }
+        return true;
     }();
     return enabled;
 }
@@ -86,10 +130,15 @@ void
 ProxyWorker::runOnce() {
     ++run_once_count_;
     const bool stats_on = statsEnabled();
+    bool any_inflight = false;
     for (uint32_t i = 0; i < assigned_channel_count_; i++) {
         ChannelState &channel = assigned_channels_[i];
         ProxySubmission submission;
         while (tryDequeue(channel, submission)) {
+            // Bracket each real submission so it shows up in nsys/NVTX timelines.
+            // No range is emitted for the (overwhelmingly common) empty-poll path,
+            // which keeps the report size sane even at hundreds of kpolls/s.
+            NIXL_NVTX_RANGE("prx:submit");
             const auto t_dequeue = stats_on ? steady_clock::now() : steady_clock::time_point{};
             nixl_status_t status = submitToBackend(channel, submission);
             if (stats_on) {
@@ -108,8 +157,19 @@ ProxyWorker::runOnce() {
                 // continue to the next operation
             }
         }
+        if (!channel.inflight_requests.empty()) {
+            any_inflight = true;
+        }
     }
-    driveBackendProgress();
+    // Only bracket progress when there is in-flight work to drive.  Otherwise
+    // the pure-idle spin (millions of empty progress() calls per second) would
+    // dwarf every other NVTX event in the capture.
+    if (any_inflight) {
+        NIXL_NVTX_RANGE("prx:progress");
+        driveBackendProgress();
+    } else {
+        driveBackendProgress();
+    }
     ++progress_count_;
     for (uint32_t i = 0; i < assigned_channel_count_; i++) {
         ChannelState &channel = assigned_channels_[i];
@@ -249,14 +309,18 @@ ProxyWorker::publishCompletions(ChannelState &channel) {
         if (stats_on && front.submit_time.time_since_epoch().count() != 0) {
             inflight_stats_.record(ns_since(front.submit_time, t_complete));
         }
+        NIXL_NVTX_MARK("prx:complete");
         NIXL_DEBUG << "ProxyWorker::publishCompletions: channel="
                    << channel.device_view.channel_id
                    << " op_idx=" << front.op_idx
                    << " status=" << st
                    << " token=" << front.backend_req_token;
-        channel.completion_slot_host_->next_status = st;
-        __atomic_store_n(&channel.completion_slot_host_->completed_idx,
-                         front.op_idx, __ATOMIC_RELEASE);
+        {
+            NIXL_NVTX_RANGE("prx:publish");
+            channel.completion_slot_host_->next_status = st;
+            __atomic_store_n(&channel.completion_slot_host_->completed_idx,
+                             front.op_idx, __ATOMIC_RELEASE);
+        }
         if (stats_on) {
             const auto t_published = steady_clock::now();
             publish_stats_.record(ns_since(t_complete, t_published));
