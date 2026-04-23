@@ -37,7 +37,7 @@ do_put_sync(nixlMemViewH local_mvh,
             nixlGpuXferStatusH &xfer_status) {
     nixlMemViewElem src{local_mvh, 0, 0};
     nixlMemViewElem dst{remote_mvh, 0, 0};
-
+    nixl_status_t status;
     // Initiate the transfer
     do_put_async<level>(local_mvh, remote_mvh, total_size, xfer_status);
     // Wait for the transfer to complete
