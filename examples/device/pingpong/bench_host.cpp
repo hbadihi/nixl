@@ -9,6 +9,13 @@
 #include <string>
 #include <thread>
 
+namespace {
+struct PeerRecvInfo {
+    uintptr_t recv_addr;
+    uint64_t gpu_id;
+};
+} // namespace
+
 // ---- BenchContext::setup -----------------------------------------------------
 
 nixl_status_t
@@ -130,14 +137,18 @@ BenchContext::setup(const BenchParams &params,
 
     // 7. Address exchange via NIXL notifications.
     //
-    //    We need each side's recv_buf device address to build nixlRemoteDesc.
+    //    We need each side's recv_buf device address and GPU id to build
+    //    nixlRemoteDesc correctly.
     //    genNotif sends a small blob to the peer; getNotifs drains the local
     //    inbox.  genNotif returns non-SUCCESS until the peer's metadata is
     //    loaded locally, so spinning on it is the correct wait for the receiver
     //    (whose listen thread loads the sender's MD asynchronously).
-    nixl_blob_t addr_blob(sizeof(uintptr_t), '\0');
-    auto my_recv_addr = reinterpret_cast<uintptr_t>(recv_buf);
-    memcpy(addr_blob.data(), &my_recv_addr, sizeof(uintptr_t));
+    PeerRecvInfo my_peer_info{};
+    my_peer_info.recv_addr = reinterpret_cast<uintptr_t>(recv_buf);
+    my_peer_info.gpu_id = static_cast<uint64_t>(params.gpu_id);
+
+    nixl_blob_t peer_info_blob(sizeof(PeerRecvInfo), '\0');
+    memcpy(peer_info_blob.data(), &my_peer_info, sizeof(PeerRecvInfo));
 
     // Wait silently until the listen thread has loaded the peer's metadata.
     // checkRemoteMD returns NIXL_ERR_NOT_FOUND (without logging) until
@@ -151,7 +162,7 @@ BenchContext::setup(const BenchParams &params,
     notif_args.backends.push_back(ucx_backend);
 
     fprintf(stderr, "[%s] sending recv_buf addr to peer...\n", my_name.c_str());
-    while ((st = agent->genNotif(peer_name, addr_blob, &notif_args)) != NIXL_SUCCESS)
+    while ((st = agent->genNotif(peer_name, peer_info_blob, &notif_args)) != NIXL_SUCCESS)
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
     fprintf(stderr, "[%s] waiting for peer recv_buf addr...\n", my_name.c_str());
@@ -161,9 +172,16 @@ BenchContext::setup(const BenchParams &params,
         if (notifs[peer_name].empty())
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    uintptr_t peer_recv_addr = 0;
-    memcpy(&peer_recv_addr, notifs[peer_name][0].data(), sizeof(uintptr_t));
-    fprintf(stderr, "[%s] peer recv_buf addr: 0x%lx\n", my_name.c_str(), peer_recv_addr);
+    if (notifs[peer_name][0].size() < sizeof(PeerRecvInfo)) {
+        fprintf(stderr, "[%s] peer info notification too small (%zu bytes)\n",
+                my_name.c_str(), notifs[peer_name][0].size());
+        return NIXL_ERR_MISMATCH;
+    }
+
+    PeerRecvInfo peer_info{};
+    memcpy(&peer_info, notifs[peer_name][0].data(), sizeof(PeerRecvInfo));
+    fprintf(stderr, "[%s] peer recv_buf addr: 0x%lx gpu=%lu\n",
+            my_name.c_str(), peer_info.recv_addr, peer_info.gpu_id);
 
     // 8. Build memory view handles.
     //    local_mvh  — covers our send_buf; the kernel POSTs PUTs from here.
@@ -172,7 +190,8 @@ BenchContext::setup(const BenchParams &params,
     local_send_dlist.addDesc(nixlBasicDesc((uintptr_t)send_buf, buf_size, params.gpu_id));
 
     nixl_remote_dlist_t remote_dlist(VRAM_SEG);
-    remote_dlist.addDesc(nixlRemoteDesc(peer_recv_addr, buf_size, params.gpu_id, peer_name));
+    remote_dlist.addDesc(
+        nixlRemoteDesc(peer_info.recv_addr, buf_size, peer_info.gpu_id, peer_name));
 
     // Spin until the remote agent's metadata is fully loaded into our local agent.
     // Sleep between retries to avoid burning CPU and spamming NIXL_ERROR logs at
