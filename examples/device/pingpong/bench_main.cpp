@@ -39,6 +39,12 @@ usage(const char *prog) {
             "    [--gpu       <id>]     (default 0)\n"
             "    [--warp]               use WARP level (default: THREAD)\n"
             "\n"
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+            "Single-process mode is not supported in the CPU-proxy build:\n"
+            "the proxy device context is published into a process-wide\n"
+            "__device__ pointer, so two agents in one process cannot coexist.\n",
+            prog);
+#else
             "Single-process mode (two threads, one GPU):\n"
             "  %s [--single-process]\n"
             "    [--msg-size  <bytes>]\n"
@@ -49,6 +55,7 @@ usage(const char *prog) {
             "    [--base-port <port>]   loopback listen ports (default 12300);\n"
             "                           sender uses base, receiver uses base+1\n",
             prog, prog);
+#endif
     exit(1);
 }
 
@@ -79,7 +86,12 @@ print_latency(uint64_t *d_elapsed, uint64_t num_iters, int gpu_id,
 
 // ----------------------------------------------------------------------------
 // Single-process benchmark (two threads, loopback TCP)
+//
+// Disabled in the CPU-proxy build: nixlProxyPublishContext writes a
+// process-wide __device__ pointer, so two BenchContexts in one process would
+// collide on it.
 // ----------------------------------------------------------------------------
+#ifndef NIXL_GPU_DEVICE_BACKEND_PROXY
 static int
 single_process_run(size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
                    int gpu_id, bool use_warp, int base_port)
@@ -210,6 +222,7 @@ single_process_run(size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
     return 0;
     // sender_ctx and recvr_ctx destructors run here — NIXL teardown is automatic
 }
+#endif // !NIXL_GPU_DEVICE_BACKEND_PROXY
 
 // ----------------------------------------------------------------------------
 // Two-process benchmark (single-threaded; each process is one side)
@@ -289,7 +302,9 @@ main(int argc, char *argv[]) {
     const char *peer_ip   = nullptr;
     int  peer_port        = 0;
     int  listen_port      = 0;
+#ifndef NIXL_GPU_DEVICE_BACKEND_PROXY
     int  base_port        = 12300;
+#endif
     size_t   msg_size     = 8;
     uint64_t num_iters    = 1000;
     uint64_t warmup_iters = 100;
@@ -302,7 +317,9 @@ main(int argc, char *argv[]) {
         else if (!strcmp(argv[i], "--peer-ip")      && i + 1 < argc) peer_ip     = argv[++i];
         else if (!strcmp(argv[i], "--peer-port")    && i + 1 < argc) peer_port   = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--listen-port")  && i + 1 < argc) listen_port = atoi(argv[++i]);
+#ifndef NIXL_GPU_DEVICE_BACKEND_PROXY
         else if (!strcmp(argv[i], "--base-port")    && i + 1 < argc) base_port   = atoi(argv[++i]);
+#endif
         else if (!strcmp(argv[i], "--msg-size")     && i + 1 < argc) msg_size    = (size_t)atoll(argv[++i]);
         else if (!strcmp(argv[i], "--iters")        && i + 1 < argc) num_iters   = (uint64_t)atoll(argv[++i]);
         else if (!strcmp(argv[i], "--warmup")       && i + 1 < argc) warmup_iters = (uint64_t)atoll(argv[++i]);
@@ -315,6 +332,14 @@ main(int argc, char *argv[]) {
     // Default to single-process when no two-process args given
     if (!role_str && !peer_ip && peer_port == 0 && listen_port == 0) single_process = true;
 
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    if (single_process) {
+        fprintf(stderr,
+                "Single-process mode is not supported in the CPU-proxy build; "
+                "use --role sender/--role receiver across two processes.\n");
+        usage(argv[0]);
+    }
+#else
     if (single_process) {
         if (role_str || peer_ip || peer_port || listen_port) {
             fprintf(stderr, "--single-process is mutually exclusive with "
@@ -323,6 +348,7 @@ main(int argc, char *argv[]) {
         }
         return single_process_run(msg_size, num_iters, warmup_iters, gpu_id, use_warp, base_port);
     }
+#endif
 
     // Two-process mode
     if (!role_str || !peer_ip || peer_port == 0 || listen_port == 0) usage(argv[0]);

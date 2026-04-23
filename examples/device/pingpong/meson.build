@@ -70,3 +70,26 @@ executable('nixl_device_pingpong',
     build_rpath: nixl_lib_dir + ':' + nixl_infra_dir,
     install: false,
 )
+
+# CPU-proxy variant: same sources, but the kernel's <nixl_device.cuh> resolves
+# to the proxy facade and the host enables the proxy runtime + publishes the
+# device context. nixl_gpu_proxy_lib must be linked so the device-link step
+# picks up g_nixl_proxy_ctx (defined in nixl_device_proxy.cu).
+pingpong_proxy_define = ['-DNIXL_GPU_DEVICE_BACKEND_PROXY']
+
+pingpong_proxy_inc_dirs = [
+    nixl_inc_dirs,
+    nixl_gpu_proxy_inc_dirs,
+    include_directories('.'),
+]
+
+executable('nixl_device_pingpong_proxy',
+    pingpong_sources,
+    dependencies: [nixl_dep, nixl_infra, cuda_dep] + (ucx_dep.found() ? [ucx_dep] : []),
+    include_directories: pingpong_proxy_inc_dirs,
+    cpp_args: pingpong_cpp_args + pingpong_proxy_define,
+    cuda_args: pingpong_cuda_args + pingpong_proxy_define,
+    link_with: [nixl_gpu_proxy_lib],
+    build_rpath: nixl_lib_dir + ':' + nixl_infra_dir,
+    install: false,
+)

@@ -85,7 +85,7 @@ nixl_pingpong_latency_kernel(gpu_bench_ctx ctx, uint64_t *elapsed_device) {
             if constexpr (is_warp) {
                 __syncwarp(); // Ensure all threads see the updated counter
             }
-            do_put_async<level>(ctx.local_mvh, ctx.remote_mvh, total_size, xfer_status);
+            do_put_sync<level>(ctx.local_mvh, ctx.remote_mvh, total_size, xfer_status);
 
             if (lane_id == 0) {
                 wait_sequence_number(recv_counter,
@@ -106,7 +106,7 @@ nixl_pingpong_latency_kernel(gpu_bench_ctx ctx, uint64_t *elapsed_device) {
                 *send_counter = i + 1; // Increment send counter to signal the sender
             }
 
-            do_put_async<level>(ctx.local_mvh, ctx.remote_mvh, total_size, xfer_status);
+            do_put_sync<level>(ctx.local_mvh, ctx.remote_mvh, total_size, xfer_status);
         }
     }
 
@@ -131,3 +131,17 @@ void
 launch_pingpong_warp(gpu_bench_ctx ctx, uint64_t *d_elapsed, cudaStream_t stream) {
     nixl_pingpong_latency_kernel<nixl_gpu_level_t::WARP><<<1, 32, 0, stream>>>(ctx, d_elapsed);
 }
+
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+#include "nixl_device_proxy.cuh"
+
+cudaError_t
+bench_proxy_publish_context(void *proxy_ctx) {
+    return nixlProxyPublishContext(static_cast<ProxyDeviceContextData *>(proxy_ctx));
+}
+
+cudaError_t
+bench_proxy_clear_context() {
+    return nixlProxyClearContext();
+}
+#endif

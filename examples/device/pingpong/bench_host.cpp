@@ -1,4 +1,5 @@
 #include "bench_host.h"
+#include "bench_kernel_iface.h"
 
 #include <cuda_runtime.h>
 #include <chrono>
@@ -28,6 +29,14 @@ BenchContext::setup(const BenchParams &params,
     //    and a listen thread (accepts incoming TCP metadata connections from peer).
     //    The constructor throws std::runtime_error if the listen port is in use.
     nixlAgentConfig cfg(/*useProgThread=*/true, /*useListenThread=*/true, my_port);
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    // Route GPU-issued nixlPut through the CPU proxy runtime. One worker /
+    // one channel avoids the known multi-worker postXfer race documented in
+    // test/gtest/device_api/single_write_test.cu.
+    cfg.enableDeviceProxy = true;
+    cfg.proxyChannelCount = 1;
+    cfg.proxyWorkerCount  = 1;
+#endif
     try {
         agent = std::make_unique<nixlAgent>(my_name, cfg);
     } catch (const std::exception &e) {
@@ -43,6 +52,21 @@ BenchContext::setup(const BenchParams &params,
         fprintf(stderr, "[%s] createBackend failed: %d\n", my_name.c_str(), st);
         return st;
     }
+
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    // The proxy runtime is created lazily by the agent during createBackend().
+    // Publish its device context to the process-wide __device__ pointer that
+    // load_proxy_context() reads from inside the kernel.
+    void *proxy_ctx = agent->getProxyDeviceContext();
+    if (proxy_ctx == nullptr) {
+        fprintf(stderr, "[%s] proxy device context not available\n", my_name.c_str());
+        return NIXL_ERR_BACKEND;
+    }
+    if (bench_proxy_publish_context(proxy_ctx) != cudaSuccess) {
+        fprintf(stderr, "[%s] bench_proxy_publish_context failed\n", my_name.c_str());
+        return NIXL_ERR_BACKEND;
+    }
+#endif
 
     // 4. Allocate and zero device buffers
     if (cudaMalloc(&send_buf, buf_size) != cudaSuccess ||
@@ -150,8 +174,15 @@ BenchContext::setup(const BenchParams &params,
     nixl_remote_dlist_t remote_dlist(VRAM_SEG);
     remote_dlist.addDesc(nixlRemoteDesc(peer_recv_addr, buf_size, params.gpu_id, peer_name));
 
-    while ((st = agent->prepMemView(local_send_dlist, local_mvh)) != NIXL_SUCCESS) {}
-    while ((st = agent->prepMemView(remote_dlist,     remote_mvh)) != NIXL_SUCCESS) {}
+    // Spin until the remote agent's metadata is fully loaded into our local agent.
+    // Sleep between retries to avoid burning CPU and spamming NIXL_ERROR logs at
+    // multi-MB/s — each failed prepMemView emits an ERROR via NIXL_ERROR_FUNC.
+    while ((st = agent->prepMemView(local_send_dlist, local_mvh)) != NIXL_SUCCESS) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    while ((st = agent->prepMemView(remote_dlist,     remote_mvh)) != NIXL_SUCCESS) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
     fprintf(stderr, "[%s] memory views ready — setup complete\n", my_name.c_str());
 
     return NIXL_SUCCESS;
@@ -162,6 +193,12 @@ BenchContext::setup(const BenchParams &params,
 BenchContext::~BenchContext()
 {
     if (!agent) return;
+
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    // Clear the global __device__ pointer before the proxy runtime backing it
+    // is destroyed by the agent's destructor.
+    bench_proxy_clear_context();
+#endif
 
     if (local_mvh)  agent->releaseMemView(local_mvh);
     if (remote_mvh) agent->releaseMemView(remote_mvh);
