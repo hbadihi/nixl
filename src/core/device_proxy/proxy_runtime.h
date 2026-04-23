@@ -17,6 +17,7 @@
 #ifndef NIXL_SRC_CORE_DEVICE_PROXY_PROXY_RUNTIME_H
 #define NIXL_SRC_CORE_DEVICE_PROXY_PROXY_RUNTIME_H
 
+#include <chrono>
 #include <cstdint>
 #include <deque>
 #include <memory>
@@ -34,6 +35,9 @@ struct ProxyRequestState {
     uint64_t op_idx = 0;
     uint64_t backend_req_token = 0;
     nixl_status_t status = NIXL_IN_PROG;
+    /** Recorded right after backend_->submit returns; used by ProxyWorker to
+     *  measure the inflight latency until the backend reports completion. */
+    std::chrono::steady_clock::time_point submit_time{};
 };
 
 struct alignas(64) ChannelState {
