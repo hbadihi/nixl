@@ -64,7 +64,7 @@ ProxyMemViewRegistry::resolveProxyMemView(nixlMemViewH proxy_memview,
         return false;
     }
     backend_memview = entry->backend_memview;
-    return backend_memview != nullptr;
+    return true;
 }
 
 bool
@@ -75,7 +75,7 @@ ProxyMemViewRegistry::resolveProxyMemViewId(uint64_t proxy_memview_id,
         return false;
     }
     backend_memview = entry->backend_memview;
-    return backend_memview != nullptr;
+    return true;
 }
 
 nixl_status_t
