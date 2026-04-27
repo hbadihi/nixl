@@ -33,14 +33,7 @@
 #include "common/hw_info.h"
 #include "telemetry.h"
 #include "telemetry_event.h"
-
-#ifdef STATIC_PLUGIN_UCX
-#include "../plugins/ucx/ucx_backend.h"
-#include "../plugins/ucx/device_proxy/ucx_proxy_backend.h"
-#define NIXL_HAS_UCX_PROXY_BACKEND 1
-#else
-#define NIXL_HAS_UCX_PROXY_BACKEND 0
-#endif
+#include "device_proxy/backend_provider.h"
 
 constexpr char TELEMETRY_ENABLED_VAR[] = "NIXL_TELEMETRY_ENABLE";
 static const std::vector<std::vector<std::string>> illegal_plugin_combinations = {
@@ -325,17 +318,16 @@ nixlAgentData::createProxyRuntime(nixlBackendEngine *engine, const nixl_backend_
         return NIXL_SUCCESS;
     }
 
-#if NIXL_HAS_UCX_PROXY_BACKEND
-    if (backend != "UCX") {
+    auto *proxy_provider = dynamic_cast<DeviceProxyBackendProvider *>(engine);
+    if (proxy_provider == nullptr) {
         return NIXL_ERR_NOT_SUPPORTED;
     }
 
-    auto *ucx_engine = dynamic_cast<nixlUcxEngine *>(engine);
-    if (ucx_engine == nullptr) {
+    proxyAdapter = proxy_provider->createDeviceProxyBackendAdapter();
+    if (!proxyAdapter) {
         return NIXL_ERR_NOT_SUPPORTED;
     }
 
-    proxyAdapter = std::make_unique<nixlUcxProxyBackend>(ucx_engine);
     proxyRuntime = std::make_unique<ProxyRuntime>();
 
     const uint32_t worker_count = std::max(1u, config_.proxyWorkerCount);
@@ -359,11 +351,6 @@ nixlAgentData::createProxyRuntime(nixlBackendEngine *engine, const nixl_backend_
     NIXL_INFO << "Enabled device proxy runtime for backend '" << backend << "' with "
               << worker_count << " worker(s) and " << channel_count << " channel(s)";
     return NIXL_SUCCESS;
-#else
-    (void)engine;
-    (void)backend;
-    return NIXL_ERR_NOT_SUPPORTED;
-#endif
 }
 
 void
