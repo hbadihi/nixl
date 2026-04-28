@@ -27,3 +27,13 @@ struct gpu_bench_ctx {
 
 void launch_pingpong_thread(gpu_bench_ctx ctx, uint64_t *d_elapsed, cudaStream_t stream);
 void launch_pingpong_warp  (gpu_bench_ctx ctx, uint64_t *d_elapsed, cudaStream_t stream);
+
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+// Host-callable thin wrappers around nixlProxyPublishContext/ClearContext.
+// Defined in bench_kernel.cu so the host .cpp file does not need to include
+// nixl_device_proxy.cuh (which references CUDA device builtins).
+//
+// proxy_ctx must be the value returned by nixlAgent::getProxyDeviceContext().
+cudaError_t bench_proxy_publish_context(void *proxy_ctx);
+cudaError_t bench_proxy_clear_context();
+#endif
