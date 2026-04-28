@@ -1125,6 +1125,56 @@ nixl_status_t nixlUcxEngine::prepXfer (const nixl_xfer_op_t &operation,
     return NIXL_SUCCESS;
 }
 
+nixl_status_t
+nixlUcxEngine::submitRmaWrite(const nixlMetaDesc &local,
+                              const nixlMetaDesc &remote,
+                              size_t size,
+                              nixlBackendReqH *&handle) const {
+    handle = nullptr;
+
+    if (local.len != size || remote.len != size) {
+        return NIXL_ERR_INVALID_PARAM;
+    }
+
+    auto *lmd = static_cast<nixlUcxPrivateMetadata *>(local.metadataP);
+    auto *rmd = static_cast<nixlUcxPublicMetadata *>(remote.metadataP);
+    if (lmd == nullptr || rmd == nullptr || rmd->conn == nullptr) {
+        return NIXL_ERR_INVALID_PARAM;
+    }
+
+    const auto worker_id = getWorkerId();
+    auto *ucx_handle = new nixlUcxBackendH(getWorker(worker_id).get(), worker_id);
+    handle = ucx_handle;
+    ucx_handle->reserve(2);
+
+    auto &ep = rmd->conn->getEp(worker_id);
+    nixlUcxReq req = nullptr;
+    nixl_status_t ret = ep->write(reinterpret_cast<void *>(local.addr),
+                                  lmd->mem,
+                                  static_cast<uint64_t>(remote.addr),
+                                  rmd->getRkey(worker_id),
+                                  size,
+                                  req);
+    ret = ucx_handle->append(ret, req, rmd->conn);
+    if (ret != NIXL_SUCCESS) {
+        releaseReqH(handle);
+        handle = nullptr;
+        return ret;
+    }
+
+    nixlUcxReq flush_req = nullptr;
+    ret = ep->flushEp(flush_req);
+    ret = ucx_handle->append(ret, flush_req, rmd->conn);
+    if (ret != NIXL_SUCCESS) {
+        releaseReqH(handle);
+        handle = nullptr;
+        return ret;
+    }
+
+    return ucx_handle->status();
+}
+
+
 nixl_status_t nixlUcxEngine::estimateXferCost (const nixl_xfer_op_t &operation,
                                                const nixl_meta_dlist_t &local,
                                                const nixl_meta_dlist_t &remote,

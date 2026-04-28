@@ -187,6 +187,13 @@ public:
     nixl_status_t
     releaseReqH(nixlBackendReqH *handle) const override;
 
+    nixl_status_t
+    submitRmaWrite(const nixlMetaDesc &local,
+                   const nixlMetaDesc &remote,
+                   size_t size,
+                   nixlBackendReqH *&handle) const;
+
+    nixl_status_t
     int
     progress();
 
