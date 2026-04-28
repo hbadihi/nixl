@@ -52,6 +52,7 @@ class nixlUcxConnection : public nixlBackendConnMD {
 };
 
 using ucx_connection_ptr_t = std::shared_ptr<nixlUcxConnection>;
+class nixlUcxProxyBackendAdapter;
 
 // A private metadata has to implement get, and has all the metadata
 class nixlUcxPrivateMetadata : public nixlBackendMD {
@@ -185,6 +186,12 @@ public:
     nixl_status_t
     releaseReqH(nixlBackendReqH *handle) const override;
 
+    nixl_status_t
+    submitRmaWrite(const nixlMetaDesc &local,
+                   const nixlMetaDesc &remote,
+                   size_t size,
+                   nixlBackendReqH *&handle) const;
+
     unsigned
     progress();
 
@@ -253,6 +260,14 @@ protected:
     notif_list_t notifList_;
 
 private:
+    friend class nixlUcxProxyBackendAdapter;
+
+    nixl_status_t
+    submitProxyRmaWrite(const nixlMetaDesc &local,
+                        const nixlMetaDesc &remote,
+                        size_t size,
+                        nixlBackendReqH *&handle) const;
+
     // Memory management helpers
     nixl_status_t
     internalMDHelper(const nixl_blob_t &blob, const std::string &agent, nixlBackendMD *&output);
