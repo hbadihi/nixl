@@ -15,25 +15,13 @@
  * limitations under the License.
  */
 
-// Defines the device-visible proxy context pointer. The host runtime writes
-// to this symbol via cudaMemcpyToSymbol after startWorkers() and clears it on
-// shutdown(). Device kernels read it through load_proxy_context().
+// Defines the device-visible proxy context pointer. Device kernels read it
+// through load_proxy_context().
 #include "nixl_device_proxy.cuh"
 
 __device__ ProxyDeviceContext *g_nixl_proxy_ctx = nullptr;
 
-// Host-callable wrappers so that proxy_runtime.cpp (compiled by g++, not NVCC)
-// can update g_nixl_proxy_ctx without referencing a __device__ symbol directly.
-void
-nixlProxyPublishContext(ProxyDeviceContextData *ctx) {
-    // ProxyDeviceContext : ProxyDeviceContextData adds no data members, so the
-    // pointer representation is identical and the reinterpret_cast is safe.
-    ProxyDeviceContext *device_ctx = reinterpret_cast<ProxyDeviceContext *>(ctx);
-    cudaMemcpyToSymbol(g_nixl_proxy_ctx, &device_ctx, sizeof(ProxyDeviceContext *));
-}
-
-void
-nixlProxyClearContext() {
-    ProxyDeviceContext *null_ctx = nullptr;
-    cudaMemcpyToSymbol(g_nixl_proxy_ctx, &null_ctx, sizeof(ProxyDeviceContext *));
-}
+// Scratch word in HBM for get_xfer_status<GRID> to broadcast the poll
+// result from global lane 0 to all blocks via device-scope atomics.
+// Safe as a singleton because cooperative grid launches are serialized.
+__device__ int32_t g_nixl_proxy_grid_scratch = 0;

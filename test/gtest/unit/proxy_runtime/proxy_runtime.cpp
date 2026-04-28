@@ -20,6 +20,8 @@
 #include <chrono>
 #include <cstdint>
 #include <cuda_runtime.h>
+#include <mutex>
+#include <string>
 #include <thread>
 
 #include "device_proxy/backend_adapter.h"
@@ -27,6 +29,11 @@
 
 namespace gtest {
 namespace proxy_runtime {
+
+class DummyBackendMD : public nixlBackendMD {
+    public:
+        DummyBackendMD() : nixlBackendMD(false) {}
+};
 
 class StubBackend : public DeviceProxyBackendAdapter {
     public:
@@ -44,7 +51,12 @@ class StubBackend : public DeviceProxyBackendAdapter {
         }
 
         nixl_status_t
-        submit(const ResolvedProxySubmission &, uint64_t &) override {
+        submit(const PreparedProxySubmission &submission, uint64_t &request_token) override {
+            {
+                std::lock_guard<std::mutex> lock(submit_mutex_);
+                submissions_.push_back(submission);
+            }
+            request_token = ++next_request_token_;
             return NIXL_SUCCESS;
         }
 
@@ -69,6 +81,9 @@ class StubBackend : public DeviceProxyBackendAdapter {
         uint32_t init_channel_count_ = 0;
         nixl_status_t init_rc_ = NIXL_SUCCESS;
         std::atomic<uint64_t> progress_calls_{0};
+        mutable std::mutex submit_mutex_;
+        std::vector<PreparedProxySubmission> submissions_;
+        uint64_t next_request_token_ = 0;
 };
 
 class ProxyRuntimeTest : public testing::Test {
@@ -142,6 +157,21 @@ TEST_F(ProxyRuntimeTest, WorkRingIndicesStartAtZero) {
                   cudaSuccess);
         EXPECT_EQ(producer, 0u);
         EXPECT_EQ(consumer, 0u);
+    }
+}
+
+TEST_F(ProxyRuntimeTest, CompletionSlotsInitialized) {
+    ASSERT_EQ(runtime_.init(&backend_, 2, 1), NIXL_SUCCESS);
+    const ProxyChannelView *views = runtime_.deviceChannelViews();
+    for (uint32_t i = 0; i < 2; ++i) {
+        CompletionSlot slot{};
+        ASSERT_EQ(cudaMemcpy(&slot,
+                             views[i].completion_slot,
+                             sizeof(CompletionSlot),
+                             cudaMemcpyDeviceToHost),
+                  cudaSuccess);
+        EXPECT_EQ(slot.completed_idx, 0u);
+        EXPECT_EQ(slot.next_status, NIXL_IN_PROG);
     }
 }
 
@@ -235,6 +265,7 @@ TEST_F(ProxyRuntimeTest, ManyChannelsManyWorkers) {
 
     ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
 }
+
 
 } // namespace proxy_runtime
 } // namespace gtest

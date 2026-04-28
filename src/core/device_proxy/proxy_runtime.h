@@ -17,17 +17,16 @@
 #ifndef NIXL_SRC_CORE_DEVICE_PROXY_PROXY_RUNTIME_H
 #define NIXL_SRC_CORE_DEVICE_PROXY_PROXY_RUNTIME_H
 
-#include <atomic>
+#include <chrono>
 #include <cstdint>
+#include <deque>
 #include <memory>
-#include <mutex>
 #include <string>
-#include <thread>
 #include <vector>
 
+#include "backend_aux.h"
 #include "proxy_protocol.h"
-
-class DeviceProxyBackendAdapter;
+#include "backend_adapter.h"
 class ProxyWorker;
 
 static constexpr uint32_t kDefaultProxyRingDepth = 256;
@@ -36,18 +35,30 @@ struct ProxyRequestState {
     uint64_t op_idx = 0;
     uint64_t backend_req_token = 0;
     nixl_status_t status = NIXL_IN_PROG;
-    bool publish_ready = false;
+    /** Recorded right after backend_->submit returns; used by ProxyWorker to
+     *  measure the inflight latency until the backend reports completion. */
+    std::chrono::steady_clock::time_point submit_time{};
 };
 
-struct ChannelState {
+struct alignas(64) ChannelState {
     ProxyChannelView device_view{};
-    std::vector<ProxyRequestState> inflight_requests;
+    std::deque<ProxyRequestState> inflight_requests;
+    bool error_latched = false;
 
     WorkRing        *work_ring_       = nullptr;
     ProxySubmission *records_         = nullptr;
-    uint32_t        *producer_idx_    = nullptr;
-    uint32_t        *consumer_idx_    = nullptr;
-    CompletionSlot  *completion_slot_ = nullptr;
+    /** Mapped pinned host memory; host proxy uses __atomic_* on host alias. */
+    uint32_t        *producer_idx_host_ = nullptr;
+    /** Device-mapped alias of producer_idx_host_ for WorkRing (GPU-writable). */
+    uint32_t        *producer_idx_dev_  = nullptr;
+    /** Consumer count: host pinned; proxy uses __atomic_* on consumer_idx_host_. */
+    uint32_t        *consumer_idx_host_  = nullptr;
+    /** Same word as consumer_idx_host_, for WorkRing::consumer_idx (GPU-readable). */
+    uint32_t        *consumer_idx_dev_   = nullptr;
+    /** Mapped pinned host memory; proxy worker writes directly via host alias. */
+    CompletionSlot  *completion_slot_host_ = nullptr;
+    /** Device-mapped alias of completion_slot_host_ for ProxyChannelView. */
+    CompletionSlot  *completion_slot_dev_  = nullptr;
 
     ChannelState() = default;
     ~ChannelState();
@@ -65,12 +76,26 @@ struct ChannelState {
 
 class ProxyMemViewRegistry {
     public:
+        enum class EntryState : uint8_t {
+            Allocated,
+            Ready,
+            Retired,
+        };
+
         nixl_status_t
         registerProxyMemView(nixlMemViewH backend_memview,
                              nixlMemViewH *proxy_memview = nullptr);
 
         nixl_status_t
         unregisterProxyMemView(nixlMemViewH proxy_memview);
+
+        nixl_status_t
+        storeMetadata(nixlMemViewH proxy_memview,
+                      const nixl_meta_dlist_t &dlist);
+
+        nixl_status_t
+        storeMetadata(nixlMemViewH proxy_memview,
+                      const nixl_remote_meta_dlist_t &dlist);
 
         bool
         resolveProxyMemView(nixlMemViewH proxy_memview,
@@ -80,12 +105,65 @@ class ProxyMemViewRegistry {
         resolveProxyMemViewId(uint64_t proxy_memview_id,
                               nixlMemViewH &backend_memview) const;
 
+        nixl_status_t
+        prepareSubmission(const ProxySubmission &submission,
+                          PreparedProxySubmission &prepared_submission) const;
+
         void
         clear() noexcept;
 
     private:
-        mutable std::mutex mutex_;
-        std::vector<nixlMemViewH> backend_memview_by_proxy_id_;
+        struct StoredEntry {
+            uintptr_t base_addr = 0;
+            nixlBackendMD *metadata = nullptr;
+        };
+
+        struct LocalMetadata {
+            nixl_mem_t mem_type = DRAM_SEG;
+            std::vector<StoredEntry> entries;
+        };
+
+        struct RemoteMetadata {
+            nixl_mem_t mem_type = DRAM_SEG;
+            std::string remote_agent;
+            std::vector<StoredEntry> entries;
+        };
+
+        enum class MetadataKind : uint8_t {
+            None,
+            Local,
+            Remote,
+        };
+
+        struct RegistryEntry {
+            uint64_t proxy_memview_id = 0;
+            nixlMemViewH proxy_memview = nullptr;
+            nixlMemViewH backend_memview = nullptr;
+            EntryState state = EntryState::Allocated;
+            MetadataKind metadata_kind = MetadataKind::None;
+            LocalMetadata local_metadata{};
+            RemoteMetadata remote_metadata{};
+        };
+
+        RegistryEntry *
+        getEntryForHandle(nixlMemViewH proxy_memview);
+
+        const RegistryEntry *
+        getEntryForHandle(nixlMemViewH proxy_memview) const;
+
+        RegistryEntry *
+        getEntryForId(uint64_t proxy_memview_id);
+
+        const RegistryEntry *
+        getEntryForId(uint64_t proxy_memview_id) const;
+
+        static void
+        fillLocalMetadata(const nixl_meta_dlist_t &dlist, LocalMetadata &out);
+
+        static void
+        fillRemoteMetadata(const nixl_remote_meta_dlist_t &dlist, RemoteMetadata &out);
+
+        std::vector<RegistryEntry> entries_;
         uint64_t next_proxy_memview_id_ = 1;
 };
 
@@ -114,6 +192,14 @@ class ProxyRuntime {
 
         nixl_status_t
         unregisterProxyMemView(nixlMemViewH proxy_memview);
+
+        nixl_status_t
+        storeMetadata(nixlMemViewH proxy_memview,
+                      const nixl_meta_dlist_t &dlist);
+
+        nixl_status_t
+        storeMetadata(nixlMemViewH proxy_memview,
+                      const nixl_remote_meta_dlist_t &dlist);
 
         bool
         resolveProxyMemView(nixlMemViewH proxy_memview,
@@ -149,10 +235,10 @@ class ProxyRuntime {
         ProxyChannelView       *device_channel_views_ = nullptr;
         ProxyDeviceContextData *device_context_       = nullptr;
         std::vector<std::unique_ptr<ProxyWorker>> workers_;
-        std::vector<std::thread> worker_threads_;
         ProxyMemViewRegistry memview_registry_;
         DeviceProxyBackendAdapter *backend_ = nullptr;
-        std::atomic<uint32_t> shutdown_word_{0};
+        uint32_t *shutdown_word_host_ = nullptr;
+        uint32_t *shutdown_word_dev_  = nullptr;
         uint32_t ring_depth_ = kDefaultProxyRingDepth;
 };
 

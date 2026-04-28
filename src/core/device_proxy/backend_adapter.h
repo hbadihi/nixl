@@ -22,21 +22,23 @@
 #include <string>
 
 #include <nixl_types.h>
+#include "backend_aux.h"
 #include "proxy_protocol.h"
 
-struct ResolvedProxySubmission {
+struct PreparedProxyTransferDesc {
+    nixl_mem_t mem_type = DRAM_SEG;
+    nixlMetaDesc desc{};
+};
+
+struct PreparedProxySubmission {
     uint64_t op_idx = 0;
     ProxyOpcode opcode = ProxyOpcode::PUT;
     uint32_t channel_id = 0;
     uint64_t flags = 0;
 
-    nixlMemViewH src_memview = nullptr;
-    size_t src_index = 0;
-    size_t src_offset = 0;
-
-    nixlMemViewH dst_memview = nullptr;
-    size_t dst_index = 0;
-    size_t dst_offset = 0;
+    PreparedProxyTransferDesc local{};
+    PreparedProxyTransferDesc remote{};
+    std::string remote_agent;
 
     size_t size = 0;
     uint64_t value = 0;
@@ -54,7 +56,7 @@ class DeviceProxyBackendAdapter {
                            const nixl_blob_t &conn_info) = 0;
 
         virtual nixl_status_t
-        submit(const ResolvedProxySubmission &submission, uint64_t &request_token) = 0;
+        submit(const PreparedProxySubmission &submission, uint64_t &request_token) = 0;
 
         virtual nixl_status_t
         checkCompletion(uint64_t request_token) = 0;
