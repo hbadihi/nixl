@@ -62,4 +62,8 @@ else
     endif
 endif
 
-ucx_backend_interface = declare_dependency(link_with: ucx_backend_lib, include_directories: ucx_backend_includes)
+ucx_backend_interface = declare_dependency(
+    link_with: ucx_backend_lib,
+    include_directories: ucx_backend_includes,
+    dependencies: [ucx_dep])
+
