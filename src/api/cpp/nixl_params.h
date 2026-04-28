@@ -53,9 +53,18 @@ struct nixlAgentConfig {
     bool captureTelemetry = kDefaultCaptureTelemetry;
     /** @var Enable the device proxy orchestration skeleton. */
     bool enableDeviceProxy = kDefaultEnableDeviceProxy;
-    /** @var Desired number of proxy workers per proxy runtime. */
+    /**
+     * @var Desired number of proxy workers per proxy runtime.
+     *      The UCX proxy backend currently shares a nixlUcxEngine across proxy
+     *      workers; keep this at 1 unless the backend has been validated for
+     *      concurrent postXfer calls.
+     */
     uint32_t proxyWorkerCount = kDefaultProxyWorkerCount;
-    /** @var Desired number of proxy channels per proxy runtime. */
+    /**
+     * @var Desired number of proxy channels per proxy runtime.
+     *      Channels may exceed workers; this is the supported way to expose
+     *      multiple GPU submission queues while using one proxy worker.
+     */
     uint32_t proxyChannelCount = kDefaultProxyChannelCount;
 
     /**

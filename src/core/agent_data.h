@@ -98,9 +98,6 @@ class nixlAgentData {
 
         // Bookkeeping from public memory view handles to backend engines
         std::unordered_map<nixlMemViewH, nixlBackendEngine &> mvhToEngine;
-        std::unique_ptr<ProxyRuntime> proxyRuntime;
-        std::unique_ptr<DeviceProxyBackendAdapter> proxyAdapter;
-        nixlBackendEngine *proxyTransportEngine = nullptr;
 
         std::unordered_map<std::string, std::unordered_map<nixl_backend_t, nixl_blob_t>>
             remoteBackends_;
@@ -121,6 +118,9 @@ class nixlAgentData {
         std::unordered_map<nixl_backend_t, std::unique_ptr<nixlBackendH>> backendHandles_;
         std::unordered_map<nixl_backend_t, nixl_blob_t> connMd_;
         backend_map_t backendEngines_;
+        std::unique_ptr<DeviceProxyBackendAdapter> proxyAdapter;
+        std::unique_ptr<ProxyRuntime> proxyRuntime;
+        nixlBackendEngine *proxyTransportEngine = nullptr;
         std::unordered_map<std::string, nixlRemoteSection> remoteSections_;
         std::unique_ptr<nixlTelemetry> telemetry_;
         nixlLocalSection localSection_;
