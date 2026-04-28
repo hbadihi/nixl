@@ -187,6 +187,12 @@ public:
                    size_t size,
                    nixlBackendReqH *&handle) const;
 
+    nixl_status_t
+    submitAtomicAdd(const nixlMetaDesc &remote,
+                    uint64_t value,
+                    size_t size,
+                    nixlBackendReqH *&handle) const;
+
     unsigned
     progress();
 

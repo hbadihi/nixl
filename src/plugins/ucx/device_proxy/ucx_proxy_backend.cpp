@@ -90,9 +90,29 @@ nixlUcxProxyBackend::submitPut(const PreparedProxySubmission &submission, uint64
 }
 
 nixl_status_t
-nixlUcxProxyBackend::submitAtomicAdd(const PreparedProxySubmission &,
-                                     uint64_t &) {
-    return NIXL_ERR_NOT_SUPPORTED;
+nixlUcxProxyBackend::submitAtomicAdd(const PreparedProxySubmission &submission,
+                                     uint64_t &request_token) {
+    nixlBackendReqH *handle = nullptr;
+    const size_t atomic_size = submission.size == 0 ? sizeof(uint64_t) : submission.size;
+    nixl_status_t status = engine_->submitAtomicAdd(submission.remote.desc,
+                                                    submission.value,
+                                                    atomic_size,
+                                                    handle);
+    if (status != NIXL_SUCCESS && status != NIXL_IN_PROG) {
+        NIXL_DEBUG << "nixlUcxProxyBackend::submitAtomicAdd: submitAtomicAdd failed status="
+                   << status;
+        return status;
+    }
+
+    request_token = trackRequest(handle);
+    NIXL_DEBUG << "nixlUcxProxyBackend::submitAtomicAdd: posted RDMA atomic add"
+               << " dst_addr=0x" << std::hex
+               << submission.remote.desc.addr << std::dec
+               << " size=" << submission.size
+               << " value=" << submission.value
+               << " remote_agent='" << submission.remote_agent << "'"
+               << " token=" << request_token;
+    return NIXL_SUCCESS;
 }
 
 nixl_status_t
