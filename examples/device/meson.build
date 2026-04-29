@@ -16,3 +16,13 @@
 if get_option('build_nixl_ep')
     subdir('ep')
 endif
+
+if get_option('build_device_pingpong')
+    if not gpu_device_api_supported
+        warning('GPU Device API backend is disabled or unavailable, skipping device pingpong benchmark')
+    elif not ucx_dep.found()
+        warning('UCX backend dependency not available, skipping device pingpong benchmark')
+    else
+        subdir('pingpong')
+    endif
+endif
