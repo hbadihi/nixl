@@ -18,6 +18,7 @@
 #include <iostream>
 #include <chrono>
 #include <iostream>
+#include <algorithm>
 #include <numeric>
 
 #include "nixl.h"
@@ -32,6 +33,7 @@
 #include "common/hw_info.h"
 #include "telemetry.h"
 #include "telemetry_event.h"
+#include "device_proxy/backend_provider.h"
 
 constexpr char TELEMETRY_ENABLED_VAR[] = "NIXL_TELEMETRY_ENABLE";
 static const std::vector<std::vector<std::string>> illegal_plugin_combinations = {
@@ -212,6 +214,8 @@ nixlAgent::nixlAgent(const std::string &name, const nixlAgentConfig &cfg) :
 }
 
 nixlAgent::~nixlAgent() {
+    data->shutdownProxyRuntime();
+
     if (data->needsCommThread_) {
         data->agentShutdown = true;
         while (!data->commQueue.empty()) {
@@ -317,6 +321,79 @@ nixlAgentData::warnAboutEfaHardwareMismatch() {
     }
 }
 
+bool
+nixlAgentData::proxyModeEnabled() const {
+    return config_.enableDeviceProxy;
+}
+
+bool
+nixlAgentData::hasProxyRuntime() const {
+    return proxyRuntime != nullptr;
+}
+
+nixl_status_t
+nixlAgentData::createProxyRuntime(nixlBackendEngine *engine,
+                                  const nixl_backend_t &backend,
+                                  const nixlBackendInitParams &init_params) {
+    if (!proxyModeEnabled()) {
+        return NIXL_ERR_NOT_SUPPORTED;
+    }
+    if (hasProxyRuntime()) {
+        return NIXL_SUCCESS;
+    }
+
+    auto *proxy_provider = dynamic_cast<DeviceProxyBackendProvider *>(engine);
+    if (proxy_provider == nullptr) {
+        return NIXL_ERR_NOT_SUPPORTED;
+    }
+
+    proxyAdapter = proxy_provider->createDeviceProxyBackendAdapter(init_params);
+    if (!proxyAdapter) {
+        return NIXL_ERR_NOT_SUPPORTED;
+    }
+
+    proxyRuntime = std::make_unique<ProxyRuntime>();
+
+    nixl_status_t status =
+        proxyRuntime->init(proxyAdapter.get(), config_.proxyChannelCount, config_.proxyWorkerCount, config_.pthrDelay);
+    if (status != NIXL_SUCCESS) {
+        proxyRuntime.reset();
+        proxyAdapter.reset();
+        return status;
+    }
+
+    status = proxyRuntime->startWorkers();
+    if (status != NIXL_SUCCESS) {
+        proxyRuntime->shutdown();
+        proxyRuntime.reset();
+        proxyAdapter.reset();
+        return status;
+    }
+
+    proxyTransportEngine = engine;
+    NIXL_INFO << "Enabled device proxy runtime for backend '" << backend << "' with "
+              << config_.proxyWorkerCount << " worker(s) and " << config_.proxyChannelCount << " channel(s)";
+    return NIXL_SUCCESS;
+}
+
+void
+nixlAgentData::shutdownProxyRuntime() {
+    if (proxyRuntime) {
+        proxyRuntime->shutdown();
+        proxyRuntime.reset();
+    }
+    proxyAdapter.reset();
+    proxyTransportEngine = nullptr;
+}
+
+void *
+nixlAgent::getProxyDeviceContext() const {
+    if (data->proxyRuntime) {
+        return data->proxyRuntime->deviceContext();
+    }
+    return nullptr;
+}
+
 nixl_status_t
 nixlAgent::createBackend(const nixl_backend_t &type,
                          const nixl_b_params_t &params,
@@ -419,6 +496,16 @@ nixlAgent::createBackend(const nixl_backend_t &type,
     bknd_hndl = it->second.get();
 
     data->backendEngines_.try_emplace(type, std::move(backend));
+
+    if (data->proxyModeEnabled() && !data->hasProxyRuntime()) {
+        nixl_status_t proxy_ret =
+            data->createProxyRuntime(data->backendEngines_[type].get(), type, init_params);
+        if ((proxy_ret != NIXL_SUCCESS) && (proxy_ret != NIXL_ERR_NOT_SUPPORTED)) {
+            NIXL_ERROR_FUNC << "Failed to initialize proxy runtime on backend '" << type
+                            << "' with status " << proxy_ret;
+            return proxy_ret;
+        }
+    }
 
     // TODO: Check if backend supports ProgThread
     //       when threading is in agent
@@ -1824,12 +1911,30 @@ nixlAgent::prepMemView(const nixl_remote_dlist_t &dlist,
         opt_args.customParam = extra_params->customParam;
     }
 
-    const auto status = engine->prepMemView(remote_meta_dlist, mvh, &opt_args);
-    if (status == NIXL_SUCCESS) {
+    if (data->hasProxyRuntime() && (data->proxyTransportEngine == engine)) {
+        nixlMemViewH proxy_mvh = nullptr;
+        nixl_status_t proxy_status =
+            data->proxyRuntime->registerProxyMemView(nullptr, &proxy_mvh);
+        if (proxy_status != NIXL_SUCCESS) {
+            return proxy_status;
+        }
+        proxy_status = data->proxyRuntime->storeMetadata(proxy_mvh, remote_meta_dlist);
+        if (proxy_status != NIXL_SUCCESS) {
+            data->proxyRuntime->unregisterProxyMemView(proxy_mvh);
+            return proxy_status;
+        }
+        mvh = proxy_mvh;
         data->mvhToEngine.emplace(mvh, *engine);
+        return NIXL_SUCCESS;
     }
 
-    return status;
+    const auto status = engine->prepMemView(remote_meta_dlist, mvh, &opt_args);
+    if (status != NIXL_SUCCESS) {
+        return status;
+    }
+
+    data->mvhToEngine.emplace(mvh, *engine);
+    return NIXL_SUCCESS;
 }
 
 nixl_status_t
@@ -1862,12 +1967,30 @@ nixlAgent::prepMemView(const nixl_local_dlist_t &dlist,
         opt_args.customParam = extra_params->customParam;
     }
 
-    const auto status = engine->prepMemView(meta_dlist, mvh, &opt_args);
-    if (status == NIXL_SUCCESS) {
+    if (data->hasProxyRuntime() && (data->proxyTransportEngine == engine)) {
+        nixlMemViewH proxy_mvh = nullptr;
+        nixl_status_t proxy_status =
+            data->proxyRuntime->registerProxyMemView(nullptr, &proxy_mvh);
+        if (proxy_status != NIXL_SUCCESS) {
+            return proxy_status;
+        }
+        proxy_status = data->proxyRuntime->storeMetadata(proxy_mvh, meta_dlist);
+        if (proxy_status != NIXL_SUCCESS) {
+            data->proxyRuntime->unregisterProxyMemView(proxy_mvh);
+            return proxy_status;
+        }
+        mvh = proxy_mvh;
         data->mvhToEngine.emplace(mvh, *engine);
+        return NIXL_SUCCESS;
     }
 
-    return status;
+    const auto status = engine->prepMemView(meta_dlist, mvh, &opt_args);
+    if (status != NIXL_SUCCESS) {
+        return status;
+    }
+
+    data->mvhToEngine.emplace(mvh, *engine);
+    return NIXL_SUCCESS;
 }
 
 void
@@ -1880,6 +2003,17 @@ nixlAgent::releaseMemView(nixlMemViewH mvh) const {
         return;
     }
 
-    it->second.releaseMemView(mvh);
+    nixlMemViewH backend_mvh = mvh;
+    if (data->hasProxyRuntime()) {
+        nixlMemViewH resolved = nullptr;
+        if (data->proxyRuntime->resolveProxyMemView(mvh, resolved)) {
+            backend_mvh = resolved;
+            data->proxyRuntime->unregisterProxyMemView(mvh);
+        }
+    }
+
+    if (backend_mvh != nullptr) {
+        it->second.releaseMemView(backend_mvh);
+    }
     data->mvhToEngine.erase(it);
 }
