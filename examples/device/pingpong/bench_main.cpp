@@ -16,9 +16,11 @@
 #include "bench_host.h"
 #include "bench_kernel_iface.h"
 #include <cuda_runtime.h>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <thread>
 
@@ -114,6 +116,24 @@ single_process_run(size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
 
     BenchContext  sender_ctx, recvr_ctx;
     nixl_status_t sender_st = NIXL_SUCCESS, recvr_st = NIXL_SUCCESS;
+    std::mutex setup_mutex;
+    std::condition_variable setup_cv;
+    int setup_ready_count = 0;
+    bool setup_failed = false;
+
+    auto wait_for_peer_setup = [&]() -> bool {
+        std::unique_lock<std::mutex> lock(setup_mutex);
+        ++setup_ready_count;
+        setup_cv.notify_all();
+        setup_cv.wait(lock, [&]() { return setup_ready_count == 2 || setup_failed; });
+        return !setup_failed;
+    };
+
+    auto signal_setup_failed = [&]() {
+        std::lock_guard<std::mutex> lock(setup_mutex);
+        setup_failed = true;
+        setup_cv.notify_all();
+    };
 
     // ---- Sender thread -------------------------------------------------------
     std::thread sender_thr([&]() {
@@ -132,9 +152,11 @@ single_process_run(size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
                                      /*my_port=*/base_port);
         if (sender_st != NIXL_SUCCESS) {
             fprintf(stderr, "[sender] setup failed (%d) — exiting thread\n", sender_st);
+            signal_setup_failed();
             return;
         }
         fprintf(stderr, "[sender] setup complete\n");
+        if (!wait_for_peer_setup()) return;
 
         gpu_bench_ctx kctx;
         kctx.local_mvh    = sender_ctx.local_mvh;
@@ -177,9 +199,11 @@ single_process_run(size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
                                    /*my_port=*/base_port + 1);
         if (recvr_st != NIXL_SUCCESS) {
             fprintf(stderr, "[recvr] setup failed (%d) — exiting thread\n", recvr_st);
+            signal_setup_failed();
             return;
         }
         fprintf(stderr, "[recvr] setup complete\n");
+        if (!wait_for_peer_setup()) return;
 
         gpu_bench_ctx kctx;
         kctx.local_mvh    = recvr_ctx.local_mvh;
