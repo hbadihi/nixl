@@ -16,6 +16,7 @@
  */
 
 #include "ucx_backend.h"
+#include "device_proxy/ucx_proxy_backend.h"
 #include "common/nixl_log.h"
 #include "serdes/serdes.h"
 #include "common/nixl_log.h"
@@ -871,6 +872,11 @@ nixlUcxEngine::~nixlUcxEngine() {
 
 nixl_status_t nixlUcxEngine::checkConn(const std::string &remote_agent) {
     return remoteConnMap.count(remote_agent) ? NIXL_SUCCESS : NIXL_ERR_NOT_FOUND;
+}
+
+std::unique_ptr<DeviceProxyBackendAdapter>
+nixlUcxEngine::createDeviceProxyBackendAdapter(const nixlBackendInitParams &init_params) {
+    return std::make_unique<nixlUcxProxyBackend>(this, init_params.enableProgTh);
 }
 
 nixl_status_t nixlUcxEngine::getConnInfo(std::string &str) const {

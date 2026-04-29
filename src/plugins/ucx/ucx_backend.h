@@ -32,6 +32,7 @@
 #include "nixl.h"
 
 #include "backend/backend_engine.h"
+#include "device_proxy/backend_provider.h"
 #include "common/nixl_time.h"
 
 #include "mem_list.h"
@@ -92,7 +93,7 @@ private:
     const std::vector<nixl::ucx::rkey> rkeys_;
 };
 
-class nixlUcxEngine : public nixlBackendEngine {
+class nixlUcxEngine : public nixlBackendEngine, public DeviceProxyBackendProvider {
 public:
     static std::unique_ptr<nixlUcxEngine>
     create(const nixlBackendInitParams &init_params);
@@ -194,6 +195,9 @@ public:
     // public function for UCX worker to mark connections as connected
     nixl_status_t
     checkConn(const std::string &remote_agent);
+
+    std::unique_ptr<DeviceProxyBackendAdapter>
+    createDeviceProxyBackendAdapter(const nixlBackendInitParams &init_params) override;
 
     nixl_status_t
     prepMemView(const nixl_remote_meta_dlist_t &,
