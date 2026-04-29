@@ -22,13 +22,28 @@
 #include "nixl_metadata_context.h"
 #include "telemetry.h"
 #include "tracing/trace.h"
+#include "device_proxy/proxy_runtime.h"
 #include "sync.h"
 
 #include <atomic>
+#include <cstdint>
 #include <functional>
 #include <memory>
 
+class nixlBackendEngine;
+class nixlBackendInitParams;
+class nixlProxyRuntime;
+
 using backend_list_t = std::vector<nixlBackendEngine*>;
+
+enum class ProxyOrchestrationPhase : uint8_t {
+    Disabled = 0,
+    Registered,
+    MetadataPending,
+    ReadyToBootstrap,
+    Active,
+    ShuttingDown,
+};
 
 // Implements nixlMetadataContext, which is the whole surface a metadata backend
 // sees of the agent: serialization, cache load and invalidation, nothing else.
@@ -54,7 +69,7 @@ class nixlAgentData final : public nixlMetadataContext {
         backend_list_t                         notifEngines;
         std::array<backend_list_t, FILE_SEG+1> memToBackend;
 
-        // Bookkeeping from memory view handles to backend engines
+        // Bookkeeping from public memory view handles to backend engines
         std::unordered_map<nixlMemViewH, nixlBackendEngine &> mvhToEngine;
 
         std::unordered_map<std::string, std::unordered_map<nixl_backend_t, nixl_blob_t>>
@@ -65,6 +80,8 @@ class nixlAgentData final : public nixlMetadataContext {
         std::unordered_map<nixl_backend_t, std::unique_ptr<nixlBackendH>> backendHandles_;
         std::unordered_map<nixl_backend_t, nixl_blob_t> connMd_;
         backend_map_t backendEngines_;
+        std::unique_ptr<nixlProxyRuntime> proxyRuntime;
+        nixlBackendEngine *proxyTransportEngine = nullptr;
         std::unordered_map<std::string, nixlRemoteSection> remoteSections_;
         std::unique_ptr<nixlTelemetry> telemetry_;
         // Composite tracer (fans out to every enabled backend); null when no
@@ -99,6 +116,16 @@ class nixlAgentData final : public nixlMetadataContext {
         getBackends(const nixl_opt_args_t *opt_args,
                     const nixlMemSection &section,
                     nixl_mem_t mem_type);
+        [[nodiscard]] bool
+        proxyModeEnabled() const;
+        [[nodiscard]] bool
+        hasProxyRuntime() const;
+        nixl_status_t
+        createProxyRuntime(nixlBackendEngine *engine,
+                           const nixl_backend_t &backend,
+                           const nixlBackendInitParams &init_params);
+        void
+        shutdownProxyRuntime();
         void
         warnAboutEfaHardwareMismatch();
 
@@ -121,9 +148,6 @@ class nixlAgentData final : public nixlMetadataContext {
 };
 
 // clang-format on
-
-class nixlBackendEngine;
-
 // This class hides away the nixlBackendEngine from user of the Agent API
 class nixlBackendH {
     private:
