@@ -114,6 +114,11 @@ public:
         return true;
     }
 
+    bool
+    supportsProxy() const override {
+        return true;
+    }
+
     nixl_mem_list_t
     getSupportedMems() const override;
 
