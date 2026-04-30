@@ -6,9 +6,10 @@
 # device pingpong benchmark.  Python port of profile_overhead.sh.
 #
 # Modes:
-#   sweep    [--iters N] [--warmup N]                 msg-size sweep on both binaries
-#   nsys     [--size N]  [--iters N] [--warmup N]     capture an Nsight Systems trace
-#   ucxinfo  [--size N]  [--iters N] [--warmup N]     dump UCX_PROTO_INFO for both
+#   sweep          [--iters N] [--warmup N]                 msg-size sweep on both binaries
+#   cluster-submit [--iters N] [--warmup N]                 two-host submit-overhead sweep
+#   nsys           [--size N]  [--iters N] [--warmup N]     capture an Nsight Systems trace
+#   ucxinfo        [--size N]  [--iters N] [--warmup N]     dump UCX_PROTO_INFO for both
 #   all                                               sweep + nsys + ucxinfo (defaults)
 #
 # Examples:
@@ -34,6 +35,15 @@
 #   NIXL_LOG_LEVEL    forwarded to bench          (default: FATAL)
 #   NIXL_PROXY_STATS  forwarded to bench          (default: 1)
 #
+# Two-host submit sweep env vars:
+#   SENDER_HOST     ssh target and advertised sender peer IP
+#   RECEIVER_HOST   ssh target and advertised receiver peer IP
+#   SENDER_GPU      sender GPU id                  (default: $SEND_GPU)
+#   RECEIVER_GPU    receiver GPU id                (default: $RECV_GPU)
+#   REMOTE_BIN_DIR  directory holding remote bins   (default: $BIN_DIR)
+#   REMOTE_OUT_DIR  remote stdout/stderr directory  (default: $OUT_DIR)
+#   SSH_CMD         ssh command prefix              (default: ssh)
+#
 # Stdlib only — no pip dependencies.
 
 from __future__ import annotations
@@ -41,8 +51,10 @@ from __future__ import annotations
 import argparse
 import csv
 import datetime as _dt
+import math
 import os
 import re
+import shlex
 import shutil
 import signal
 import socket
@@ -85,6 +97,14 @@ _DEFAULT_OUT = (
     REPO_ROOT / "profile_results" / _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
 )
 OUT_DIR = Path(os.environ.get("OUT_DIR", _DEFAULT_OUT)).resolve()
+
+SENDER_HOST = os.environ.get("SENDER_HOST", "")
+RECEIVER_HOST = os.environ.get("RECEIVER_HOST", "")
+SENDER_GPU = os.environ.get("SENDER_GPU", SEND_GPU)
+RECEIVER_GPU = os.environ.get("RECEIVER_GPU", RECV_GPU)
+REMOTE_BIN_DIR = os.environ.get("REMOTE_BIN_DIR", str(BIN_DIR))
+REMOTE_OUT_DIR = os.environ.get("REMOTE_OUT_DIR", str(OUT_DIR))
+SSH_CMD = os.environ.get("SSH_CMD", "ssh")
 
 # Inherited env we want to push down to children.  Quiets the bench logs by
 # default — bench_host.cpp spins on prepMemView until remote metadata loads
@@ -227,13 +247,20 @@ class RunSpec:
     tag: str
     nsys_rep: Optional[Path] = None  # if set, wrap sender in `nsys profile`
     extra_env: Optional[dict] = None  # extra env vars for both procs
+    measure_submit: bool = False
 
 
 def _build_args(
-    role: str, listen_port: int, peer_port: int, spec: RunSpec, gpu: str
+    role: str,
+    listen_port: int,
+    peer_port: int,
+    spec: RunSpec,
+    gpu: str,
+    peer_ip: str = RECV_HOST,
+    binary: Optional[Path] = None,
 ) -> list[str]:
     args = [
-        str(spec.binary),
+        str(binary or spec.binary),
         "--role",
         role,
         "--gpu",
@@ -241,7 +268,7 @@ def _build_args(
         "--listen-port",
         str(listen_port),
         "--peer-ip",
-        RECV_HOST,
+        peer_ip,
         "--peer-port",
         str(peer_port),
         "--msg-size",
@@ -253,6 +280,8 @@ def _build_args(
     ]
     if USE_WARP:
         args.append("--warp")
+    if spec.measure_submit:
+        args.append("--measure-submit")
     return args
 
 
@@ -327,14 +356,190 @@ def run_one(spec: RunSpec) -> tuple[int, str]:
     return 0, send_out.read_text(errors="replace")
 
 
+# ---------- two-host submit sweep --------------------------------------------
+
+
+def _ssh_prefix() -> list[str]:
+    return shlex.split(SSH_CMD)
+
+
+def _remote_path(binary: Path) -> Path:
+    return Path(REMOTE_BIN_DIR) / binary.name
+
+
+def _shell_join(argv: list[str]) -> str:
+    return " ".join(shlex.quote(str(arg)) for arg in argv)
+
+
+def _remote_cmd(host: str, argv: list[str], env: dict) -> list[str]:
+    env_parts = [
+        f"{key}={shlex.quote(str(value))}" for key, value in sorted(env.items())
+    ]
+    cmd = f"mkdir -p {shlex.quote(REMOTE_OUT_DIR)} && cd {shlex.quote(REMOTE_OUT_DIR)} && "
+    if env_parts:
+        cmd += "env " + " ".join(env_parts) + " "
+    cmd += _shell_join(argv)
+    return [*_ssh_prefix(), host, cmd]
+
+
+def check_cluster_submit_config() -> None:
+    missing = [
+        name
+        for name, value in (
+            ("SENDER_HOST", SENDER_HOST),
+            ("RECEIVER_HOST", RECEIVER_HOST),
+            ("REMOTE_BIN_DIR", REMOTE_BIN_DIR),
+        )
+        if not value
+    ]
+    if missing:
+        print("ERROR: cluster-submit requires " + ", ".join(missing), file=sys.stderr)
+        sys.exit(2)
+
+    if not _ssh_prefix():
+        print("ERROR: SSH_CMD must not be empty", file=sys.stderr)
+        sys.exit(2)
+
+
+def run_cluster_one(spec: RunSpec) -> tuple[int, str]:
+    """Run one two-host point via ssh and return (sender rc, sender stdout)."""
+    recv_out = OUT_DIR / f"{spec.tag}_recv.out"
+    recv_err = OUT_DIR / f"{spec.tag}_recv.err"
+    send_out = OUT_DIR / f"{spec.tag}_send.out"
+    send_err = OUT_DIR / f"{spec.tag}_send.err"
+
+    p_recv, p_send = _ports.next_pair()
+    log(
+        f"  cluster tag={spec.tag} size={spec.size} iters={spec.iters} "
+        f"warmup={spec.warmup} ports=recv:{p_recv}/send:{p_send}"
+    )
+
+    env = child_env(spec.extra_env)
+    remote_binary = _remote_path(spec.binary)
+    recv_args = _build_args(
+        "receiver",
+        p_recv,
+        p_send,
+        spec,
+        RECEIVER_GPU,
+        peer_ip=SENDER_HOST,
+        binary=remote_binary,
+    )
+    send_args = _build_args(
+        "sender",
+        p_send,
+        p_recv,
+        spec,
+        SENDER_GPU,
+        peer_ip=RECEIVER_HOST,
+        binary=remote_binary,
+    )
+
+    recv_cmd = _remote_cmd(RECEIVER_HOST, recv_args, env)
+    send_cmd = _remote_cmd(SENDER_HOST, send_args, env)
+
+    with open(recv_out, "wb") as ro, open(recv_err, "wb") as re_:
+        recv_proc = subprocess.Popen(recv_cmd, stdout=ro, stderr=re_)
+
+    time.sleep(1)
+
+    rc = 0
+    try:
+        with open(send_out, "wb") as so, open(send_err, "wb") as se:
+            rc = subprocess.call(send_cmd, stdout=so, stderr=se)
+    finally:
+        deadline = time.monotonic() + RECV_WAIT_S
+        while recv_proc.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.5)
+        if recv_proc.poll() is None:
+            log(
+                f"    remote receiver ssh pid={recv_proc.pid} still alive after "
+                f"{RECV_WAIT_S}s - killing"
+            )
+            recv_proc.kill()
+            try:
+                recv_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+
+    if rc != 0:
+        log(
+            f"    sender FAILED (rc={rc}) - see {send_out} {send_err} {recv_out} {recv_err}"
+        )
+        return rc, ""
+
+    return 0, send_out.read_text(errors="replace")
+
+
 # ---------- output parsing ---------------------------------------------------
 
-_RTT_RE = re.compile(r"RTT=([0-9.]+)\s*us")
+_FLOAT = r"([-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?)"
+_KEYVAL_RE = re.compile(rf"\b(issue_us|submit_us|one_way_us|rtt_us)={_FLOAT}\b")
+_RTT_RE = re.compile(rf"\bRTT={_FLOAT}\s*us\b")
+_ONE_WAY_RE = re.compile(rf"\bone-way={_FLOAT}\s*us\b")
+_TABLE_ROW_RE = re.compile(
+    rf"^\s*(issue|submit|one-way|rtt)\s+{_FLOAT}(?:\s+|$)", re.MULTILINE
+)
 
 
-def parse_rtt_us(text: str) -> Optional[float]:
-    m = _RTT_RE.search(text)
-    return float(m.group(1)) if m else None
+@dataclass
+class BenchMetrics:
+    issue_us: Optional[float] = None
+    submit_us: Optional[float] = None
+    one_way_us: Optional[float] = None
+    rtt_us: Optional[float] = None
+
+
+def _parse_float(value: str) -> Optional[float]:
+    try:
+        parsed = float(value)
+    except ValueError:
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
+def parse_metrics(text: str) -> BenchMetrics:
+    """Parse benchmark stdout in table, key=value, and legacy RTT formats."""
+    metrics = BenchMetrics()
+    for key, value in _KEYVAL_RE.findall(text):
+        parsed = _parse_float(value)
+        if parsed is not None:
+            setattr(metrics, key, parsed)
+
+    for label, value in _TABLE_ROW_RE.findall(text):
+        parsed = _parse_float(value)
+        if parsed is None:
+            continue
+        if label == "issue" and metrics.issue_us is None:
+            metrics.issue_us = parsed
+        elif label == "submit" and metrics.submit_us is None:
+            metrics.submit_us = parsed
+        elif label == "one-way" and metrics.one_way_us is None:
+            metrics.one_way_us = parsed
+        elif label == "rtt" and metrics.rtt_us is None:
+            metrics.rtt_us = parsed
+
+    if metrics.one_way_us is None:
+        m = _ONE_WAY_RE.search(text)
+        if m:
+            metrics.one_way_us = _parse_float(m.group(1))
+
+    if metrics.rtt_us is None:
+        m = _RTT_RE.search(text)
+        if m:
+            metrics.rtt_us = _parse_float(m.group(1))
+
+    return metrics
+
+
+def normalize_metrics(metrics: BenchMetrics, variant: str) -> BenchMetrics:
+    if variant == "ucx" and metrics.submit_us is None:
+        metrics.submit_us = metrics.issue_us
+    return metrics
+
+
+def fmt_metric(value: Optional[float]) -> str:
+    return f"{value:.6f}" if value is not None else "NaN"
 
 
 # ---------- mode: sweep ------------------------------------------------------
@@ -346,7 +551,18 @@ def do_sweep(iters: int, warmup: int) -> None:
 
     with open(csv_path, "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["variant", "msg_size", "iters", "warmup", "rtt_us"])
+        w.writerow(
+            [
+                "variant",
+                "msg_size",
+                "iters",
+                "warmup",
+                "issue_us",
+                "submit_us",
+                "one_way_us",
+                "rtt_us",
+            ]
+        )
 
         for size in SIZES:
             for variant, binary in (("ucx", UCX_BIN), ("proxy", PROXY_BIN)):
@@ -356,12 +572,28 @@ def do_sweep(iters: int, warmup: int) -> None:
                 )
                 rc, out = run_one(spec)
                 if rc == 0:
-                    rtt = parse_rtt_us(out)
-                    rtt_str = f"{rtt:.6f}" if rtt is not None else "NaN"
-                    w.writerow([variant, size, iters, warmup, rtt_str])
-                    log(f"    {variant} size={size} -> {rtt_str} us")
+                    metrics = normalize_metrics(parse_metrics(out), variant)
+                    rtt_str = fmt_metric(metrics.rtt_us)
+                    one_way_str = fmt_metric(metrics.one_way_us)
+                    w.writerow(
+                        [
+                            variant,
+                            size,
+                            iters,
+                            warmup,
+                            fmt_metric(metrics.issue_us),
+                            fmt_metric(metrics.submit_us),
+                            one_way_str,
+                            rtt_str,
+                        ]
+                    )
+                    log(
+                        f"    {variant} size={size} -> one-way={one_way_str} rtt={rtt_str} us"
+                    )
                 else:
-                    w.writerow([variant, size, iters, warmup, "FAIL"])
+                    w.writerow(
+                        [variant, size, iters, warmup, "FAIL", "FAIL", "FAIL", "FAIL"]
+                    )
                 f.flush()
                 time.sleep(1)
 
@@ -372,29 +604,31 @@ def do_sweep(iters: int, warmup: int) -> None:
 def print_sweep_summary(csv_path: Path) -> None:
     txt_path = OUT_DIR / "summary.txt"
 
-    # variant -> size -> rtt (float) or None
-    rtts: dict[str, dict[int, Optional[float]]] = {"ucx": {}, "proxy": {}}
+    # variant -> size -> one-way latency (float) or None
+    one_ways: dict[str, dict[int, Optional[float]]] = {"ucx": {}, "proxy": {}}
     with open(csv_path) as f:
         reader = csv.DictReader(f)
         for row in reader:
             try:
                 size = int(row["msg_size"])
-                val: Optional[float] = float(row["rtt_us"])
+                val = _parse_float(row.get("one_way_us", ""))
             except (ValueError, KeyError):
                 size = int(row.get("msg_size", "0") or 0)
                 val = None
-            rtts.setdefault(row["variant"], {})[size] = val
+            one_ways.setdefault(row["variant"], {})[size] = val
 
-    sizes = sorted(set(SIZES) | set(rtts["ucx"].keys()) | set(rtts["proxy"].keys()))
+    sizes = sorted(
+        set(SIZES) | set(one_ways["ucx"].keys()) | set(one_ways["proxy"].keys())
+    )
 
     lines: list[str] = [
         f"Sweep summary  (csv: {csv_path})",
         "---------------------------------------------------------------------------",
-        f"  {'msg_size':>10}  {'ucx_us':>12}  {'proxy_us':>12}  {'delta_us':>12}  {'ratio':>10}",
+        f"  {'msg_size':>10}  {'ucx_oneway':>12}  {'proxy_oneway':>12}  {'delta_us':>12}  {'ratio':>10}",
     ]
     for s in sizes:
-        u = rtts["ucx"].get(s)
-        p = rtts["proxy"].get(s)
+        u = one_ways["ucx"].get(s)
+        p = one_ways["proxy"].get(s)
         if u and p and u > 0 and p > 0:
             lines.append(
                 f"  {s:>10d}  {u:>12.2f}  {p:>12.2f}  {p - u:>12.2f}  {p / u:>9.2f}x"
@@ -403,6 +637,125 @@ def print_sweep_summary(csv_path: Path) -> None:
             u_s = f"{u:.2f}" if u else "FAIL"
             p_s = f"{p:.2f}" if p else "FAIL"
             lines.append(f"  {s:>10d}  {u_s:>12}  {p_s:>12}  {'-':>12}  {'-':>10}")
+
+    body = "\n".join(lines) + "\n"
+    sys.stdout.write(body)
+    sys.stdout.flush()
+    txt_path.write_text(body)
+    log(f"wrote {txt_path}")
+
+
+def do_cluster_submit(iters: int, warmup: int) -> None:
+    check_cluster_submit_config()
+    csv_path = OUT_DIR / "submit_sweep.csv"
+    log(
+        "cluster-submit "
+        f"sender={SENDER_HOST} receiver={RECEIVER_HOST} "
+        f"iters={iters} warmup={warmup} sizes=({' '.join(map(str, SIZES))})"
+    )
+
+    with open(csv_path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(
+            [
+                "variant",
+                "msg_size",
+                "iters",
+                "warmup",
+                "issue_us",
+                "submit_us",
+                "one_way_us",
+                "rtt_us",
+            ]
+        )
+
+        for size in SIZES:
+            for variant, binary in (("ucx", UCX_BIN), ("proxy", PROXY_BIN)):
+                tag = f"submit_{variant}_{size}"
+                spec = RunSpec(
+                    binary=binary,
+                    size=size,
+                    iters=iters,
+                    warmup=warmup,
+                    tag=tag,
+                    measure_submit=True,
+                )
+                rc, out = run_cluster_one(spec)
+                if rc == 0:
+                    metrics = normalize_metrics(parse_metrics(out), variant)
+                    issue_str = fmt_metric(metrics.issue_us)
+                    submit_str = fmt_metric(metrics.submit_us)
+                    one_way_str = fmt_metric(metrics.one_way_us)
+                    rtt_str = fmt_metric(metrics.rtt_us)
+                    w.writerow(
+                        [
+                            variant,
+                            size,
+                            iters,
+                            warmup,
+                            issue_str,
+                            submit_str,
+                            one_way_str,
+                            rtt_str,
+                        ]
+                    )
+                    log(
+                        f"    {variant} size={size} -> "
+                        f"issue={issue_str} submit={submit_str} one-way={one_way_str} rtt={rtt_str} us"
+                    )
+                else:
+                    w.writerow(
+                        [variant, size, iters, warmup, "FAIL", "FAIL", "FAIL", "FAIL"]
+                    )
+                f.flush()
+                time.sleep(1)
+
+    log(f"wrote {csv_path}")
+    print_submit_summary(csv_path)
+
+
+def _read_metric_by_variant(
+    csv_path: Path, column: str
+) -> dict[str, dict[int, Optional[float]]]:
+    metrics: dict[str, dict[int, Optional[float]]] = {"ucx": {}, "proxy": {}}
+    with open(csv_path) as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            try:
+                size = int(row["msg_size"])
+            except (ValueError, KeyError):
+                continue
+            value = _parse_float(row.get(column, ""))
+            metrics.setdefault(row.get("variant", ""), {})[size] = value
+    return metrics
+
+
+def print_submit_summary(csv_path: Path) -> None:
+    txt_path = OUT_DIR / "submit_summary.txt"
+    submits = _read_metric_by_variant(csv_path, "submit_us")
+    sizes = sorted(
+        set(SIZES) | set(submits["ucx"].keys()) | set(submits["proxy"].keys())
+    )
+
+    lines: list[str] = [
+        f"Submit summary  (csv: {csv_path})",
+        "---------------------------------------------------------------------------",
+        f"  {'msg_size':>10}  {'ucx_submit':>12}  {'proxy_submit':>12}  {'delta_us':>12}  {'ratio':>10}",
+    ]
+    for size in sizes:
+        ucx = submits["ucx"].get(size)
+        proxy = submits["proxy"].get(size)
+        if ucx and proxy and ucx > 0 and proxy > 0:
+            lines.append(
+                f"  {size:>10d}  {ucx:>12.2f}  {proxy:>12.2f}  "
+                f"{proxy - ucx:>12.2f}  {proxy / ucx:>9.2f}x"
+            )
+        else:
+            ucx_s = f"{ucx:.2f}" if ucx else "FAIL"
+            proxy_s = f"{proxy:.2f}" if proxy else "FAIL"
+            lines.append(
+                f"  {size:>10d}  {ucx_s:>12}  {proxy_s:>12}  {'-':>12}  {'-':>10}"
+            )
 
     body = "\n".join(lines) + "\n"
     sys.stdout.write(body)
@@ -465,6 +818,10 @@ def _build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--iters", type=int, default=DEFAULT_ITERS)
     sp.add_argument("--warmup", type=int, default=DEFAULT_WARMUP)
 
+    cp = sub.add_parser("cluster-submit", help="two-host submit-overhead sweep")
+    cp.add_argument("--iters", type=int, default=DEFAULT_ITERS)
+    cp.add_argument("--warmup", type=int, default=DEFAULT_WARMUP)
+
     np = sub.add_parser("nsys", help="capture an Nsight Systems trace")
     np.add_argument("--size", type=int, default=8192)
     np.add_argument("--iters", type=int, default=2000)
@@ -484,7 +841,10 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     args = _build_parser().parse_args(list(argv) if argv is not None else None)
     mode = args.mode or "sweep"
 
-    check_binaries()
+    if mode == "cluster-submit":
+        check_cluster_submit_config()
+    else:
+        check_binaries()
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     maybe_kill_stale()
@@ -492,6 +852,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
 
     if mode == "sweep":
         do_sweep(args.iters, args.warmup)
+    elif mode == "cluster-submit":
+        do_cluster_submit(args.iters, args.warmup)
     elif mode == "nsys":
         do_nsys(args.size, args.iters, args.warmup)
     elif mode == "ucxinfo":
