@@ -10,6 +10,14 @@
 // ---- GPU-side context passed directly into the kernel -------------------------
 // All pointers must be device-accessible (cudaMalloc'd).
 
+struct gpu_cycle_stats {
+    uint64_t count;
+    uint64_t sum;
+    uint64_t min;
+    uint64_t max;
+    double   sum_sq;
+};
+
 struct gpu_bench_ctx {
     nixlMemViewH local_mvh;  // view of local send_buf
     nixlMemViewH remote_mvh; // view of peer's recv_buf
@@ -19,6 +27,9 @@ struct gpu_bench_ctx {
     uint64_t     num_iters;
     uint64_t     warmup_iters;
     bool         is_sender;
+    gpu_cycle_stats *issue_stats;  // optional: nixlPut issue-cycle samples
+    gpu_cycle_stats *submit_stats; // optional: submit-boundary cycle samples
+    gpu_cycle_stats *rtt_stats;    // optional: pingpong RTT cycle samples
 };
 
 // ---- Launch wrappers ----------------------------------------------------------

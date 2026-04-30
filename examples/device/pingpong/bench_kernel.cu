@@ -10,6 +10,23 @@ wait_sequence_number(volatile uint64_t *counter, uint64_t expected_value) {
     }
 }
 
+__device__ static void
+record_cycle_sample(gpu_cycle_stats *stats, uint64_t cycles) {
+    if (stats == nullptr) {
+        return;
+    }
+    if (stats->count == 0) {
+        stats->min = cycles;
+        stats->max = cycles;
+    } else {
+        stats->min = cycles < stats->min ? cycles : stats->min;
+        stats->max = cycles > stats->max ? cycles : stats->max;
+    }
+    stats->count += 1;
+    stats->sum += cycles;
+    stats->sum_sq += static_cast<double>(cycles) * static_cast<double>(cycles);
+}
+
 template<nixl_gpu_level_t level>
 __device__ static nixl_status_t
 do_put_async(nixlMemViewH local_mvh,
@@ -47,6 +64,20 @@ do_put_sync(nixlMemViewH local_mvh,
     return status;
 }
 
+template<nixl_gpu_level_t level>
+__device__ static nixl_status_t
+wait_submit_boundary(nixlGpuXferStatusH &xfer_status) {
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    nixl_status_t status;
+    do {
+        status = nixlProxyPollSubmitted<level>(xfer_status);
+    } while (status == NIXL_IN_PROG);
+    return status;
+#else
+    (void)xfer_status;
+    return NIXL_SUCCESS;
+#endif
+}
 
 template<nixl_gpu_level_t level>
 __global__ void
@@ -67,6 +98,9 @@ nixl_pingpong_latency_kernel(gpu_bench_ctx ctx, uint64_t *elapsed_device) {
 
     const size_t total_size = ctx.msg_size + sizeof(uint64_t); // Message size + counter
     nixlGpuXferStatusH xfer_status;
+    const bool measure_submit =
+        ctx.is_sender && ctx.issue_stats != nullptr && ctx.submit_stats != nullptr;
+    const bool measure_rtt = ctx.is_sender && ctx.rtt_stats != nullptr;
 
     // warmup
     const uint64_t total_iters = ctx.num_iters + ctx.warmup_iters;
@@ -79,17 +113,62 @@ nixl_pingpong_latency_kernel(gpu_bench_ctx ctx, uint64_t *elapsed_device) {
 
         // ping pong body
         if (ctx.is_sender) {
+            const bool timed_iter = i >= ctx.warmup_iters;
+            uint64_t rtt_start = 0;
+            if (timed_iter && measure_rtt && lane_id == 0) {
+                rtt_start = clock64();
+            }
             if (lane_id == 0) {
                 *send_counter = i + 1; // Increment send counter to signal the receiver
             }
             if constexpr (is_warp) {
                 __syncwarp(); // Ensure all threads see the updated counter
             }
-            do_put_async<level>(ctx.local_mvh, ctx.remote_mvh, total_size, xfer_status);
+            uint64_t issue_start = 0;
+            if (timed_iter && measure_submit && lane_id == 0) {
+                issue_start = clock64();
+            }
+            nixl_status_t put_status =
+                do_put_async<level>(ctx.local_mvh, ctx.remote_mvh, total_size, xfer_status);
+            if constexpr (is_warp) {
+                put_status = static_cast<nixl_status_t>(
+                    __shfl_sync(0xffffffff, static_cast<int>(put_status), 0));
+            }
+            if (put_status != NIXL_IN_PROG) {
+                return;
+            }
+            uint64_t issue_end = 0;
+            if (timed_iter && measure_submit && lane_id == 0) {
+                issue_end = clock64();
+            }
+            if (timed_iter && measure_submit) {
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+                nixl_status_t submit_status = wait_submit_boundary<level>(xfer_status);
+                if (submit_status != NIXL_SUCCESS) {
+                    if (lane_id == 0) {
+                        printf("submit boundary failed with status %d\n", submit_status);
+                    }
+                    return;
+                }
+#endif
+                if (lane_id == 0) {
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+                    uint64_t submit_end = clock64();
+#else
+                    uint64_t submit_end = issue_end;
+#endif
+                    record_cycle_sample(ctx.issue_stats, issue_end - issue_start);
+                    record_cycle_sample(ctx.submit_stats, submit_end - issue_start);
+                }
+            }
 
             if (lane_id == 0) {
                 wait_sequence_number(recv_counter,
                                      i + 1); // Wait for the receiver to process the message
+                if (timed_iter && measure_rtt) {
+                    uint64_t rtt_end = clock64();
+                    record_cycle_sample(ctx.rtt_stats, rtt_end - rtt_start);
+                }
             }
             if constexpr (is_warp) {
                 __syncwarp(); // Ensure all threads are synchronized before the next iteration

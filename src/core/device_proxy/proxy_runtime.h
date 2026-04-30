@@ -59,6 +59,10 @@ struct alignas(64) ChannelState {
     CompletionSlot  *completion_slot_host_ = nullptr;
     /** Device-mapped alias of completion_slot_host_ for ProxyChannelView. */
     CompletionSlot  *completion_slot_dev_  = nullptr;
+    /** Mapped pinned host memory; proxy worker publishes after backend submit returns. */
+    uint64_t        *submitted_idx_host_ = nullptr;
+    /** Device-mapped alias of submitted_idx_host_ for ProxyChannelView. */
+    uint64_t        *submitted_idx_dev_  = nullptr;
 
     ChannelState() = default;
     ~ChannelState();

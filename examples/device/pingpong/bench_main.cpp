@@ -16,6 +16,7 @@
 #include "bench_host.h"
 #include "bench_kernel_iface.h"
 #include <cuda_runtime.h>
+#include <cmath>
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
@@ -40,6 +41,7 @@ usage(const char *prog) {
             "    [--warmup    <n>]      (default 100)\n"
             "    [--gpu       <id>]     (default 0)\n"
             "    [--warp]               use WARP level (default: THREAD)\n"
+            "    [--no-measure-submit]  skip GPU issue/submit timing metrics\n"
             "\n"
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
             "Single-process mode is not supported in the CPU-proxy build:\n"
@@ -54,6 +56,7 @@ usage(const char *prog) {
             "    [--warmup    <n>]\n"
             "    [--gpu       <id>]\n"
             "    [--warp]\n"
+            "    [--no-measure-submit]\n"
             "    [--base-port <port>]   loopback listen ports (default 12300);\n"
             "                           sender uses base, receiver uses base+1\n",
             prog, prog);
@@ -64,8 +67,53 @@ usage(const char *prog) {
 // ----------------------------------------------------------------------------
 // Shared helper: print latency from sender's elapsed tick counter
 // ----------------------------------------------------------------------------
+struct TimingStatsUs {
+    double avg = -1.0;
+    double min = -1.0;
+    double max = -1.0;
+    double stddev = -1.0;
+    uint64_t count = 0;
+};
+
+static TimingStatsUs
+read_cycle_stats_us(gpu_cycle_stats *d_stats, double clock_hz, double scale = 1.0)
+{
+    TimingStatsUs out;
+    if (d_stats == nullptr) {
+        return out;
+    }
+
+    gpu_cycle_stats h_stats{};
+    cudaMemcpy(&h_stats, d_stats, sizeof(gpu_cycle_stats), cudaMemcpyDeviceToHost);
+    if (h_stats.count == 0) {
+        return out;
+    }
+
+    const double count = static_cast<double>(h_stats.count);
+    const double avg_cycles = static_cast<double>(h_stats.sum) / count;
+    const double mean_sq_cycles = h_stats.sum_sq / count;
+    const double variance_cycles = std::fmax(0.0, mean_sq_cycles - avg_cycles * avg_cycles);
+    const double cycles_to_us = 1e6 / clock_hz * scale;
+
+    out.avg = avg_cycles * cycles_to_us;
+    out.min = static_cast<double>(h_stats.min) * cycles_to_us;
+    out.max = static_cast<double>(h_stats.max) * cycles_to_us;
+    out.stddev = std::sqrt(variance_cycles) * cycles_to_us;
+    out.count = h_stats.count;
+    return out;
+}
+
 static void
-print_latency(uint64_t *d_elapsed, uint64_t num_iters, int gpu_id,
+print_timing_row(const char *name, const TimingStatsUs &stats)
+{
+    printf("  %-8s %14.6f  %14.6f  %14.6f  %14.6f\n",
+           name, stats.avg, stats.min, stats.max, stats.stddev);
+}
+
+static void
+print_latency(uint64_t *d_elapsed, gpu_cycle_stats *d_issue_stats,
+              gpu_cycle_stats *d_submit_stats, gpu_cycle_stats *d_rtt_stats,
+              uint64_t num_iters, int gpu_id,
               size_t msg_size, bool use_warp)
 {
     uint64_t h_elapsed = 0;
@@ -80,10 +128,33 @@ print_latency(uint64_t *d_elapsed, uint64_t num_iters, int gpu_id,
 
     double rtt_us     = (double)h_elapsed / (double)num_iters / clock_hz * 1e6;
     double one_way_us = rtt_us / 2.0;
+    TimingStatsUs issue = read_cycle_stats_us(d_issue_stats, clock_hz);
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    TimingStatsUs submit = read_cycle_stats_us(d_submit_stats, clock_hz);
+#endif
+    TimingStatsUs rtt = read_cycle_stats_us(d_rtt_stats, clock_hz);
+    TimingStatsUs one_way = read_cycle_stats_us(d_rtt_stats, clock_hz, 0.5);
 
     printf("msg_size=%-6zu  iters=%-6llu  RTT=%.3f us  one-way=%.3f us  [%s]\n",
            msg_size, (unsigned long long)num_iters, rtt_us, one_way_us,
            use_warp ? "WARP" : "THREAD");
+    printf("metrics:\n");
+    printf("  msg_size=%zu  iters=%llu  level=%s  samples=%llu\n",
+           msg_size, (unsigned long long)num_iters, use_warp ? "WARP" : "THREAD",
+           (unsigned long long)rtt.count);
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    printf("  one-way includes: issue + submit + backend progress/completion + network/peer response\n");
+#else
+    printf("  one-way includes: issue/submit + backend progress/completion + network/peer response\n");
+#endif
+    printf("  %-8s %14s  %14s  %14s  %14s\n",
+           "", "avg_us", "min_us", "max_us", "stddev_us");
+    print_timing_row("issue", issue);
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    print_timing_row("submit", submit);
+#endif
+    print_timing_row("one-way", one_way);
+    print_timing_row("rtt", rtt);
 }
 
 // ----------------------------------------------------------------------------
@@ -96,7 +167,7 @@ print_latency(uint64_t *d_elapsed, uint64_t num_iters, int gpu_id,
 #ifndef NIXL_GPU_DEVICE_BACKEND_PROXY
 static int
 single_process_run(size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
-                   int gpu_id, bool use_warp, int base_port)
+                   int gpu_id, bool use_warp, int base_port, bool measure_submit)
 {
     fprintf(stderr,
             "[main] single-process mode  msg_size=%zu  iters=%llu  warmup=%llu"
@@ -106,6 +177,7 @@ single_process_run(size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
 
     cudaSetDevice(gpu_id);
     uint64_t *d_elapsed_sender = nullptr, *d_elapsed_recvr = nullptr;
+    gpu_cycle_stats *d_issue_sender = nullptr, *d_submit_sender = nullptr, *d_rtt_sender = nullptr;
     if (cudaMalloc(&d_elapsed_sender, sizeof(uint64_t)) != cudaSuccess ||
         cudaMalloc(&d_elapsed_recvr,  sizeof(uint64_t)) != cudaSuccess) {
         fprintf(stderr, "[main] cudaMalloc d_elapsed failed\n");
@@ -113,6 +185,27 @@ single_process_run(size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
     }
     cudaMemset(d_elapsed_sender, 0, sizeof(uint64_t));
     cudaMemset(d_elapsed_recvr,  0, sizeof(uint64_t));
+    if (cudaMalloc(&d_rtt_sender, sizeof(gpu_cycle_stats)) != cudaSuccess) {
+        fprintf(stderr, "[main] cudaMalloc RTT stats failed\n");
+        cudaFree(d_elapsed_sender);
+        cudaFree(d_elapsed_recvr);
+        return 1;
+    }
+    cudaMemset(d_rtt_sender, 0, sizeof(gpu_cycle_stats));
+    if (measure_submit) {
+        if (cudaMalloc(&d_issue_sender, sizeof(gpu_cycle_stats)) != cudaSuccess ||
+            cudaMalloc(&d_submit_sender, sizeof(gpu_cycle_stats)) != cudaSuccess) {
+            fprintf(stderr, "[main] cudaMalloc timing counters failed\n");
+            cudaFree(d_elapsed_sender);
+            cudaFree(d_elapsed_recvr);
+            cudaFree(d_issue_sender);
+            cudaFree(d_submit_sender);
+            cudaFree(d_rtt_sender);
+            return 1;
+        }
+        cudaMemset(d_issue_sender, 0, sizeof(gpu_cycle_stats));
+        cudaMemset(d_submit_sender, 0, sizeof(gpu_cycle_stats));
+    }
 
     BenchContext  sender_ctx, recvr_ctx;
     nixl_status_t sender_st = NIXL_SUCCESS, recvr_st = NIXL_SUCCESS;
@@ -167,6 +260,9 @@ single_process_run(size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
         kctx.num_iters    = num_iters;
         kctx.warmup_iters = warmup_iters;
         kctx.is_sender    = true;
+        kctx.issue_stats = d_issue_sender;
+        kctx.submit_stats = d_submit_sender;
+        kctx.rtt_stats = d_rtt_sender;
 
         cudaStream_t stream;
         cudaStreamCreate(&stream);
@@ -214,6 +310,9 @@ single_process_run(size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
         kctx.num_iters    = num_iters;
         kctx.warmup_iters = warmup_iters;
         kctx.is_sender    = false;
+        kctx.issue_stats = nullptr;
+        kctx.submit_stats = nullptr;
+        kctx.rtt_stats = nullptr;
 
         cudaStream_t stream;
         cudaStreamCreate(&stream);
@@ -235,13 +334,20 @@ single_process_run(size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
         fprintf(stderr, "[main] one or both sides failed — no latency output\n");
         cudaFree(d_elapsed_sender);
         cudaFree(d_elapsed_recvr);
+        cudaFree(d_issue_sender);
+        cudaFree(d_submit_sender);
+        cudaFree(d_rtt_sender);
         return 1;
         // BenchContext destructors run here regardless
     }
 
-    print_latency(d_elapsed_sender, num_iters, gpu_id, msg_size, use_warp);
+    print_latency(d_elapsed_sender, d_issue_sender, d_submit_sender, d_rtt_sender,
+                  num_iters, gpu_id, msg_size, use_warp);
     cudaFree(d_elapsed_sender);
     cudaFree(d_elapsed_recvr);
+    cudaFree(d_issue_sender);
+    cudaFree(d_submit_sender);
+    cudaFree(d_rtt_sender);
     fprintf(stderr, "[main] done\n");
     return 0;
     // sender_ctx and recvr_ctx destructors run here — NIXL teardown is automatic
@@ -254,7 +360,7 @@ single_process_run(size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
 static int
 twoprocess_run(const char *peer_ip, int peer_port, int listen_port,
                size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
-               int gpu_id, bool use_warp, bool is_sender)
+               int gpu_id, bool use_warp, bool is_sender, bool measure_submit)
 {
     const char *role = is_sender ? "sender" : "receiver";
     fprintf(stderr,
@@ -279,11 +385,35 @@ twoprocess_run(const char *peer_ip, int peer_port, int listen_port,
 
     cudaSetDevice(gpu_id);
     uint64_t *d_elapsed = nullptr;
+    gpu_cycle_stats *d_issue_stats = nullptr;
+    gpu_cycle_stats *d_submit_stats = nullptr;
+    gpu_cycle_stats *d_rtt_stats = nullptr;
     if (cudaMalloc(&d_elapsed, sizeof(uint64_t)) != cudaSuccess) {
         fprintf(stderr, "[%s] cudaMalloc d_elapsed failed\n", role);
         return 1;
     }
     cudaMemset(d_elapsed, 0, sizeof(uint64_t));
+    if (is_sender) {
+        if (cudaMalloc(&d_rtt_stats, sizeof(gpu_cycle_stats)) != cudaSuccess) {
+            fprintf(stderr, "[%s] cudaMalloc RTT stats failed\n", role);
+            cudaFree(d_elapsed);
+            return 1;
+        }
+        cudaMemset(d_rtt_stats, 0, sizeof(gpu_cycle_stats));
+    }
+    if (measure_submit && is_sender) {
+        if (cudaMalloc(&d_issue_stats, sizeof(gpu_cycle_stats)) != cudaSuccess ||
+            cudaMalloc(&d_submit_stats, sizeof(gpu_cycle_stats)) != cudaSuccess) {
+            fprintf(stderr, "[%s] cudaMalloc timing counters failed\n", role);
+            cudaFree(d_elapsed);
+            cudaFree(d_issue_stats);
+            cudaFree(d_submit_stats);
+            cudaFree(d_rtt_stats);
+            return 1;
+        }
+        cudaMemset(d_issue_stats, 0, sizeof(gpu_cycle_stats));
+        cudaMemset(d_submit_stats, 0, sizeof(gpu_cycle_stats));
+    }
 
     gpu_bench_ctx kctx;
     kctx.local_mvh    = ctx.local_mvh;
@@ -294,6 +424,9 @@ twoprocess_run(const char *peer_ip, int peer_port, int listen_port,
     kctx.num_iters    = num_iters;
     kctx.warmup_iters = warmup_iters;
     kctx.is_sender    = is_sender;
+    kctx.issue_stats = d_issue_stats;
+    kctx.submit_stats = d_submit_stats;
+    kctx.rtt_stats = d_rtt_stats;
 
     cudaStream_t stream;
     cudaStreamCreate(&stream);
@@ -309,9 +442,13 @@ twoprocess_run(const char *peer_ip, int peer_port, int listen_port,
     fprintf(stderr, "[%s] kernel finished\n", role);
 
     if (is_sender)
-        print_latency(d_elapsed, num_iters, gpu_id, msg_size, use_warp);
+        print_latency(d_elapsed, d_issue_stats, d_submit_stats, d_rtt_stats,
+                      num_iters, gpu_id, msg_size, use_warp);
 
     cudaFree(d_elapsed);
+    cudaFree(d_issue_stats);
+    cudaFree(d_submit_stats);
+    cudaFree(d_rtt_stats);
     fprintf(stderr, "[main] done\n");
     return 0;
     // ctx destructor runs here — NIXL teardown is automatic
@@ -334,6 +471,7 @@ main(int argc, char *argv[]) {
     uint64_t warmup_iters = 100;
     int      gpu_id       = 0;
     bool     use_warp     = false;
+    bool     measure_submit = true;
     bool     single_process = false;
 
     for (int i = 1; i < argc; i++) {
@@ -349,6 +487,8 @@ main(int argc, char *argv[]) {
         else if (!strcmp(argv[i], "--warmup")       && i + 1 < argc) warmup_iters = (uint64_t)atoll(argv[++i]);
         else if (!strcmp(argv[i], "--gpu")          && i + 1 < argc) gpu_id      = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--warp"))                          use_warp    = true;
+        else if (!strcmp(argv[i], "--measure-submit"))                measure_submit = true;
+        else if (!strcmp(argv[i], "--no-measure-submit"))             measure_submit = false;
         else if (!strcmp(argv[i], "--single-process"))                single_process = true;
         else usage(argv[0]);
     }
@@ -370,7 +510,8 @@ main(int argc, char *argv[]) {
                             "--role/--peer-ip/--peer-port/--listen-port\n");
             usage(argv[0]);
         }
-        return single_process_run(msg_size, num_iters, warmup_iters, gpu_id, use_warp, base_port);
+        return single_process_run(msg_size, num_iters, warmup_iters, gpu_id, use_warp,
+                                  base_port, measure_submit);
     }
 #endif
 
@@ -385,5 +526,5 @@ main(int argc, char *argv[]) {
 
     return twoprocess_run(peer_ip, peer_port, listen_port,
                           msg_size, num_iters, warmup_iters,
-                          gpu_id, use_warp, is_sender);
+                          gpu_id, use_warp, is_sender, measure_submit);
 }

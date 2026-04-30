@@ -129,6 +129,7 @@ ProxyWorker::submitToBackend(ChannelState &channel, const ProxySubmission &submi
     ProxyRequestState inflight{};
     inflight.op_idx = submission.op_idx;
     status = backend_->submit(prepared_submission, request_token);
+    __atomic_store_n(channel.submitted_idx_host_, submission.op_idx, __ATOMIC_RELEASE);
     inflight.backend_req_token = request_token;
     if (status != NIXL_SUCCESS) {
         // backend submit failed, so status is already terminal and can be

@@ -246,7 +246,9 @@ ChannelState::allocate(uint32_t channel_id, uint32_t depth) {
                        sizeof(uint32_t))                                 != cudaSuccess
      || cudaMallocHost(reinterpret_cast<void **>(&producer_idx_host_),
                        sizeof(uint32_t))                                 != cudaSuccess
-     || cudaMallocHost(&completion_slot_host_, sizeof(CompletionSlot))     != cudaSuccess) {
+     || cudaMallocHost(&completion_slot_host_, sizeof(CompletionSlot))     != cudaSuccess
+     || cudaMallocHost(reinterpret_cast<void **>(&submitted_idx_host_),
+                       sizeof(uint64_t))                                  != cudaSuccess) {
         NIXL_ERROR << "ChannelState::allocate: CUDA allocation failed for channel "
                    << channel_id;
         deallocate();
@@ -274,6 +276,13 @@ ChannelState::allocate(uint32_t channel_id, uint32_t depth) {
     }
     completion_slot_dev_ = static_cast<CompletionSlot *>(completion_dev);
 
+    void *submitted_idx_dev = nullptr;
+    if (cudaHostGetDevicePointer(&submitted_idx_dev, submitted_idx_host_, 0) != cudaSuccess) {
+        deallocate();
+        return NIXL_ERR_BACKEND;
+    }
+    submitted_idx_dev_ = static_cast<uint64_t *>(submitted_idx_dev);
+
     for (uint32_t i = 0; i < depth; ++i) {
         records_[i] = ProxySubmission{};
     }
@@ -282,13 +291,14 @@ ChannelState::allocate(uint32_t channel_id, uint32_t depth) {
     completion_slot_host_->next_status = NIXL_IN_PROG;
     __atomic_store_n(&completion_slot_host_->completed_idx,
                      uint64_t{0}, __ATOMIC_RELEASE);
+    __atomic_store_n(submitted_idx_host_, uint64_t{0}, __ATOMIC_RELEASE);
     *work_ring_ = WorkRing{
         records_,
         producer_idx_dev_,
         consumer_idx_dev_,
         depth,
     };
-    device_view = ProxyChannelView{ work_ring_, completion_slot_dev_, channel_id };
+    device_view = ProxyChannelView{ work_ring_, completion_slot_dev_, submitted_idx_dev_, channel_id };
 
     inflight_requests.clear();
     NIXL_INFO << "ChannelState::allocate: channel " << channel_id << " ready"
@@ -299,12 +309,19 @@ ChannelState::allocate(uint32_t channel_id, uint32_t depth) {
               << " consumer_idx(host)=" << consumer_idx_host_
               << " consumer_idx(dev)=" << consumer_idx_dev_
               << " completion_slot(host)=" << completion_slot_host_
-              << " completion_slot(dev)=" << completion_slot_dev_;
+              << " completion_slot(dev)=" << completion_slot_dev_
+              << " submitted_idx(host)=" << submitted_idx_host_
+              << " submitted_idx(dev)=" << submitted_idx_dev_;
     return NIXL_SUCCESS;
 }
 
 void
 ChannelState::deallocate() noexcept {
+    if (submitted_idx_host_) {
+        cudaFreeHost(submitted_idx_host_);
+        submitted_idx_host_ = nullptr;
+        submitted_idx_dev_  = nullptr;
+    }
     if (completion_slot_host_) {
         cudaFreeHost(completion_slot_host_);
         completion_slot_host_ = nullptr;
@@ -339,7 +356,9 @@ ChannelState::ChannelState(ChannelState &&other) noexcept
       consumer_idx_host_(other.consumer_idx_host_),
       consumer_idx_dev_(other.consumer_idx_dev_),
       completion_slot_host_(other.completion_slot_host_),
-      completion_slot_dev_(other.completion_slot_dev_) {
+      completion_slot_dev_(other.completion_slot_dev_),
+      submitted_idx_host_(other.submitted_idx_host_),
+      submitted_idx_dev_(other.submitted_idx_dev_) {
     other.work_ring_            = nullptr;
     other.records_              = nullptr;
     other.producer_idx_host_    = nullptr;
@@ -348,6 +367,8 @@ ChannelState::ChannelState(ChannelState &&other) noexcept
     other.consumer_idx_dev_     = nullptr;
     other.completion_slot_host_ = nullptr;
     other.completion_slot_dev_  = nullptr;
+    other.submitted_idx_host_   = nullptr;
+    other.submitted_idx_dev_    = nullptr;
     other.device_view      = ProxyChannelView{};
 }
 
@@ -365,6 +386,8 @@ ChannelState::operator=(ChannelState &&other) noexcept {
         consumer_idx_dev_    = other.consumer_idx_dev_;
         completion_slot_host_    = other.completion_slot_host_;
         completion_slot_dev_     = other.completion_slot_dev_;
+        submitted_idx_host_      = other.submitted_idx_host_;
+        submitted_idx_dev_       = other.submitted_idx_dev_;
         other.work_ring_            = nullptr;
         other.records_              = nullptr;
         other.producer_idx_host_    = nullptr;
@@ -373,6 +396,8 @@ ChannelState::operator=(ChannelState &&other) noexcept {
         other.consumer_idx_dev_     = nullptr;
         other.completion_slot_host_ = nullptr;
         other.completion_slot_dev_  = nullptr;
+        other.submitted_idx_host_   = nullptr;
+        other.submitted_idx_dev_    = nullptr;
         other.device_view      = ProxyChannelView{};
     }
     return *this;

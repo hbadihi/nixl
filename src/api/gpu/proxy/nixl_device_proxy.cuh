@@ -29,7 +29,8 @@ struct ProxyDeviceContext;
 // Overlay struct written into nixlGpuXferStatusH::storage by enqueue()
 // and read back by pollXferStatus().  Must fit within the 64-byte opaque blob.
 struct ProxyXferStatus {
-    CompletionSlot *slot;  // device pointer to the channel's CompletionSlot
+    CompletionSlot *slot;          // device pointer to the channel's CompletionSlot
+    uint64_t       *submitted_idx; // device pointer to the channel's submit ack counter
     uint64_t        op_idx;
 };
 static_assert(sizeof(ProxyXferStatus) <= sizeof(nixlGpuXferStatusH),
@@ -82,6 +83,8 @@ static_assert(sizeof(WorkRing::running_op_idx) == 8,
               "running_op_idx must be 64-bit to avoid wrap-around false completions");
 static_assert(sizeof(CompletionSlot::completed_idx) == 8,
               "completed_idx must be 64-bit to match running_op_idx");
+static_assert(sizeof(*ProxyChannelView{}.submitted_idx) == 8,
+              "submitted_idx must be 64-bit to match running_op_idx");
 
 /**
 * Initialize the lane_id and num_lanes variables for the given level.
@@ -178,7 +181,9 @@ struct ProxyDeviceContext : ProxyDeviceContextData {
         ready.store(1, cuda::memory_order_release);
 
         if (xfer_status != nullptr) {
-            ProxyXferStatus pxs{channel_view.completion_slot, submission.op_idx};
+            ProxyXferStatus pxs{channel_view.completion_slot,
+                                channel_view.submitted_idx,
+                                submission.op_idx};
             memcpy(xfer_status->storage, &pxs, sizeof(ProxyXferStatus));
         }
 
@@ -219,6 +224,93 @@ struct ProxyDeviceContext : ProxyDeviceContextData {
 
         return NIXL_IN_PROG;
     }
+
+    // Poll the submit acknowledgement recorded by enqueue().
+    //
+    // submitted_idx advances after backend_->submit returns on the CPU proxy
+    // worker. Completion errors are also observed so callers do not spin
+    // forever if the submission cannot reach the backend boundary.
+    __device__ inline nixl_status_t
+    pollSubmitted(const nixlGpuXferStatusH &xfer_status) const {
+        const ProxyXferStatus *pxs =
+            reinterpret_cast<const ProxyXferStatus *>(xfer_status.storage);
+
+        cuda::atomic_ref<uint64_t, cuda::thread_scope_system> sub_idx(
+            *pxs->submitted_idx);
+        const uint64_t submitted_idx = sub_idx.load(cuda::memory_order_acquire);
+        if (submitted_idx >= pxs->op_idx) {
+            return NIXL_SUCCESS;
+        }
+
+        cuda::atomic_ref<uint64_t, cuda::thread_scope_system> comp_idx(
+            pxs->slot->completed_idx);
+        (void)comp_idx.load(cuda::memory_order_acquire);
+        const nixl_status_t current_status = pxs->slot->next_status;
+        if (current_status < 0) {
+            return current_status;
+        }
+
+        return NIXL_IN_PROG;
+    }
 };
+
+template<nixl_gpu_level_t level = nixl_gpu_level_t::THREAD>
+__device__ inline nixl_status_t
+nixlProxyPollSubmitted(nixlGpuXferStatusH &xfer_status) {
+    uint32_t lane_id, num_lanes;
+    nixlProxyExecInit<level>(lane_id, num_lanes);
+
+    ProxyDeviceContext *ctx = load_proxy_context();
+
+    nixl_status_t status = NIXL_IN_PROG;
+    if (lane_id == 0) {
+        if (ctx == nullptr) {
+            status = NIXL_ERR_NOT_SUPPORTED;
+        } else {
+            status = ctx->pollSubmitted(xfer_status);
+        }
+    }
+
+    switch (level) {
+    case nixl_gpu_level_t::THREAD:
+        break;
+
+    case nixl_gpu_level_t::WARP:
+        status = static_cast<nixl_status_t>(
+            __shfl_sync(0xffffffff, static_cast<int>(status), 0));
+        break;
+
+    case nixl_gpu_level_t::BLOCK: {
+        __shared__ nixl_status_t s_status;
+        if (threadIdx.x == 0) {
+            s_status = status;
+        }
+        __syncthreads();
+        status = s_status;
+        break;
+    }
+
+    case nixl_gpu_level_t::GRID: {
+        cuda::atomic_ref<int32_t, cuda::thread_scope_device> scratch(
+            g_nixl_proxy_grid_scratch);
+        if (lane_id == 0) {
+            scratch.store(static_cast<int32_t>(status),
+                          cuda::memory_order_relaxed);
+        }
+        cooperative_groups::this_grid().sync();
+
+        __shared__ nixl_status_t s_status;
+        if (threadIdx.x == 0) {
+            s_status = static_cast<nixl_status_t>(
+                scratch.load(cuda::memory_order_relaxed));
+        }
+        __syncthreads();
+        status = s_status;
+        break;
+    }
+    }
+
+    return status;
+}
 
 #endif // NIXL_SRC_API_GPU_PROXY_NIXL_DEVICE_PROXY_CUH
