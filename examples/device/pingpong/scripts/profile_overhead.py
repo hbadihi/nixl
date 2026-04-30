@@ -7,7 +7,8 @@
 #
 # Modes:
 #   sweep          [--iters N] [--warmup N]                 msg-size sweep on both binaries
-#   cluster-submit [--iters N] [--warmup N]                 two-host submit-overhead sweep
+#   cluster-submit [--iters N] [--warmup N]                 SSH two-host submit-overhead sweep
+#   slurm-submit   [--iters N] [--warmup N]                 Slurm/enroot submit-overhead sweep
 #   nsys           [--size N]  [--iters N] [--warmup N]     capture an Nsight Systems trace
 #   ucxinfo        [--size N]  [--iters N] [--warmup N]     dump UCX_PROTO_INFO for both
 #   all                                               sweep + nsys + ucxinfo (defaults)
@@ -43,6 +44,18 @@
 #   REMOTE_BIN_DIR  directory holding remote bins   (default: $BIN_DIR)
 #   REMOTE_OUT_DIR  remote stdout/stderr directory  (default: $OUT_DIR)
 #   SSH_CMD         ssh command prefix              (default: ssh)
+#
+# Slurm submit sweep env vars:
+#   SENDER_NODE / RECEIVER_NODE        Slurm node names; default: first two allocated nodes
+#   SENDER_IP / RECEIVER_IP            peer addresses passed to benchmark; default: node names
+#   SENDER_CUDA_VISIBLE_DEVICES        sender CUDA_VISIBLE_DEVICES
+#   RECEIVER_CUDA_VISIBLE_DEVICES      receiver CUDA_VISIBLE_DEVICES
+#   SENDER_UCX_NET_DEVICES             sender UCX_NET_DEVICES
+#   RECEIVER_UCX_NET_DEVICES           receiver UCX_NET_DEVICES
+#   SLURM_CONTAINER_IMAGE              optional srun --container-image
+#   SLURM_CONTAINER_MOUNTS             optional srun --container-mounts
+#   SLURM_CONTAINER_WORKDIR            optional srun --container-workdir
+#   SLURM_SRUN_ARGS                    extra args prepended to every srun
 #
 # Stdlib only — no pip dependencies.
 
@@ -105,6 +118,15 @@ RECEIVER_GPU = os.environ.get("RECEIVER_GPU", RECV_GPU)
 REMOTE_BIN_DIR = os.environ.get("REMOTE_BIN_DIR", str(BIN_DIR))
 REMOTE_OUT_DIR = os.environ.get("REMOTE_OUT_DIR", str(OUT_DIR))
 SSH_CMD = os.environ.get("SSH_CMD", "ssh")
+SRUN_CMD = os.environ.get("SRUN_CMD", "srun")
+SLURM_CONTAINER_IMAGE = os.environ.get(
+    "SLURM_CONTAINER_IMAGE", os.environ.get("CONTAINER_IMAGE", "")
+)
+SLURM_CONTAINER_MOUNTS = os.environ.get(
+    "SLURM_CONTAINER_MOUNTS", os.environ.get("CONTAINER_MOUNTS", "")
+)
+SLURM_CONTAINER_WORKDIR = os.environ.get("SLURM_CONTAINER_WORKDIR", "")
+SLURM_SRUN_ARGS = os.environ.get("SLURM_SRUN_ARGS", "")
 
 # Inherited env we want to push down to children.  Quiets the bench logs by
 # default — bench_host.cpp spins on prepMemView until remote metadata loads
@@ -471,6 +493,233 @@ def run_cluster_one(spec: RunSpec) -> tuple[int, str]:
     return 0, send_out.read_text(errors="replace")
 
 
+# ---------- Slurm/enroot submit sweep ----------------------------------------
+
+
+@dataclass
+class SlurmConfig:
+    sender_node: str
+    receiver_node: str
+    sender_ip: str
+    receiver_ip: str
+    sender_gpu: str
+    receiver_gpu: str
+    sender_cuda_visible_devices: str
+    receiver_cuda_visible_devices: str
+    sender_ucx_net_devices: str
+    receiver_ucx_net_devices: str
+    container_image: str
+    container_mounts: str
+    container_workdir: str
+    extra_srun_args: list[str]
+    capture_topology: bool = True
+
+
+def _split_words(value: str) -> list[str]:
+    return shlex.split(value) if value else []
+
+
+def _slurm_allocated_nodes() -> list[str]:
+    if os.environ.get("SLURM_JOB_NODELIST") and shutil.which("scontrol"):
+        out = subprocess.run(
+            ["scontrol", "show", "hostnames", os.environ["SLURM_JOB_NODELIST"]],
+            check=False,
+            capture_output=True,
+            text=True,
+        ).stdout
+        nodes = [line.strip() for line in out.splitlines() if line.strip()]
+        if nodes:
+            return nodes
+
+    node = os.environ.get("SLURMD_NODENAME") or socket.gethostname()
+    return [node]
+
+
+def _slurm_container_args(cfg: SlurmConfig) -> list[str]:
+    args: list[str] = []
+    if cfg.container_image:
+        args.append(f"--container-image={cfg.container_image}")
+    if cfg.container_mounts:
+        args.append(f"--container-mounts={cfg.container_mounts}")
+    if cfg.container_workdir:
+        args.append(f"--container-workdir={cfg.container_workdir}")
+    return args
+
+
+def _srun_prefix(node: str, cfg: SlurmConfig) -> list[str]:
+    return [
+        *_split_words(SRUN_CMD),
+        "-N1",
+        "-n1",
+        "-w",
+        node,
+        *cfg.extra_srun_args,
+        *_slurm_container_args(cfg),
+    ]
+
+
+def _role_env(cfg: SlurmConfig, role: str) -> dict[str, str]:
+    env: dict[str, str] = {}
+    if role == "sender":
+        cuda_visible = cfg.sender_cuda_visible_devices
+        ucx_devices = cfg.sender_ucx_net_devices
+    else:
+        cuda_visible = cfg.receiver_cuda_visible_devices
+        ucx_devices = cfg.receiver_ucx_net_devices
+
+    if cuda_visible:
+        env["CUDA_VISIBLE_DEVICES"] = cuda_visible
+    if ucx_devices:
+        env["UCX_NET_DEVICES"] = ucx_devices
+    return env
+
+
+def _env_argv(env: dict[str, str], argv: list[str]) -> list[str]:
+    if not env:
+        return argv
+    return ["env", *[f"{key}={value}" for key, value in sorted(env.items())], *argv]
+
+
+def _safe_name(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", value)
+
+
+def build_slurm_config(args: argparse.Namespace) -> SlurmConfig:
+    nodes = _slurm_allocated_nodes()
+    receiver_node = args.receiver_node or os.environ.get("RECEIVER_NODE", "")
+    sender_node = args.sender_node or os.environ.get("SENDER_NODE", "")
+    if not receiver_node and nodes:
+        receiver_node = nodes[0]
+    if not sender_node and len(nodes) > 1:
+        sender_node = nodes[1]
+    elif not sender_node and nodes:
+        sender_node = nodes[0]
+
+    if not sender_node or not receiver_node:
+        print(
+            "ERROR: slurm-submit needs two allocated nodes or explicit "
+            "--sender-node/--receiver-node",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    sender_ip = args.sender_ip or os.environ.get("SENDER_IP", sender_node)
+    receiver_ip = args.receiver_ip or os.environ.get("RECEIVER_IP", receiver_node)
+
+    return SlurmConfig(
+        sender_node=sender_node,
+        receiver_node=receiver_node,
+        sender_ip=sender_ip,
+        receiver_ip=receiver_ip,
+        sender_gpu=str(args.sender_gpu),
+        receiver_gpu=str(args.receiver_gpu),
+        sender_cuda_visible_devices=args.sender_cuda_visible_devices
+        or os.environ.get("SENDER_CUDA_VISIBLE_DEVICES", ""),
+        receiver_cuda_visible_devices=args.receiver_cuda_visible_devices
+        or os.environ.get("RECEIVER_CUDA_VISIBLE_DEVICES", ""),
+        sender_ucx_net_devices=args.sender_ucx_net_devices
+        or os.environ.get("SENDER_UCX_NET_DEVICES", ""),
+        receiver_ucx_net_devices=args.receiver_ucx_net_devices
+        or os.environ.get("RECEIVER_UCX_NET_DEVICES", ""),
+        container_image=args.container_image,
+        container_mounts=args.container_mounts,
+        container_workdir=args.container_workdir,
+        extra_srun_args=[*args.srun_arg, *_split_words(SLURM_SRUN_ARGS)],
+        capture_topology=not args.no_topo,
+    )
+
+
+def capture_slurm_topology(cfg: SlurmConfig) -> None:
+    if not cfg.capture_topology:
+        return
+
+    for role, node in (("receiver", cfg.receiver_node), ("sender", cfg.sender_node)):
+        out_path = OUT_DIR / f"topology_{role}_{_safe_name(node)}.out"
+        err_path = OUT_DIR / f"topology_{role}_{_safe_name(node)}.err"
+        env = _role_env(cfg, role)
+        cmd = [
+            *_srun_prefix(node, cfg),
+            *_env_argv(env, ["bash", "-lc", "hostname; nvidia-smi topo -m"]),
+        ]
+        log(f"  capture {role} topology on {node} -> {out_path}")
+        with open(out_path, "wb") as out, open(err_path, "wb") as err:
+            rc = subprocess.call(cmd, stdout=out, stderr=err, env=child_env())
+        if rc != 0:
+            log(f"    topology capture failed for {role} rc={rc}; see {err_path}")
+
+
+def run_slurm_one(spec: RunSpec, cfg: SlurmConfig) -> tuple[int, str]:
+    recv_out = OUT_DIR / f"{spec.tag}_recv.out"
+    recv_err = OUT_DIR / f"{spec.tag}_recv.err"
+    send_out = OUT_DIR / f"{spec.tag}_send.out"
+    send_err = OUT_DIR / f"{spec.tag}_send.err"
+
+    p_recv, p_send = _ports.next_pair()
+    log(
+        f"  slurm tag={spec.tag} size={spec.size} iters={spec.iters} "
+        f"warmup={spec.warmup} nodes=recv:{cfg.receiver_node}/send:{cfg.sender_node} "
+        f"ports=recv:{p_recv}/send:{p_send}"
+    )
+
+    recv_args = _build_args(
+        "receiver",
+        p_recv,
+        p_send,
+        spec,
+        cfg.receiver_gpu,
+        peer_ip=cfg.sender_ip,
+    )
+    send_args = _build_args(
+        "sender",
+        p_send,
+        p_recv,
+        spec,
+        cfg.sender_gpu,
+        peer_ip=cfg.receiver_ip,
+    )
+
+    recv_cmd = [
+        *_srun_prefix(cfg.receiver_node, cfg),
+        *_env_argv(_role_env(cfg, "receiver"), recv_args),
+    ]
+    send_cmd = [
+        *_srun_prefix(cfg.sender_node, cfg),
+        *_env_argv(_role_env(cfg, "sender"), send_args),
+    ]
+
+    env = child_env(spec.extra_env)
+    with open(recv_out, "wb") as ro, open(recv_err, "wb") as re_:
+        recv_proc = subprocess.Popen(recv_cmd, stdout=ro, stderr=re_, env=env)
+
+    time.sleep(1)
+
+    rc = 0
+    try:
+        with open(send_out, "wb") as so, open(send_err, "wb") as se:
+            rc = subprocess.call(send_cmd, stdout=so, stderr=se, env=env)
+    finally:
+        deadline = time.monotonic() + RECV_WAIT_S
+        while recv_proc.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.5)
+        if recv_proc.poll() is None:
+            log(
+                f"    receiver srun pid={recv_proc.pid} still alive after {RECV_WAIT_S}s - killing"
+            )
+            recv_proc.kill()
+            try:
+                recv_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+
+    if rc != 0:
+        log(
+            f"    sender FAILED (rc={rc}) - see {send_out} {send_err} {recv_out} {recv_err}"
+        )
+        return rc, ""
+
+    return 0, send_out.read_text(errors="replace")
+
+
 # ---------- output parsing ---------------------------------------------------
 
 _FLOAT = r"([-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?)"
@@ -714,6 +963,92 @@ def do_cluster_submit(iters: int, warmup: int) -> None:
     print_submit_summary(csv_path)
 
 
+def do_slurm_submit(args: argparse.Namespace) -> None:
+    cfg = build_slurm_config(args)
+    csv_path = OUT_DIR / "submit_sweep.csv"
+    log(
+        "slurm-submit "
+        f"sender={cfg.sender_node}({cfg.sender_ip}) receiver={cfg.receiver_node}({cfg.receiver_ip}) "
+        f"iters={args.iters} warmup={args.warmup} sizes=({' '.join(map(str, SIZES))})"
+    )
+    log(
+        "  sender env: "
+        f"CUDA_VISIBLE_DEVICES={cfg.sender_cuda_visible_devices or '<inherit>'} "
+        f"UCX_NET_DEVICES={cfg.sender_ucx_net_devices or '<inherit>'}"
+    )
+    log(
+        "  receiver env: "
+        f"CUDA_VISIBLE_DEVICES={cfg.receiver_cuda_visible_devices or '<inherit>'} "
+        f"UCX_NET_DEVICES={cfg.receiver_ucx_net_devices or '<inherit>'}"
+    )
+
+    capture_slurm_topology(cfg)
+
+    with open(csv_path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(
+            [
+                "variant",
+                "msg_size",
+                "iters",
+                "warmup",
+                "sender_node",
+                "receiver_node",
+                "sender_cuda_visible_devices",
+                "receiver_cuda_visible_devices",
+                "sender_ucx_net_devices",
+                "receiver_ucx_net_devices",
+                "issue_us",
+                "submit_us",
+                "one_way_us",
+                "rtt_us",
+            ]
+        )
+
+        for size in SIZES:
+            for variant, binary in (("ucx", UCX_BIN), ("proxy", PROXY_BIN)):
+                tag = f"slurm_submit_{variant}_{size}"
+                spec = RunSpec(
+                    binary=binary,
+                    size=size,
+                    iters=args.iters,
+                    warmup=args.warmup,
+                    tag=tag,
+                    measure_submit=True,
+                )
+                rc, out = run_slurm_one(spec, cfg)
+                base_row = [
+                    variant,
+                    size,
+                    args.iters,
+                    args.warmup,
+                    cfg.sender_node,
+                    cfg.receiver_node,
+                    cfg.sender_cuda_visible_devices,
+                    cfg.receiver_cuda_visible_devices,
+                    cfg.sender_ucx_net_devices,
+                    cfg.receiver_ucx_net_devices,
+                ]
+                if rc == 0:
+                    metrics = normalize_metrics(parse_metrics(out), variant)
+                    issue_str = fmt_metric(metrics.issue_us)
+                    submit_str = fmt_metric(metrics.submit_us)
+                    one_way_str = fmt_metric(metrics.one_way_us)
+                    rtt_str = fmt_metric(metrics.rtt_us)
+                    w.writerow([*base_row, issue_str, submit_str, one_way_str, rtt_str])
+                    log(
+                        f"    {variant} size={size} -> "
+                        f"issue={issue_str} submit={submit_str} one-way={one_way_str} rtt={rtt_str} us"
+                    )
+                else:
+                    w.writerow([*base_row, "FAIL", "FAIL", "FAIL", "FAIL"])
+                f.flush()
+                time.sleep(1)
+
+    log(f"wrote {csv_path}")
+    print_submit_summary(csv_path)
+
+
 def _read_metric_by_variant(
     csv_path: Path, column: str
 ) -> dict[str, dict[int, Optional[float]]]:
@@ -822,6 +1157,46 @@ def _build_parser() -> argparse.ArgumentParser:
     cp.add_argument("--iters", type=int, default=DEFAULT_ITERS)
     cp.add_argument("--warmup", type=int, default=DEFAULT_WARMUP)
 
+    slp = sub.add_parser("slurm-submit", help="Slurm/enroot submit-overhead sweep")
+    slp.add_argument("--iters", type=int, default=DEFAULT_ITERS)
+    slp.add_argument("--warmup", type=int, default=DEFAULT_WARMUP)
+    slp.add_argument("--sender-node", default=os.environ.get("SENDER_NODE", ""))
+    slp.add_argument("--receiver-node", default=os.environ.get("RECEIVER_NODE", ""))
+    slp.add_argument("--sender-ip", default=os.environ.get("SENDER_IP", ""))
+    slp.add_argument("--receiver-ip", default=os.environ.get("RECEIVER_IP", ""))
+    slp.add_argument("--sender-gpu", default=SENDER_GPU)
+    slp.add_argument("--receiver-gpu", default=RECEIVER_GPU)
+    slp.add_argument(
+        "--sender-cuda-visible-devices",
+        default=os.environ.get("SENDER_CUDA_VISIBLE_DEVICES", ""),
+    )
+    slp.add_argument(
+        "--receiver-cuda-visible-devices",
+        default=os.environ.get("RECEIVER_CUDA_VISIBLE_DEVICES", ""),
+    )
+    slp.add_argument(
+        "--sender-ucx-net-devices",
+        default=os.environ.get("SENDER_UCX_NET_DEVICES", ""),
+    )
+    slp.add_argument(
+        "--receiver-ucx-net-devices",
+        default=os.environ.get("RECEIVER_UCX_NET_DEVICES", ""),
+    )
+    slp.add_argument("--container-image", default=SLURM_CONTAINER_IMAGE)
+    slp.add_argument("--container-mounts", default=SLURM_CONTAINER_MOUNTS)
+    slp.add_argument("--container-workdir", default=SLURM_CONTAINER_WORKDIR)
+    slp.add_argument(
+        "--srun-arg",
+        action="append",
+        default=[],
+        help="extra argument to pass to every srun; may be repeated",
+    )
+    slp.add_argument(
+        "--no-topo",
+        action="store_true",
+        help="skip nvidia-smi topo -m capture on sender/receiver nodes",
+    )
+
     np = sub.add_parser("nsys", help="capture an Nsight Systems trace")
     np.add_argument("--size", type=int, default=8192)
     np.add_argument("--iters", type=int, default=2000)
@@ -843,7 +1218,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
 
     if mode == "cluster-submit":
         check_cluster_submit_config()
-    else:
+    elif mode != "slurm-submit":
         check_binaries()
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -854,6 +1229,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         do_sweep(args.iters, args.warmup)
     elif mode == "cluster-submit":
         do_cluster_submit(args.iters, args.warmup)
+    elif mode == "slurm-submit":
+        do_slurm_submit(args)
     elif mode == "nsys":
         do_nsys(args.size, args.iters, args.warmup)
     elif mode == "ucxinfo":
