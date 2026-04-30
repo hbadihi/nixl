@@ -404,7 +404,9 @@ nixlProxyChannelState::allocate(uint32_t channel_id, uint32_t depth) {
      || cudaMallocHost(&records_,         sizeof(nixlProxySubmission) * depth) != cudaSuccess
      || cudaMallocHost(reinterpret_cast<void **>(&consumer_idx_host_),
                        sizeof(uint64_t))                                  != cudaSuccess
-     || cudaMallocHost(&completion_slot_host_, sizeof(nixlProxyCompletionSlot)) != cudaSuccess) {
+     || cudaMallocHost(&completion_slot_host_, sizeof(nixlProxyCompletionSlot)) != cudaSuccess
+     || cudaMallocHost(reinterpret_cast<void **>(&submitted_idx_host_),
+                       sizeof(uint64_t))                                  != cudaSuccess) {
         NIXL_ERROR << "nixlProxyChannelState::allocate: CUDA allocation failed for channel "
                    << channel_id;
         deallocate();
@@ -432,6 +434,13 @@ nixlProxyChannelState::allocate(uint32_t channel_id, uint32_t depth) {
     }
     completion_slot_dev_ = static_cast<nixlProxyCompletionSlot *>(completion_dev);
 
+    void *submitted_idx_dev = nullptr;
+    if (cudaHostGetDevicePointer(&submitted_idx_dev, submitted_idx_host_, 0) != cudaSuccess) {
+        deallocate();
+        return NIXL_ERR_BACKEND;
+    }
+    submitted_idx_dev_ = static_cast<uint64_t *>(submitted_idx_dev);
+
     for (uint32_t i = 0; i < depth; ++i) {
         records_[i] = nixlProxySubmission{};
     }
@@ -444,6 +453,7 @@ nixlProxyChannelState::allocate(uint32_t channel_id, uint32_t depth) {
     completion_slot_host_->next_status = NIXL_IN_PROG;
     __atomic_store_n(&completion_slot_host_->completed_idx,
                      uint64_t{0}, __ATOMIC_RELEASE);
+    __atomic_store_n(submitted_idx_host_, uint64_t{0}, __ATOMIC_RELEASE);
     nixlProxyWorkRing work_ring{
         records_dev_,
         producer_ticket_dev_,
@@ -458,7 +468,8 @@ nixlProxyChannelState::allocate(uint32_t channel_id, uint32_t depth) {
         deallocate();
         return NIXL_ERR_BACKEND;
     }
-    device_view = nixlProxyChannelView{ work_ring_dev_, completion_slot_dev_, channel_id };
+    device_view = nixlProxyChannelView{work_ring_dev_, completion_slot_dev_,
+                                       submitted_idx_dev_, channel_id};
 
     inflight_requests.clear();
     NIXL_INFO << "nixlProxyChannelState::allocate: channel " << channel_id << " ready"
@@ -470,12 +481,19 @@ nixlProxyChannelState::allocate(uint32_t channel_id, uint32_t depth) {
               << " consumer_idx(dev)=" << consumer_idx_dev_
               << " consumer_idx_cache(dev)=" << consumer_idx_cache_dev_
               << " completion_slot(host)=" << completion_slot_host_
-              << " completion_slot(dev)=" << completion_slot_dev_;
+              << " completion_slot(dev)=" << completion_slot_dev_
+              << " submitted_idx(host)=" << submitted_idx_host_
+              << " submitted_idx(dev)=" << submitted_idx_dev_;
     return NIXL_SUCCESS;
 }
 
 void
 nixlProxyChannelState::deallocate() noexcept {
+    if (submitted_idx_host_) {
+        cudaFreeHost(submitted_idx_host_);
+        submitted_idx_host_ = nullptr;
+        submitted_idx_dev_  = nullptr;
+    }
     if (completion_slot_host_) {
         cudaFreeHost(completion_slot_host_);
         completion_slot_host_ = nullptr;
@@ -531,6 +549,8 @@ nixlProxyChannelState::operator=(nixlProxyChannelState &&other) noexcept {
         ring_depth_          = other.ring_depth_;
         completion_slot_host_    = other.completion_slot_host_;
         completion_slot_dev_     = other.completion_slot_dev_;
+        submitted_idx_host_      = other.submitted_idx_host_;
+        submitted_idx_dev_       = other.submitted_idx_dev_;
         other.work_ring_dev_        = nullptr;
         other.records_              = nullptr;
         other.records_dev_          = nullptr;
@@ -541,6 +561,8 @@ nixlProxyChannelState::operator=(nixlProxyChannelState &&other) noexcept {
         other.ring_depth_           = 0;
         other.completion_slot_host_ = nullptr;
         other.completion_slot_dev_  = nullptr;
+        other.submitted_idx_host_   = nullptr;
+        other.submitted_idx_dev_    = nullptr;
         other.device_view      = nixlProxyChannelView{};
     }
     return *this;
