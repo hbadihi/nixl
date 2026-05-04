@@ -607,14 +607,7 @@ registerDummyMemViews(nixlProxyRuntime &runtime)
 static void
 signalProxyShutdown(nixlProxyRuntime &runtime)
 {
-    cudaPointerAttributes attrs{};
-    ASSERT_EQ(cudaPointerGetAttributes(&attrs, runtime.deviceContext()->shutdown_word),
-              cudaSuccess);
-    ASSERT_NE(attrs.hostPointer, nullptr);
-    auto *shutdown_host = static_cast<uint32_t *>(attrs.hostPointer);
-    __atomic_store_n(shutdown_host,
-                     static_cast<uint32_t>(nixl_proxy_control_state_t::SHUTDOWN),
-                     __ATOMIC_RELEASE);
+    runtime.requestShutdown();
 }
 
 // ---------------------------------------------------------------------------

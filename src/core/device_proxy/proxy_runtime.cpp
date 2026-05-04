@@ -393,32 +393,34 @@ nixl_status_t
 nixlProxyChannelState::allocate(uint32_t channel_id, uint32_t depth) {
     NIXL_INFO << "nixlProxyChannelState::allocate: channel_id=" << channel_id
               << " depth=" << depth;
-    if (cudaMallocHost(&work_ring_,       sizeof(nixlProxyWorkRing))                != cudaSuccess
+    ring_depth_ = depth;
+    if (cudaMalloc(reinterpret_cast<void **>(&work_ring_dev_),
+                   sizeof(nixlProxyWorkRing))                             != cudaSuccess
+     || cudaMalloc(reinterpret_cast<void **>(&producer_ticket_dev_),
+                   sizeof(uint64_t))                                      != cudaSuccess
      || cudaMallocHost(&records_,         sizeof(nixlProxySubmission) * depth) != cudaSuccess
      || cudaMallocHost(reinterpret_cast<void **>(&consumer_idx_host_),
-                       sizeof(uint32_t))                                 != cudaSuccess
-     || cudaMallocHost(reinterpret_cast<void **>(&producer_idx_host_),
-                       sizeof(uint32_t))                                 != cudaSuccess
-     || cudaMallocHost(&completion_slot_host_, sizeof(nixlProxyCompletionSlot))     != cudaSuccess) {
+                       sizeof(uint64_t))                                  != cudaSuccess
+     || cudaMallocHost(&completion_slot_host_, sizeof(nixlProxyCompletionSlot)) != cudaSuccess) {
         NIXL_ERROR << "nixlProxyChannelState::allocate: CUDA allocation failed for channel "
                    << channel_id;
         deallocate();
         return NIXL_ERR_BACKEND;
     }
 
+    void *records_dev = nullptr;
+    if (cudaHostGetDevicePointer(&records_dev, records_, 0) != cudaSuccess) {
+        deallocate();
+        return NIXL_ERR_BACKEND;
+    }
+    records_dev_ = static_cast<nixlProxySubmission *>(records_dev);
+
     void *consumer_dev = nullptr;
     if (cudaHostGetDevicePointer(&consumer_dev, consumer_idx_host_, 0) != cudaSuccess) {
         deallocate();
         return NIXL_ERR_BACKEND;
     }
-    consumer_idx_dev_ = static_cast<uint32_t *>(consumer_dev);
-
-    void *producer_dev = nullptr;
-    if (cudaHostGetDevicePointer(&producer_dev, producer_idx_host_, 0) != cudaSuccess) {
-        deallocate();
-        return NIXL_ERR_BACKEND;
-    }
-    producer_idx_dev_ = static_cast<uint32_t *>(producer_dev);
+    consumer_idx_dev_ = static_cast<uint64_t *>(consumer_dev);
 
     void *completion_dev = nullptr;
     if (cudaHostGetDevicePointer(&completion_dev, completion_slot_host_, 0) != cudaSuccess) {
@@ -430,25 +432,39 @@ nixlProxyChannelState::allocate(uint32_t channel_id, uint32_t depth) {
     for (uint32_t i = 0; i < depth; ++i) {
         records_[i] = nixlProxySubmission{};
     }
-    __atomic_store_n(producer_idx_host_, 0, __ATOMIC_RELEASE);
-    __atomic_store_n(consumer_idx_host_, 0, __ATOMIC_RELEASE);
+    uint64_t producer_ticket = 0;
+    if (cudaMemcpy(producer_ticket_dev_,
+                   &producer_ticket,
+                   sizeof(producer_ticket),
+                   cudaMemcpyHostToDevice) != cudaSuccess) {
+        deallocate();
+        return NIXL_ERR_BACKEND;
+    }
+    __atomic_store_n(consumer_idx_host_, uint64_t{0}, __ATOMIC_RELEASE);
     completion_slot_host_->next_status = NIXL_IN_PROG;
     __atomic_store_n(&completion_slot_host_->completed_idx,
                      uint64_t{0}, __ATOMIC_RELEASE);
-    *work_ring_ = nixlProxyWorkRing{
-        records_,
-        producer_idx_dev_,
+    nixlProxyWorkRing work_ring{
+        records_dev_,
+        producer_ticket_dev_,
         consumer_idx_dev_,
         depth,
     };
-    device_view = nixlProxyChannelView{ work_ring_, completion_slot_dev_, channel_id };
+    if (cudaMemcpy(work_ring_dev_,
+                   &work_ring,
+                   sizeof(work_ring),
+                   cudaMemcpyHostToDevice) != cudaSuccess) {
+        deallocate();
+        return NIXL_ERR_BACKEND;
+    }
+    device_view = nixlProxyChannelView{ work_ring_dev_, completion_slot_dev_, channel_id };
 
     inflight_requests.clear();
     NIXL_INFO << "nixlProxyChannelState::allocate: channel " << channel_id << " ready"
-              << " work_ring=" << work_ring_
+              << " work_ring(dev)=" << work_ring_dev_
               << " records=" << records_
-              << " producer_idx(host)=" << producer_idx_host_
-              << " producer_idx(dev)=" << producer_idx_dev_
+              << " records(dev)=" << records_dev_
+              << " producer_ticket(dev)=" << producer_ticket_dev_
               << " consumer_idx(host)=" << consumer_idx_host_
               << " consumer_idx(dev)=" << consumer_idx_dev_
               << " completion_slot(host)=" << completion_slot_host_
@@ -463,18 +479,25 @@ nixlProxyChannelState::deallocate() noexcept {
         completion_slot_host_ = nullptr;
         completion_slot_dev_  = nullptr;
     }
-    if (producer_idx_host_) {
-        cudaFreeHost(producer_idx_host_);
-        producer_idx_host_ = nullptr;
-        producer_idx_dev_  = nullptr;
+    if (producer_ticket_dev_) {
+        cudaFree(producer_ticket_dev_);
+        producer_ticket_dev_ = nullptr;
     }
     if (consumer_idx_host_) {
         cudaFreeHost(consumer_idx_host_);
         consumer_idx_host_ = nullptr;
         consumer_idx_dev_  = nullptr;
     }
-    if (records_)         { cudaFreeHost(records_);         records_         = nullptr; }
-    if (work_ring_)       { cudaFreeHost(work_ring_);       work_ring_       = nullptr; }
+    if (records_) {
+        cudaFreeHost(records_);
+        records_     = nullptr;
+        records_dev_ = nullptr;
+    }
+    if (work_ring_dev_) {
+        cudaFree(work_ring_dev_);
+        work_ring_dev_ = nullptr;
+    }
+    ring_depth_ = 0;
     device_view = nixlProxyChannelView{};
 }
 
@@ -485,20 +508,22 @@ nixlProxyChannelState::~nixlProxyChannelState() {
 nixlProxyChannelState::nixlProxyChannelState(nixlProxyChannelState &&other) noexcept
     : device_view(other.device_view),
       inflight_requests(std::move(other.inflight_requests)),
-      work_ring_(other.work_ring_),
+      work_ring_dev_(other.work_ring_dev_),
       records_(other.records_),
-      producer_idx_host_(other.producer_idx_host_),
-      producer_idx_dev_(other.producer_idx_dev_),
+      records_dev_(other.records_dev_),
+      producer_ticket_dev_(other.producer_ticket_dev_),
       consumer_idx_host_(other.consumer_idx_host_),
       consumer_idx_dev_(other.consumer_idx_dev_),
+      ring_depth_(other.ring_depth_),
       completion_slot_host_(other.completion_slot_host_),
       completion_slot_dev_(other.completion_slot_dev_) {
-    other.work_ring_            = nullptr;
+    other.work_ring_dev_        = nullptr;
     other.records_              = nullptr;
-    other.producer_idx_host_    = nullptr;
-    other.producer_idx_dev_     = nullptr;
+    other.records_dev_          = nullptr;
+    other.producer_ticket_dev_  = nullptr;
     other.consumer_idx_host_    = nullptr;
     other.consumer_idx_dev_     = nullptr;
+    other.ring_depth_           = 0;
     other.completion_slot_host_ = nullptr;
     other.completion_slot_dev_  = nullptr;
     other.device_view      = nixlProxyChannelView{};
@@ -510,20 +535,22 @@ nixlProxyChannelState::operator=(nixlProxyChannelState &&other) noexcept {
         deallocate();
         device_view       = other.device_view;
         inflight_requests = std::move(other.inflight_requests);
-        work_ring_           = other.work_ring_;
+        work_ring_dev_       = other.work_ring_dev_;
         records_             = other.records_;
-        producer_idx_host_   = other.producer_idx_host_;
-        producer_idx_dev_    = other.producer_idx_dev_;
+        records_dev_         = other.records_dev_;
+        producer_ticket_dev_ = other.producer_ticket_dev_;
         consumer_idx_host_   = other.consumer_idx_host_;
         consumer_idx_dev_    = other.consumer_idx_dev_;
+        ring_depth_          = other.ring_depth_;
         completion_slot_host_    = other.completion_slot_host_;
         completion_slot_dev_     = other.completion_slot_dev_;
-        other.work_ring_            = nullptr;
+        other.work_ring_dev_        = nullptr;
         other.records_              = nullptr;
-        other.producer_idx_host_    = nullptr;
-        other.producer_idx_dev_     = nullptr;
+        other.records_dev_          = nullptr;
+        other.producer_ticket_dev_  = nullptr;
         other.consumer_idx_host_    = nullptr;
         other.consumer_idx_dev_     = nullptr;
+        other.ring_depth_           = 0;
         other.completion_slot_host_ = nullptr;
         other.completion_slot_dev_  = nullptr;
         other.device_view      = nixlProxyChannelView{};
@@ -606,8 +633,9 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
         }
     }
 
-    if (cudaMallocHost(&device_channel_views_,
-                       sizeof(nixlProxyChannelView) * channel_count) != cudaSuccess) {
+    device_channel_views_.resize(channel_count);
+    if (cudaMalloc(reinterpret_cast<void **>(&device_channel_views_dev_),
+                   sizeof(nixlProxyChannelView) * channel_count) != cudaSuccess) {
         channels_.clear();
         backend_->shutdown();
         cudaFreeHost(shutdown_word_host_);
@@ -619,11 +647,13 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
     for (uint32_t channel_id = 0; channel_id < channel_count; ++channel_id) {
         device_channel_views_[channel_id] = channels_[channel_id].device_view;
     }
-
-    if (cudaMallocHost(&device_context_,
-                       sizeof(nixlProxyDeviceContextData)) != cudaSuccess) {
-        cudaFreeHost(device_channel_views_);
-        device_channel_views_ = nullptr;
+    if (cudaMemcpy(device_channel_views_dev_,
+                   device_channel_views_.data(),
+                   sizeof(nixlProxyChannelView) * channel_count,
+                   cudaMemcpyHostToDevice) != cudaSuccess) {
+        cudaFree(device_channel_views_dev_);
+        device_channel_views_dev_ = nullptr;
+        device_channel_views_.clear();
         channels_.clear();
         backend_->shutdown();
         cudaFreeHost(shutdown_word_host_);
@@ -632,11 +662,32 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
         backend_.reset();
         return NIXL_ERR_BACKEND;
     }
-    *device_context_ = nixlProxyDeviceContextData{
-        device_channel_views_,
+    device_context_host_ = nixlProxyDeviceContextData{
+        device_channel_views_dev_,
         channel_count,
         shutdown_word_dev_
     };
+    if (cudaMalloc(reinterpret_cast<void **>(&device_context_),
+                   sizeof(nixlProxyDeviceContextData)) != cudaSuccess
+        || cudaMemcpy(device_context_,
+                      &device_context_host_,
+                      sizeof(device_context_host_),
+                      cudaMemcpyHostToDevice) != cudaSuccess) {
+        if (device_context_) {
+            cudaFree(device_context_);
+            device_context_ = nullptr;
+        }
+        cudaFree(device_channel_views_dev_);
+        device_channel_views_dev_ = nullptr;
+        device_channel_views_.clear();
+        channels_.clear();
+        backend_->shutdown();
+        cudaFreeHost(shutdown_word_host_);
+        shutdown_word_host_ = nullptr;
+        shutdown_word_dev_  = nullptr;
+        backend_.reset();
+        return NIXL_ERR_BACKEND;
+    }
 
     workers_.clear();
     workers_.reserve(worker_count);
@@ -661,7 +712,7 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
     NIXL_INFO << "ProxyRuntime::init: complete — "
               << channel_count << " channels, "
               << worker_count << " workers, "
-              << "device_context=" << device_context_;
+              << "device_context(dev)=" << device_context_;
     return NIXL_SUCCESS;
 }
 
@@ -774,6 +825,15 @@ nixlProxyRuntime::startWorkers() {
 }
 
 void
+nixlProxyRuntime::requestShutdown() noexcept {
+    if (shutdown_word_host_ != nullptr) {
+        __atomic_store_n(shutdown_word_host_,
+                         static_cast<uint32_t>(nixl_proxy_control_state_t::SHUTDOWN),
+                         __ATOMIC_RELEASE);
+    }
+}
+
+void
 nixlProxyRuntime::joinWorkerThreads() noexcept {
     for (auto &worker : workers_) {
         worker->join();
@@ -783,11 +843,7 @@ nixlProxyRuntime::joinWorkerThreads() noexcept {
 nixl_status_t
 nixlProxyRuntime::shutdown() {
     NIXL_INFO << "ProxyRuntime::shutdown: signalling workers to stop";
-    if (shutdown_word_host_ != nullptr) {
-        __atomic_store_n(shutdown_word_host_,
-                         static_cast<uint32_t>(nixl_proxy_control_state_t::SHUTDOWN),
-                         __ATOMIC_RELEASE);
-    }
+    requestShutdown();
 
     joinWorkerThreads();
     workers_started_ = false;
@@ -807,18 +863,20 @@ nixlProxyRuntime::shutdown() {
     memview_registry_.clear();
 
     if (device_context_) {
-        cudaFreeHost(device_context_);
+        cudaFree(device_context_);
         device_context_ = nullptr;
     }
+    device_context_host_ = nixlProxyDeviceContextData{};
     if (shutdown_word_host_) {
         cudaFreeHost(shutdown_word_host_);
         shutdown_word_host_ = nullptr;
         shutdown_word_dev_  = nullptr;
     }
-    if (device_channel_views_) {
-        cudaFreeHost(device_channel_views_);
-        device_channel_views_ = nullptr;
+    if (device_channel_views_dev_) {
+        cudaFree(device_channel_views_dev_);
+        device_channel_views_dev_ = nullptr;
     }
+    device_channel_views_.clear();
 
     channels_.clear();
     backend_.reset();
