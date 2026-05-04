@@ -64,20 +64,17 @@ do_put_sync(nixlMemViewH local_mvh,
     return status;
 }
 
-template<nixl_gpu_level_t level>
-__device__ static nixl_status_t
-wait_submit_boundary(nixlGpuXferStatusH &xfer_status) {
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+template<nixl_gpu_level_t level, ProxyStageAck stage>
+__device__ static nixl_status_t
+wait_proxy_stage(nixlGpuXferStatusH &xfer_status) {
     nixl_status_t status;
     do {
-        status = nixlProxyPollSubmitted<level>(xfer_status);
+        status = nixlProxyPollStage<stage, level>(xfer_status);
     } while (status == NIXL_IN_PROG);
     return status;
-#else
-    (void)xfer_status;
-    return NIXL_SUCCESS;
-#endif
 }
+#endif
 
 template<nixl_gpu_level_t level>
 __global__ void
@@ -100,6 +97,11 @@ nixl_pingpong_latency_kernel(gpu_bench_ctx ctx, uint64_t *elapsed_device) {
     nixlGpuXferStatusH xfer_status;
     const bool measure_submit =
         ctx.is_sender && ctx.issue_stats != nullptr && ctx.submit_stats != nullptr;
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    const bool measure_proxy_stages =
+        measure_submit && ctx.dequeue_stats != nullptr && ctx.prepare_stats != nullptr
+        && ctx.post_submit_stats != nullptr;
+#endif
     const bool measure_rtt = ctx.is_sender && ctx.rtt_stats != nullptr;
 
     // warmup
@@ -141,32 +143,86 @@ nixl_pingpong_latency_kernel(gpu_bench_ctx ctx, uint64_t *elapsed_device) {
             if (timed_iter && measure_submit && lane_id == 0) {
                 issue_end = clock64();
             }
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+            uint64_t dequeue_end = 0;
+            uint64_t prepare_end = 0;
+#endif
+            uint64_t submit_end = 0;
             if (timed_iter && measure_submit) {
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-                nixl_status_t submit_status = wait_submit_boundary<level>(xfer_status);
-                if (submit_status != NIXL_SUCCESS) {
+                nixl_status_t stage_status = NIXL_SUCCESS;
+
+                if (measure_proxy_stages) {
+                    stage_status = wait_proxy_stage<level, ProxyStageAck::Dequeued>(xfer_status);
+                    if (stage_status != NIXL_SUCCESS) {
+                        if (lane_id == 0) {
+                            printf("dequeue boundary failed with status %d\n", stage_status);
+                        }
+                        return;
+                    }
                     if (lane_id == 0) {
-                        printf("submit boundary failed with status %d\n", submit_status);
+                        dequeue_end = clock64();
+                    }
+
+                    stage_status = wait_proxy_stage<level, ProxyStageAck::Prepared>(xfer_status);
+                    if (stage_status != NIXL_SUCCESS) {
+                        if (lane_id == 0) {
+                            printf("prepare boundary failed with status %d\n", stage_status);
+                        }
+                        return;
+                    }
+                    if (lane_id == 0) {
+                        prepare_end = clock64();
+                    }
+                }
+
+                stage_status = wait_proxy_stage<level, ProxyStageAck::Submitted>(xfer_status);
+                if (stage_status != NIXL_SUCCESS) {
+                    if (lane_id == 0) {
+                        printf("submit boundary failed with status %d\n", stage_status);
                     }
                     return;
                 }
 #endif
                 if (lane_id == 0) {
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-                    uint64_t submit_end = clock64();
+                    submit_end = clock64();
 #else
-                    uint64_t submit_end = issue_end;
+                    submit_end = issue_end;
 #endif
-                    record_cycle_sample(ctx.issue_stats, issue_end - issue_start);
-                    record_cycle_sample(ctx.submit_stats, submit_end - issue_start);
                 }
             }
 
             if (lane_id == 0) {
                 wait_sequence_number(recv_counter,
                                      i + 1); // Wait for the receiver to process the message
+                uint64_t rtt_end = 0;
                 if (timed_iter && measure_rtt) {
-                    uint64_t rtt_end = clock64();
+                    rtt_end = clock64();
+                }
+                if (timed_iter && measure_submit) {
+                    record_cycle_sample(ctx.issue_stats, issue_end - issue_start);
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+                    if (measure_proxy_stages) {
+                        record_cycle_sample(ctx.dequeue_stats, dequeue_end - issue_end);
+                        record_cycle_sample(ctx.prepare_stats, prepare_end - dequeue_end);
+                    }
+#endif
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+                    if (measure_proxy_stages) {
+                        record_cycle_sample(ctx.submit_stats, submit_end - prepare_end);
+                    } else
+#endif
+                    {
+                        record_cycle_sample(ctx.submit_stats, submit_end - issue_start);
+                    }
+                }
+                if (timed_iter && measure_rtt) {
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+                    if (measure_proxy_stages) {
+                        record_cycle_sample(ctx.post_submit_stats, rtt_end - submit_end);
+                    }
+#endif
                     record_cycle_sample(ctx.rtt_stats, rtt_end - rtt_start);
                 }
             }

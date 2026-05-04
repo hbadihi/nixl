@@ -106,13 +106,15 @@ read_cycle_stats_us(gpu_cycle_stats *d_stats, double clock_hz, double scale = 1.
 static void
 print_timing_row(const char *name, const TimingStatsUs &stats)
 {
-    printf("  %-8s %14.6f  %14.6f  %14.6f  %14.6f\n",
+    printf("  %-11s %14.6f  %14.6f  %14.6f  %14.6f\n",
            name, stats.avg, stats.min, stats.max, stats.stddev);
 }
 
 static void
 print_latency(uint64_t *d_elapsed, gpu_cycle_stats *d_issue_stats,
-              gpu_cycle_stats *d_submit_stats, gpu_cycle_stats *d_rtt_stats,
+              gpu_cycle_stats *d_dequeue_stats, gpu_cycle_stats *d_prepare_stats,
+              gpu_cycle_stats *d_submit_stats, gpu_cycle_stats *d_post_submit_stats,
+              gpu_cycle_stats *d_rtt_stats,
               uint64_t num_iters, int gpu_id,
               size_t msg_size, bool use_warp)
 {
@@ -130,7 +132,10 @@ print_latency(uint64_t *d_elapsed, gpu_cycle_stats *d_issue_stats,
     double one_way_us = rtt_us / 2.0;
     TimingStatsUs issue = read_cycle_stats_us(d_issue_stats, clock_hz);
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    TimingStatsUs dequeue = read_cycle_stats_us(d_dequeue_stats, clock_hz);
+    TimingStatsUs prepare = read_cycle_stats_us(d_prepare_stats, clock_hz);
     TimingStatsUs submit = read_cycle_stats_us(d_submit_stats, clock_hz);
+    TimingStatsUs post_submit = read_cycle_stats_us(d_post_submit_stats, clock_hz);
 #endif
     TimingStatsUs rtt = read_cycle_stats_us(d_rtt_stats, clock_hz);
     TimingStatsUs one_way = read_cycle_stats_us(d_rtt_stats, clock_hz, 0.5);
@@ -143,15 +148,18 @@ print_latency(uint64_t *d_elapsed, gpu_cycle_stats *d_issue_stats,
            msg_size, (unsigned long long)num_iters, use_warp ? "WARP" : "THREAD",
            (unsigned long long)rtt.count);
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-    printf("  one-way includes: issue + submit + backend progress/completion + network/peer response\n");
+    printf("  stage rows are per-iteration durations; one-way is RTT/2\n");
 #else
     printf("  one-way includes: issue/submit + backend progress/completion + network/peer response\n");
 #endif
-    printf("  %-8s %14s  %14s  %14s  %14s\n",
+    printf("  %-11s %14s  %14s  %14s  %14s\n",
            "", "avg_us", "min_us", "max_us", "stddev_us");
     print_timing_row("issue", issue);
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    print_timing_row("issue->deq", dequeue);
+    print_timing_row("prepare", prepare);
     print_timing_row("submit", submit);
+    print_timing_row("post-submit", post_submit);
 #endif
     print_timing_row("one-way", one_way);
     print_timing_row("rtt", rtt);
@@ -261,7 +269,10 @@ single_process_run(size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
         kctx.warmup_iters = warmup_iters;
         kctx.is_sender    = true;
         kctx.issue_stats = d_issue_sender;
+        kctx.dequeue_stats = nullptr;
+        kctx.prepare_stats = nullptr;
         kctx.submit_stats = d_submit_sender;
+        kctx.post_submit_stats = nullptr;
         kctx.rtt_stats = d_rtt_sender;
 
         cudaStream_t stream;
@@ -311,7 +322,10 @@ single_process_run(size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
         kctx.warmup_iters = warmup_iters;
         kctx.is_sender    = false;
         kctx.issue_stats = nullptr;
+        kctx.dequeue_stats = nullptr;
+        kctx.prepare_stats = nullptr;
         kctx.submit_stats = nullptr;
+        kctx.post_submit_stats = nullptr;
         kctx.rtt_stats = nullptr;
 
         cudaStream_t stream;
@@ -341,7 +355,8 @@ single_process_run(size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
         // BenchContext destructors run here regardless
     }
 
-    print_latency(d_elapsed_sender, d_issue_sender, d_submit_sender, d_rtt_sender,
+    print_latency(d_elapsed_sender, d_issue_sender, nullptr, nullptr,
+                  d_submit_sender, nullptr, d_rtt_sender,
                   num_iters, gpu_id, msg_size, use_warp);
     cudaFree(d_elapsed_sender);
     cudaFree(d_elapsed_recvr);
@@ -386,7 +401,10 @@ twoprocess_run(const char *peer_ip, int peer_port, int listen_port,
     cudaSetDevice(gpu_id);
     uint64_t *d_elapsed = nullptr;
     gpu_cycle_stats *d_issue_stats = nullptr;
+    gpu_cycle_stats *d_dequeue_stats = nullptr;
+    gpu_cycle_stats *d_prepare_stats = nullptr;
     gpu_cycle_stats *d_submit_stats = nullptr;
+    gpu_cycle_stats *d_post_submit_stats = nullptr;
     gpu_cycle_stats *d_rtt_stats = nullptr;
     if (cudaMalloc(&d_elapsed, sizeof(uint64_t)) != cudaSuccess) {
         fprintf(stderr, "[%s] cudaMalloc d_elapsed failed\n", role);
@@ -403,16 +421,42 @@ twoprocess_run(const char *peer_ip, int peer_port, int listen_port,
     }
     if (measure_submit && is_sender) {
         if (cudaMalloc(&d_issue_stats, sizeof(gpu_cycle_stats)) != cudaSuccess ||
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+            cudaMalloc(&d_dequeue_stats, sizeof(gpu_cycle_stats)) != cudaSuccess ||
+            cudaMalloc(&d_prepare_stats, sizeof(gpu_cycle_stats)) != cudaSuccess ||
+#endif
             cudaMalloc(&d_submit_stats, sizeof(gpu_cycle_stats)) != cudaSuccess) {
             fprintf(stderr, "[%s] cudaMalloc timing counters failed\n", role);
             cudaFree(d_elapsed);
             cudaFree(d_issue_stats);
+            cudaFree(d_dequeue_stats);
+            cudaFree(d_prepare_stats);
+            cudaFree(d_submit_stats);
+            cudaFree(d_post_submit_stats);
+            cudaFree(d_rtt_stats);
+            return 1;
+        }
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+        if (cudaMalloc(&d_post_submit_stats, sizeof(gpu_cycle_stats)) != cudaSuccess) {
+            fprintf(stderr, "[%s] cudaMalloc post-submit stats failed\n", role);
+            cudaFree(d_elapsed);
+            cudaFree(d_issue_stats);
+            cudaFree(d_dequeue_stats);
+            cudaFree(d_prepare_stats);
             cudaFree(d_submit_stats);
             cudaFree(d_rtt_stats);
             return 1;
         }
+#endif
         cudaMemset(d_issue_stats, 0, sizeof(gpu_cycle_stats));
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+        cudaMemset(d_dequeue_stats, 0, sizeof(gpu_cycle_stats));
+        cudaMemset(d_prepare_stats, 0, sizeof(gpu_cycle_stats));
+#endif
         cudaMemset(d_submit_stats, 0, sizeof(gpu_cycle_stats));
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+        cudaMemset(d_post_submit_stats, 0, sizeof(gpu_cycle_stats));
+#endif
     }
 
     gpu_bench_ctx kctx;
@@ -425,7 +469,10 @@ twoprocess_run(const char *peer_ip, int peer_port, int listen_port,
     kctx.warmup_iters = warmup_iters;
     kctx.is_sender    = is_sender;
     kctx.issue_stats = d_issue_stats;
+    kctx.dequeue_stats = d_dequeue_stats;
+    kctx.prepare_stats = d_prepare_stats;
     kctx.submit_stats = d_submit_stats;
+    kctx.post_submit_stats = d_post_submit_stats;
     kctx.rtt_stats = d_rtt_stats;
 
     cudaStream_t stream;
@@ -442,12 +489,16 @@ twoprocess_run(const char *peer_ip, int peer_port, int listen_port,
     fprintf(stderr, "[%s] kernel finished\n", role);
 
     if (is_sender)
-        print_latency(d_elapsed, d_issue_stats, d_submit_stats, d_rtt_stats,
+        print_latency(d_elapsed, d_issue_stats, d_dequeue_stats, d_prepare_stats,
+                      d_submit_stats, d_post_submit_stats, d_rtt_stats,
                       num_iters, gpu_id, msg_size, use_warp);
 
     cudaFree(d_elapsed);
     cudaFree(d_issue_stats);
+    cudaFree(d_dequeue_stats);
+    cudaFree(d_prepare_stats);
     cudaFree(d_submit_stats);
+    cudaFree(d_post_submit_stats);
     cudaFree(d_rtt_stats);
     fprintf(stderr, "[main] done\n");
     return 0;
