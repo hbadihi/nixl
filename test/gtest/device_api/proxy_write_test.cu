@@ -604,14 +604,33 @@ registerDummyMemViews(nixlProxyRuntime &runtime)
     return handles;
 }
 
-static void
-signalProxyShutdown(nixlProxyRuntime &runtime)
+static uint32_t *
+shutdownWordHostFromRuntime(nixlProxyRuntime &runtime)
 {
+    nixlProxyDeviceContextData device_ctx{};
+    if (runtime.deviceContext() == nullptr) {
+        return nullptr;
+    }
+    if (cudaMemcpy(&device_ctx,
+                   runtime.deviceContext(),
+                   sizeof(device_ctx),
+                   cudaMemcpyDeviceToHost) != cudaSuccess) {
+        return nullptr;
+    }
+    if (device_ctx.shutdown_word == nullptr) {
+        return nullptr;
+    }
+
     cudaPointerAttributes attrs{};
-    ASSERT_EQ(cudaPointerGetAttributes(&attrs, runtime.deviceContext()->shutdown_word),
-              cudaSuccess);
-    ASSERT_NE(attrs.hostPointer, nullptr);
-    auto *shutdown_host = static_cast<uint32_t *>(attrs.hostPointer);
+    if (cudaPointerGetAttributes(&attrs, device_ctx.shutdown_word) != cudaSuccess) {
+        return nullptr;
+    }
+    return static_cast<uint32_t *>(attrs.hostPointer);
+}
+
+static void
+signalProxyShutdown(uint32_t *shutdown_host)
+{
     __atomic_store_n(shutdown_host,
                      static_cast<uint32_t>(nixl_proxy_control_state_t::SHUTDOWN),
                      __ATOMIC_RELEASE);
@@ -1052,6 +1071,8 @@ TEST_F(ProxyDeviceApiTest, RingOverflowReturnsBackendErrorOnShutdown)
     ASSERT_EQ(runtime.init(std::move(adapter), /*channel_count=*/1, /*worker_count=*/1),
               NIXL_SUCCESS);
     publishProxyContext(runtime);
+    uint32_t *shutdown_host = shutdownWordHostFromRuntime(runtime);
+    ASSERT_NE(shutdown_host, nullptr);
 
     constexpr uint32_t kBurstOps = kDefaultProxyRingDepth + 1;
     nixl_status_t *d_statuses = nullptr;
@@ -1064,7 +1085,7 @@ TEST_F(ProxyDeviceApiTest, RingOverflowReturnsBackendErrorOnShutdown)
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     ASSERT_EQ(cudaStreamQuery(nullptr), cudaErrorNotReady);
 
-    signalProxyShutdown(runtime);
+    signalProxyShutdown(shutdown_host);
 
     ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
     ASSERT_EQ(cudaGetLastError(), cudaSuccess);
