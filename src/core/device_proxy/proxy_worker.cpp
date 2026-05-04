@@ -95,6 +95,7 @@ ProxyWorker::tryDequeue(nixlProxyChannelState &channel, nixlProxySubmission &sub
     __atomic_store_n(channel.consumer_idx_host_,
                      local_consumer_idx + 1,
                      __ATOMIC_RELEASE);
+    __atomic_store_n(channel.dequeued_idx_host_, submission.op_idx, __ATOMIC_RELEASE);
     NIXL_DEBUG << "ProxyWorker::tryDequeue: channel=" << channel.device_view.channel_id
                << " consumer=" << local_consumer_idx
                << " opcode=" << static_cast<int>(submission.opcode)
@@ -117,6 +118,7 @@ ProxyWorker::submitToBackend(nixlProxyChannelState &channel, const nixlProxySubm
         // The terminal error is queued for publishCompletions(); the worker handled it.
         return;
     }
+    __atomic_store_n(channel.prepared_idx_host_, submission.op_idx, __ATOMIC_RELEASE);
 
     NIXL_DEBUG << "ProxyWorker::submitToBackend: op_idx=" << submission.op_idx
                << " opcode=" << static_cast<int>(submission.opcode)

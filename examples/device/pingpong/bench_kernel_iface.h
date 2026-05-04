@@ -28,7 +28,10 @@ struct gpu_bench_ctx {
     uint64_t     warmup_iters;
     bool         is_sender;
     gpu_cycle_stats *issue_stats;  // optional: nixlPut issue-cycle samples
-    gpu_cycle_stats *submit_stats; // optional: submit-boundary cycle samples
+    gpu_cycle_stats *dequeue_stats; // optional: issue return to dequeue duration samples
+    gpu_cycle_stats *prepare_stats; // optional: dequeue to prepare duration samples
+    gpu_cycle_stats *submit_stats; // optional: prepare to submit duration samples
+    gpu_cycle_stats *post_submit_stats; // optional: submit-to-pong cycle samples
     gpu_cycle_stats *rtt_stats;    // optional: pingpong RTT cycle samples
 };
 

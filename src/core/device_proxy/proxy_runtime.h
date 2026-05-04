@@ -58,6 +58,14 @@ struct alignas(64) nixlProxyChannelState {
     nixlProxyCompletionSlot  *completion_slot_host_ = nullptr;
     /** Device-mapped alias of completion_slot_host_ for nixlProxyChannelView. */
     nixlProxyCompletionSlot  *completion_slot_dev_  = nullptr;
+    /** Mapped pinned host memory; proxy worker publishes after dequeue. */
+    uint64_t        *dequeued_idx_host_ = nullptr;
+    /** Device-mapped alias of dequeued_idx_host_ for nixlProxyChannelView. */
+    uint64_t        *dequeued_idx_dev_  = nullptr;
+    /** Mapped pinned host memory; proxy worker publishes after prepare succeeds. */
+    uint64_t        *prepared_idx_host_ = nullptr;
+    /** Device-mapped alias of prepared_idx_host_ for nixlProxyChannelView. */
+    uint64_t        *prepared_idx_dev_  = nullptr;
     /** Mapped pinned host memory; proxy worker publishes after backend submit returns. */
     uint64_t        *submitted_idx_host_ = nullptr;
     /** Device-mapped alias of submitted_idx_host_ for nixlProxyChannelView. */
