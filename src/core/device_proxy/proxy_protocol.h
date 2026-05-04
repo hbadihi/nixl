@@ -32,24 +32,24 @@ enum class ProxyControlState : uint32_t {
     Shutdown = 1,
 };
 
-struct ProxySubmission {
+struct alignas(64) ProxySubmission {
     uint64_t op_idx = 0;
     ProxyOpcode opcode = ProxyOpcode::PUT;
     uint32_t channel_id = 0;
-    uint64_t flags = 0;
+    uint32_t flags = 0;
+
+    uint32_t src_index = 0;
+    uint32_t src_offset = 0;
+    uint32_t dst_index = 0;
+    uint32_t dst_offset = 0;
+    uint32_t size = 0;
 
     uint64_t src_proxy_memview_id = 0;
-    size_t src_index = 0;
-    size_t src_offset = 0;
-
     uint64_t dst_proxy_memview_id = 0;
-    size_t dst_index = 0;
-    size_t dst_offset = 0;
-
-    uint32_t ready_flag = 0;
-    size_t size = 0;
     uint64_t value = 0;
 };
+
+static_assert(sizeof(ProxySubmission) == 64, "ProxySubmission must be 64 bytes");
 
 struct WorkRing {
     /** Host-accessible (e.g. cudaMallocHost); GPU may read via mapped pointer if needed. */
