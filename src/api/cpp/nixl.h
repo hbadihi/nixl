@@ -562,7 +562,7 @@ class nixlAgent {
                        const nixl_xfer_dlist_t &descs) const;
 
         /**
-         * @brief  Return the proxy runtime's device context data pointer,
+         * @brief  Return the proxy runtime's device-resident context pointer,
          *         or nullptr when proxy mode is not active.
          *
          * The caller can pass this to nixlProxyPublishContext() from a CUDA TU
