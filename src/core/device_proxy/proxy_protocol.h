@@ -52,17 +52,14 @@ struct alignas(64) ProxySubmission {
 static_assert(sizeof(ProxySubmission) == 64, "ProxySubmission must be 64 bytes");
 
 struct WorkRing {
-    /** Host-accessible (e.g. cudaMallocHost); GPU may read via mapped pointer if needed. */
+    /** Mapped host records: GPU writes via device alias; CPU worker reads host alias. */
     ProxySubmission *records = nullptr;
-    /** Mapped pinned producer; GPU advances with CUDA atomics; host reads via __atomic_*. */
-    uint32_t *producer_idx = nullptr;
+    /** Device-resident producer ticket; only the GPU updates it. */
+    uint64_t *producer_ticket = nullptr;
     /** Mapped pinned consumer; host proxy uses __atomic_* on host alias (ChannelState). */
-    uint32_t *consumer_idx = nullptr;
+    uint64_t *consumer_idx = nullptr;
     /** The depth of the work ring. */
     uint32_t depth = 0;
-    /** Monotonic 64-bit counter; starts at 1 so completed_idx==0 means
-     *  "no operation completed yet" and the first op_idx is never 0. */
-    uint64_t running_op_idx = 1;
 };
 
 struct alignas(16) CompletionSlot {

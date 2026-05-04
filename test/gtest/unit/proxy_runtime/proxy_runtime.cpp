@@ -96,6 +96,22 @@ class ProxyRuntimeTest : public testing::Test {
         ProxyRuntime runtime_;
 };
 
+static WorkRing
+copyDeviceWorkRing(const ProxyChannelView &view) {
+    WorkRing ring{};
+    EXPECT_EQ(cudaMemcpy(&ring, view.work_ring, sizeof(ring), cudaMemcpyDeviceToHost),
+              cudaSuccess);
+    return ring;
+}
+
+static ProxySubmission *
+hostRecordsFromDeviceAlias(ProxySubmission *records_dev) {
+    cudaPointerAttributes attrs{};
+    EXPECT_EQ(cudaPointerGetAttributes(&attrs, records_dev), cudaSuccess);
+    return static_cast<ProxySubmission *>(
+        attrs.hostPointer == nullptr ? records_dev : attrs.hostPointer);
+}
+
 TEST_F(ProxyRuntimeTest, InitCallsBackendInit) {
     ASSERT_EQ(runtime_.init(&backend_, 4, 2), NIXL_SUCCESS);
     EXPECT_TRUE(backend_.init_called_);
@@ -132,10 +148,12 @@ TEST_F(ProxyRuntimeTest, DeviceChannelViewsPopulated) {
     for (uint32_t i = 0; i < 3; ++i) {
         EXPECT_EQ(views[i].channel_id, i);
         EXPECT_NE(views[i].work_ring, nullptr);
-        EXPECT_NE(views[i].work_ring->producer_idx, nullptr);
-        EXPECT_NE(views[i].work_ring->consumer_idx, nullptr);
+        const WorkRing ring = copyDeviceWorkRing(views[i]);
+        EXPECT_NE(ring.records, nullptr);
+        EXPECT_NE(ring.producer_ticket, nullptr);
+        EXPECT_NE(ring.consumer_idx, nullptr);
         EXPECT_NE(views[i].completion_slot, nullptr);
-        EXPECT_EQ(views[i].work_ring->depth, kDefaultProxyRingDepth);
+        EXPECT_EQ(ring.depth, kDefaultProxyRingDepth);
     }
 }
 
@@ -143,15 +161,16 @@ TEST_F(ProxyRuntimeTest, WorkRingIndicesStartAtZero) {
     ASSERT_EQ(runtime_.init(&backend_, 2, 1), NIXL_SUCCESS);
     const ProxyChannelView *views = runtime_.deviceChannelViews();
     for (uint32_t i = 0; i < 2; ++i) {
-        uint32_t producer = 0;
-        uint32_t consumer = 0;
+        const WorkRing ring = copyDeviceWorkRing(views[i]);
+        uint64_t producer = 0;
+        uint64_t consumer = 0;
         ASSERT_EQ(cudaMemcpy(&producer,
-                             views[i].work_ring->producer_idx,
+                             ring.producer_ticket,
                              sizeof(producer),
                              cudaMemcpyDeviceToHost),
                   cudaSuccess);
         ASSERT_EQ(cudaMemcpy(&consumer,
-                             views[i].work_ring->consumer_idx,
+                             ring.consumer_idx,
                              sizeof(consumer),
                              cudaMemcpyDeviceToHost),
                   cudaSuccess);
@@ -184,11 +203,13 @@ TEST_F(ProxyRuntimeTest, WorkerCountClampedToChannels) {
 
 TEST_F(ProxyRuntimeTest, DeviceContextPopulated) {
     ASSERT_EQ(runtime_.init(&backend_, 3, 1), NIXL_SUCCESS);
-    auto *ctx = runtime_.deviceContext();
-    ASSERT_NE(ctx, nullptr);
-    EXPECT_EQ(ctx->num_channels, 3u);
-    EXPECT_EQ(ctx->channels, runtime_.deviceChannelViews());
-    EXPECT_NE(ctx->shutdown_word, nullptr);
+    auto *device_ctx = runtime_.deviceContext();
+    ASSERT_NE(device_ctx, nullptr);
+    ProxyDeviceContextData ctx{};
+    ASSERT_EQ(cudaMemcpy(&ctx, device_ctx, sizeof(ctx), cudaMemcpyDeviceToHost), cudaSuccess);
+    EXPECT_EQ(ctx.num_channels, 3u);
+    EXPECT_NE(ctx.channels, nullptr);
+    EXPECT_NE(ctx.shutdown_word, nullptr);
 }
 
 TEST_F(ProxyRuntimeTest, DeviceContextNullAfterShutdown) {
@@ -306,10 +327,12 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedTransportDescriptors) {
     submission.dst_offset = 8;
     submission.size = 32;
 
-    auto *ring = runtime_.deviceChannelViews()[0].work_ring;
+    const WorkRing ring = copyDeviceWorkRing(runtime_.deviceChannelViews()[0]);
+    auto *records = hostRecordsFromDeviceAlias(ring.records);
+    ASSERT_NE(records, nullptr);
     submission.op_idx = 0;
-    ring->records[0] = submission;
-    __atomic_store_n(&ring->records[0].op_idx, uint64_t{11}, __ATOMIC_RELEASE);
+    records[0] = submission;
+    __atomic_store_n(&records[0].op_idx, uint64_t{11}, __ATOMIC_RELEASE);
 
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
     while (std::chrono::steady_clock::now() < deadline) {
@@ -370,10 +393,12 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedAtomicAddDescriptor) {
     submission.size = sizeof(uint64_t);
     submission.value = 42;
 
-    auto *ring = runtime_.deviceChannelViews()[0].work_ring;
+    const WorkRing ring = copyDeviceWorkRing(runtime_.deviceChannelViews()[0]);
+    auto *records = hostRecordsFromDeviceAlias(ring.records);
+    ASSERT_NE(records, nullptr);
     submission.op_idx = 0;
-    ring->records[0] = submission;
-    __atomic_store_n(&ring->records[0].op_idx, uint64_t{11}, __ATOMIC_RELEASE);
+    records[0] = submission;
+    __atomic_store_n(&records[0].op_idx, uint64_t{11}, __ATOMIC_RELEASE);
 
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
     while (std::chrono::steady_clock::now() < deadline) {

@@ -45,16 +45,18 @@ struct alignas(64) ChannelState {
     std::deque<ProxyRequestState> inflight_requests;
     bool error_latched = false;
 
-    WorkRing        *work_ring_       = nullptr;
+    WorkRing        *work_ring_dev_   = nullptr;
     ProxySubmission *records_         = nullptr;
-    /** Mapped pinned host memory; host proxy uses __atomic_* on host alias. */
-    uint32_t        *producer_idx_host_ = nullptr;
-    /** Device-mapped alias of producer_idx_host_ for WorkRing (GPU-writable). */
-    uint32_t        *producer_idx_dev_  = nullptr;
+    /** Device-mapped alias of records_ for WorkRing (GPU-writable). */
+    ProxySubmission *records_dev_     = nullptr;
+    /** Device-resident producer ticket; only the GPU updates it. */
+    uint64_t        *producer_ticket_dev_ = nullptr;
     /** Consumer count: host pinned; proxy uses __atomic_* on consumer_idx_host_. */
-    uint32_t        *consumer_idx_host_  = nullptr;
+    uint64_t        *consumer_idx_host_  = nullptr;
     /** Same word as consumer_idx_host_, for WorkRing::consumer_idx (GPU-readable). */
-    uint32_t        *consumer_idx_dev_   = nullptr;
+    uint64_t        *consumer_idx_dev_   = nullptr;
+    /** Host-side ring depth for the CPU worker; WorkRing itself is device-only. */
+    uint32_t         ring_depth_         = 0;
     /** Mapped pinned host memory; proxy worker writes directly via host alias. */
     CompletionSlot  *completion_slot_host_ = nullptr;
     /** Device-mapped alias of completion_slot_host_ for ProxyChannelView. */
@@ -228,6 +230,9 @@ class ProxyRuntime {
         nixl_status_t
         shutdown();
 
+        void
+        requestShutdown() noexcept;
+
         const ProxyMemViewRegistry &
         memviewRegistry() const { return memview_registry_; }
 
@@ -235,7 +240,9 @@ class ProxyRuntime {
         channelCount() const { return static_cast<uint32_t>(channels_.size()); }
 
         const ProxyChannelView *
-        deviceChannelViews() const { return device_channel_views_; }
+        deviceChannelViews() const {
+            return device_channel_views_.empty() ? nullptr : device_channel_views_.data();
+        }
 
         ProxyDeviceContextData *
         deviceContext() const { return device_context_; }
@@ -245,8 +252,10 @@ class ProxyRuntime {
         joinWorkerThreads() noexcept;
 
         std::vector<ChannelState> channels_;
-        ProxyChannelView       *device_channel_views_ = nullptr;
+        std::vector<ProxyChannelView> device_channel_views_;
+        ProxyChannelView       *device_channel_views_dev_ = nullptr;
         ProxyDeviceContextData *device_context_       = nullptr;
+        ProxyDeviceContextData  device_context_host_{};
         std::vector<std::unique_ptr<ProxyWorker>> workers_;
         ProxyMemViewRegistry memview_registry_;
         DeviceProxyBackendAdapter *backend_ = nullptr;
