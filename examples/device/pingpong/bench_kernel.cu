@@ -10,21 +10,18 @@ wait_sequence_number(volatile uint64_t *counter, uint64_t expected_value) {
     }
 }
 
-__device__ static void
-record_cycle_sample(gpu_cycle_stats *stats, uint64_t cycles) {
-    if (stats == nullptr) {
-        return;
+__forceinline__ __device__ static void
+record_cycle_sample(gpu_cycle_stats *s, uint64_t c) {
+    if (!s) return;
+    if (s->count == 0)
+        s->min = s->max = c;
+    else {
+        s->min = min(s->min, c);
+        s->max = max(s->max, c);
     }
-    if (stats->count == 0) {
-        stats->min = cycles;
-        stats->max = cycles;
-    } else {
-        stats->min = cycles < stats->min ? cycles : stats->min;
-        stats->max = cycles > stats->max ? cycles : stats->max;
-    }
-    stats->count += 1;
-    stats->sum += cycles;
-    stats->sum_sq += static_cast<double>(cycles) * static_cast<double>(cycles);
+    ++s->count;
+    s->sum += c;
+    s->sum_sq += double(c) * double(c);
 }
 
 template<nixl_gpu_level_t level>
@@ -36,11 +33,8 @@ do_put_async(nixlMemViewH local_mvh,
     nixlMemViewElem src{local_mvh, 0, 0};
     nixlMemViewElem dst{remote_mvh, 0, 0};
     nixl_status_t status = nixlPut<level>(src, dst, total_size, 0, 0, &xfer_status);
-    if (status != NIXL_IN_PROG) {
-        if (threadIdx.x == 0) {
-            printf("nixlPut failed with status %d\n", status);
-        }
-        return status;
+    if (status != NIXL_IN_PROG && threadIdx.x == 0) {
+        printf("nixlPut failed with status %d\n", status);
     }
     return status;
 }

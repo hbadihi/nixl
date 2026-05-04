@@ -19,7 +19,7 @@
 // through load_proxy_context().
 #include "nixl_device_proxy.cuh"
 
-__device__ ProxyDeviceContext *g_nixl_proxy_ctx = nullptr;
+__device__ __constant__ ProxyDeviceContext *g_nixl_proxy_ctx = nullptr;
 
 // Scratch word in HBM for get_xfer_status<GRID> to broadcast the poll
 // result from global lane 0 to all blocks via device-scope atomics.

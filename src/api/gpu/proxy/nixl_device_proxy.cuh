@@ -38,7 +38,7 @@ static_assert(sizeof(ProxyXferStatus) <= sizeof(nixlGpuXferStatusH),
 
 // Defined in nixl_device_proxy.cu and read by device kernels through
 // load_proxy_context().
-extern __device__ ProxyDeviceContext *g_nixl_proxy_ctx;
+extern __device__ __constant__ ProxyDeviceContext *g_nixl_proxy_ctx;
 extern __device__ int32_t g_nixl_proxy_grid_scratch;
 
 // Host-callable helpers. Keeping these inline in CUDA translation units avoids
@@ -69,12 +69,12 @@ nixlProxyClearContext() {
     return err;
 }
 
-__device__ inline uint64_t
+__device__ __forceinline__  uint64_t
 proxyMemViewIdFromHandle(nixlMemViewH mvh) {
     return static_cast<uint64_t>(reinterpret_cast<uintptr_t>(mvh));
 }
 
-__device__ inline ProxyDeviceContext *
+__device__ __forceinline__  ProxyDeviceContext *
 load_proxy_context() {
     return g_nixl_proxy_ctx;
 }
