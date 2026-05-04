@@ -75,14 +75,14 @@ put(const nixlMemViewElem &src,
                 nixlProxySubmission{
                     .opcode               = nixl_proxy_opcode_t::PUT,
                     .channel_id           = static_cast<uint32_t>(channel_id),
-                    .flags                = flags,
+                    .flags                = static_cast<uint32_t>(flags),
+                    .src_index            = static_cast<uint32_t>(src.index),
+                    .src_offset           = static_cast<uint32_t>(src.offset),
+                    .dst_index            = static_cast<uint32_t>(dst.index),
+                    .dst_offset           = static_cast<uint32_t>(dst.offset),
+                    .size                 = static_cast<uint32_t>(size),
                     .src_proxy_memview_id = proxyMemViewIdFromHandle(src.mvh),
-                    .src_index            = src.index,
-                    .src_offset           = src.offset,
-                    .dst_proxy_memview_id = proxyMemViewIdFromHandle(dst.mvh),
-                    .dst_index            = dst.index,
-                    .dst_offset           = dst.offset,
-                    .size                 = size},
+                    .dst_proxy_memview_id = proxyMemViewIdFromHandle(dst.mvh)},
                 xfer_status);
         }
     }
@@ -109,11 +109,11 @@ atomic_add(uint64_t value,
                 nixlProxySubmission{
                     .opcode               = nixl_proxy_opcode_t::ATOMIC_ADD,
                     .channel_id           = static_cast<uint32_t>(channel_id),
-                    .flags                = flags,
+                    .flags                = static_cast<uint32_t>(flags),
+                    .dst_index            = static_cast<uint32_t>(counter.index),
+                    .dst_offset           = static_cast<uint32_t>(counter.offset),
+                    .size                 = static_cast<uint32_t>(sizeof(uint64_t)),
                     .dst_proxy_memview_id = proxyMemViewIdFromHandle(counter.mvh),
-                    .dst_index            = counter.index,
-                    .dst_offset           = counter.offset,
-                    .size                 = sizeof(uint64_t),
                     .value                = value},
                 xfer_status);
         }
