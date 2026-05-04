@@ -30,6 +30,8 @@ struct ProxyDeviceContext;
 // and read back by pollXferStatus().  Must fit within the 64-byte opaque blob.
 struct ProxyXferStatus {
     CompletionSlot *slot;          // device pointer to the channel's CompletionSlot
+    uint64_t       *dequeued_idx;  // device pointer to the channel's dequeue ack counter
+    uint64_t       *prepared_idx;  // device pointer to the channel's prepare ack counter
     uint64_t       *submitted_idx; // device pointer to the channel's submit ack counter
     uint64_t        op_idx;
 };
@@ -83,6 +85,10 @@ static_assert(sizeof(WorkRing::running_op_idx) == 8,
               "running_op_idx must be 64-bit to avoid wrap-around false completions");
 static_assert(sizeof(CompletionSlot::completed_idx) == 8,
               "completed_idx must be 64-bit to match running_op_idx");
+static_assert(sizeof(*ProxyChannelView{}.dequeued_idx) == 8,
+              "dequeued_idx must be 64-bit to match running_op_idx");
+static_assert(sizeof(*ProxyChannelView{}.prepared_idx) == 8,
+              "prepared_idx must be 64-bit to match running_op_idx");
 static_assert(sizeof(*ProxyChannelView{}.submitted_idx) == 8,
               "submitted_idx must be 64-bit to match running_op_idx");
 
@@ -182,6 +188,8 @@ struct ProxyDeviceContext : ProxyDeviceContextData {
 
         if (xfer_status != nullptr) {
             ProxyXferStatus pxs{channel_view.completion_slot,
+                                channel_view.dequeued_idx,
+                                channel_view.prepared_idx,
                                 channel_view.submitted_idx,
                                 submission.op_idx};
             memcpy(xfer_status->storage, &pxs, sizeof(ProxyXferStatus));
@@ -225,20 +233,19 @@ struct ProxyDeviceContext : ProxyDeviceContextData {
         return NIXL_IN_PROG;
     }
 
-    // Poll the submit acknowledgement recorded by enqueue().
+    // Poll a stage acknowledgement recorded by enqueue().
     //
-    // submitted_idx advances after backend_->submit returns on the CPU proxy
-    // worker. Completion errors are also observed so callers do not spin
+    // Stage counters advance on the CPU proxy worker. Completion errors are
+    // also observed so callers do not spin
     // forever if the submission cannot reach the backend boundary.
     __device__ inline nixl_status_t
-    pollSubmitted(const nixlGpuXferStatusH &xfer_status) const {
+    pollStage(const nixlGpuXferStatusH &xfer_status, uint64_t *stage_idx) const {
         const ProxyXferStatus *pxs =
             reinterpret_cast<const ProxyXferStatus *>(xfer_status.storage);
 
-        cuda::atomic_ref<uint64_t, cuda::thread_scope_system> sub_idx(
-            *pxs->submitted_idx);
-        const uint64_t submitted_idx = sub_idx.load(cuda::memory_order_acquire);
-        if (submitted_idx >= pxs->op_idx) {
+        cuda::atomic_ref<uint64_t, cuda::thread_scope_system> ack_idx(*stage_idx);
+        const uint64_t acked_idx = ack_idx.load(cuda::memory_order_acquire);
+        if (acked_idx >= pxs->op_idx) {
             return NIXL_SUCCESS;
         }
 
@@ -252,11 +259,38 @@ struct ProxyDeviceContext : ProxyDeviceContextData {
 
         return NIXL_IN_PROG;
     }
+
+    __device__ inline nixl_status_t
+    pollDequeued(const nixlGpuXferStatusH &xfer_status) const {
+        const ProxyXferStatus *pxs =
+            reinterpret_cast<const ProxyXferStatus *>(xfer_status.storage);
+        return pollStage(xfer_status, pxs->dequeued_idx);
+    }
+
+    __device__ inline nixl_status_t
+    pollPrepared(const nixlGpuXferStatusH &xfer_status) const {
+        const ProxyXferStatus *pxs =
+            reinterpret_cast<const ProxyXferStatus *>(xfer_status.storage);
+        return pollStage(xfer_status, pxs->prepared_idx);
+    }
+
+    __device__ inline nixl_status_t
+    pollSubmitted(const nixlGpuXferStatusH &xfer_status) const {
+        const ProxyXferStatus *pxs =
+            reinterpret_cast<const ProxyXferStatus *>(xfer_status.storage);
+        return pollStage(xfer_status, pxs->submitted_idx);
+    }
 };
 
-template<nixl_gpu_level_t level = nixl_gpu_level_t::THREAD>
+enum class ProxyStageAck : uint32_t {
+    Dequeued = 0,
+    Prepared = 1,
+    Submitted = 2,
+};
+
+template<ProxyStageAck stage, nixl_gpu_level_t level = nixl_gpu_level_t::THREAD>
 __device__ inline nixl_status_t
-nixlProxyPollSubmitted(nixlGpuXferStatusH &xfer_status) {
+nixlProxyPollStage(nixlGpuXferStatusH &xfer_status) {
     uint32_t lane_id, num_lanes;
     nixlProxyExecInit<level>(lane_id, num_lanes);
 
@@ -267,7 +301,13 @@ nixlProxyPollSubmitted(nixlGpuXferStatusH &xfer_status) {
         if (ctx == nullptr) {
             status = NIXL_ERR_NOT_SUPPORTED;
         } else {
-            status = ctx->pollSubmitted(xfer_status);
+            if constexpr (stage == ProxyStageAck::Dequeued) {
+                status = ctx->pollDequeued(xfer_status);
+            } else if constexpr (stage == ProxyStageAck::Prepared) {
+                status = ctx->pollPrepared(xfer_status);
+            } else {
+                status = ctx->pollSubmitted(xfer_status);
+            }
         }
     }
 
@@ -311,6 +351,24 @@ nixlProxyPollSubmitted(nixlGpuXferStatusH &xfer_status) {
     }
 
     return status;
+}
+
+template<nixl_gpu_level_t level = nixl_gpu_level_t::THREAD>
+__device__ inline nixl_status_t
+nixlProxyPollDequeued(nixlGpuXferStatusH &xfer_status) {
+    return nixlProxyPollStage<ProxyStageAck::Dequeued, level>(xfer_status);
+}
+
+template<nixl_gpu_level_t level = nixl_gpu_level_t::THREAD>
+__device__ inline nixl_status_t
+nixlProxyPollPrepared(nixlGpuXferStatusH &xfer_status) {
+    return nixlProxyPollStage<ProxyStageAck::Prepared, level>(xfer_status);
+}
+
+template<nixl_gpu_level_t level = nixl_gpu_level_t::THREAD>
+__device__ inline nixl_status_t
+nixlProxyPollSubmitted(nixlGpuXferStatusH &xfer_status) {
+    return nixlProxyPollStage<ProxyStageAck::Submitted, level>(xfer_status);
 }
 
 #endif // NIXL_SRC_API_GPU_PROXY_NIXL_DEVICE_PROXY_CUH
