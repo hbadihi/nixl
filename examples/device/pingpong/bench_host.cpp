@@ -76,6 +76,7 @@ BenchContext::setup(const BenchParams &params,
 
     // 3. Create UCX backend
     nixl_b_params_t bparams;
+    bparams["ucx_error_handling_mode"] = "none";
     nixl_status_t st = agent->createBackend("UCX", bparams, ucx_backend);
     if (st != NIXL_SUCCESS) {
         fprintf(stderr, "[%s] createBackend failed: %d\n", my_name.c_str(), st);
