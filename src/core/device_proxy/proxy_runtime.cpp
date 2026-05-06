@@ -21,6 +21,7 @@
 #include "nixl_log.h"
 #include <algorithm>
 #include <cstdint>
+#include <utility>
 #include <cuda_runtime.h>
 
 nixl_status_t
@@ -432,11 +433,7 @@ nixlProxyChannelState::allocate(uint32_t channel_id, uint32_t depth) {
     for (uint32_t i = 0; i < depth; ++i) {
         records_[i] = nixlProxySubmission{};
     }
-    uint64_t producer_ticket = 0;
-    if (cudaMemcpy(producer_ticket_dev_,
-                   &producer_ticket,
-                   sizeof(producer_ticket),
-                   cudaMemcpyHostToDevice) != cudaSuccess) {
+    if (cudaMemset(producer_ticket_dev_, 0, sizeof(*producer_ticket_dev_)) != cudaSuccess) {
         deallocate();
         return NIXL_ERR_BACKEND;
     }
@@ -505,28 +502,8 @@ nixlProxyChannelState::~nixlProxyChannelState() {
     deallocate();
 }
 
-nixlProxyChannelState::nixlProxyChannelState(nixlProxyChannelState &&other) noexcept
-    : device_view(other.device_view),
-      inflight_requests(std::move(other.inflight_requests)),
-      work_ring_dev_(other.work_ring_dev_),
-      records_(other.records_),
-      records_dev_(other.records_dev_),
-      producer_ticket_dev_(other.producer_ticket_dev_),
-      consumer_idx_host_(other.consumer_idx_host_),
-      consumer_idx_dev_(other.consumer_idx_dev_),
-      ring_depth_(other.ring_depth_),
-      completion_slot_host_(other.completion_slot_host_),
-      completion_slot_dev_(other.completion_slot_dev_) {
-    other.work_ring_dev_        = nullptr;
-    other.records_              = nullptr;
-    other.records_dev_          = nullptr;
-    other.producer_ticket_dev_  = nullptr;
-    other.consumer_idx_host_    = nullptr;
-    other.consumer_idx_dev_     = nullptr;
-    other.ring_depth_           = 0;
-    other.completion_slot_host_ = nullptr;
-    other.completion_slot_dev_  = nullptr;
-    other.device_view      = nixlProxyChannelView{};
+nixlProxyChannelState::nixlProxyChannelState(nixlProxyChannelState &&other) noexcept {
+    *this = std::move(other);
 }
 
 nixlProxyChannelState &
@@ -662,7 +639,7 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
         backend_.reset();
         return NIXL_ERR_BACKEND;
     }
-    device_context_host_ = nixlProxyDeviceContextData{
+    nixlProxyDeviceContextData device_context{
         device_channel_views_dev_,
         channel_count,
         shutdown_word_dev_
@@ -670,8 +647,8 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
     if (cudaMalloc(reinterpret_cast<void **>(&device_context_),
                    sizeof(nixlProxyDeviceContextData)) != cudaSuccess
         || cudaMemcpy(device_context_,
-                      &device_context_host_,
-                      sizeof(device_context_host_),
+                      &device_context,
+                      sizeof(device_context),
                       cudaMemcpyHostToDevice) != cudaSuccess) {
         if (device_context_) {
             cudaFree(device_context_);
@@ -800,9 +777,7 @@ nixlProxyRuntime::startWorkers() {
         NIXL_ERROR << "ProxyRuntime::startWorkers: runtime not initialized";
         return NIXL_ERR_NOT_SUPPORTED;
     }
-    __atomic_store_n(shutdown_word_host_,
-                     static_cast<uint32_t>(nixl_proxy_control_state_t::SHUTDOWN),
-                     __ATOMIC_RELEASE);
+    requestShutdown();
     joinWorkerThreads();
     for (auto &channel : channels_) {
         channel.inflight_requests.clear();
@@ -866,7 +841,6 @@ nixlProxyRuntime::shutdown() {
         cudaFree(device_context_);
         device_context_ = nullptr;
     }
-    device_context_host_ = nixlProxyDeviceContextData{};
     if (shutdown_word_host_) {
         cudaFreeHost(shutdown_word_host_);
         shutdown_word_host_ = nullptr;
