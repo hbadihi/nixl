@@ -84,6 +84,7 @@ static_assert(sizeof(*nixlProxyWorkRing{}.consumer_idx) == 8,
 static_assert(sizeof(nixlProxyCompletionSlot::completed_idx) == 8,
               "completed_idx must be 64-bit to match producer_ticket");
 
+// Select the leader lane for the requested collective scope.
 template<nixl_gpu_level_t level>
 __device__ inline void nixlProxyExecInit(uint32_t &lane_id) {
     static_assert(level != nixl_gpu_level_t::GRID,
@@ -182,11 +183,10 @@ struct ProxyDeviceContext : nixlProxyDeviceContextData {
             pxs->slot->completed_idx);
 
         const uint64_t completed_idx = comp_idx.load(cuda::memory_order_acquire);
-        const nixl_status_t current_status = pxs->slot->next_status;
-
         if (completed_idx > pxs->op_idx) {
             return NIXL_SUCCESS;
         }
+        const nixl_status_t current_status = pxs->slot->next_status;
         if (completed_idx == pxs->op_idx) {
             return current_status;
         }
