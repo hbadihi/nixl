@@ -18,12 +18,18 @@ struct gpu_cycle_stats {
     double   sum_sq;
 };
 
+enum class gpu_bench_op : uint32_t {
+    Put,
+    AtomicFlag,
+};
+
 struct gpu_bench_ctx {
     nixlMemViewH local_mvh;  // view of local send_buf
     nixlMemViewH remote_mvh; // view of peer's recv_buf
     uint8_t     *send_buf;   // device pointer, buf_size bytes
     uint8_t     *recv_buf;   // device pointer, buf_size bytes
     size_t       msg_size;   // payload bytes (counter NOT included)
+    gpu_bench_op op;
     uint64_t     num_iters;
     uint64_t     warmup_iters;
     bool         is_sender;

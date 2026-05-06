@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bench_kernel_iface.h"
 #include "nixl.h"
 #include "nixl_descriptors.h"
 #include "nixl_types.h"
@@ -15,6 +16,7 @@ struct BenchParams {
     uint64_t warmup_iters = 100;
     int      gpu_id       = 0;
     bool     is_sender    = true;
+    gpu_bench_op op = gpu_bench_op::Put;
 };
 
 // ---- Per-side context ---------------------------------------------------------

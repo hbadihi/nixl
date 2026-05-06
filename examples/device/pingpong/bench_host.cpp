@@ -14,6 +14,28 @@ struct PeerRecvInfo {
     uintptr_t recv_addr;
     uint64_t gpu_id;
 };
+
+template <typename DList>
+nixl_status_t
+prep_memview_with_retries(nixlAgent *agent,
+                          const DList &dlist,
+                          nixlMemViewH &mvh,
+                          const std::string &agent_name,
+                          const char *label)
+{
+    nixl_status_t st = NIXL_SUCCESS;
+    for (int attempt = 0; attempt < 5; ++attempt) {
+        st = agent->prepMemView(dlist, mvh);
+        if (st == NIXL_SUCCESS) {
+            return st;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    fprintf(stderr, "[%s] prepMemView(%s) failed after retries: %d\n",
+            agent_name.c_str(), label, st);
+    return st;
+}
 } // namespace
 
 // ---- BenchContext::setup -----------------------------------------------------
@@ -75,9 +97,13 @@ BenchContext::setup(const BenchParams &params,
     }
 #endif
 
-    // 4. Allocate and zero device buffers
+    // 4. Allocate and zero device buffers.
     if (cudaMalloc(&send_buf, buf_size) != cudaSuccess ||
         cudaMalloc(&recv_buf, buf_size) != cudaSuccess) {
+        if (send_buf) {
+            cudaFree(send_buf);
+            send_buf = nullptr;
+        }
         fprintf(stderr, "[%s] cudaMalloc failed\n", my_name.c_str());
         return NIXL_ERR_NOT_FOUND;
     }
@@ -183,25 +209,24 @@ BenchContext::setup(const BenchParams &params,
     fprintf(stderr, "[%s] peer recv_buf addr: 0x%lx gpu=%lu\n",
             my_name.c_str(), peer_info.recv_addr, peer_info.gpu_id);
 
-    // 8. Build memory view handles.
-    //    local_mvh  — covers our send_buf; the kernel POSTs PUTs from here.
-    //    remote_mvh — covers peer's recv_buf; the kernel PUTs into there.
-    nixl_local_dlist_t local_send_dlist(VRAM_SEG);
-    local_send_dlist.addDesc(nixlBasicDesc((uintptr_t)send_buf, buf_size, params.gpu_id));
-
+    // 8. Build memory view handles. PUT needs both a local source and remote
+    //    destination view; atomic-flag only needs the remote counter view.
     nixl_remote_dlist_t remote_dlist(VRAM_SEG);
     remote_dlist.addDesc(
         nixlRemoteDesc(peer_info.recv_addr, buf_size, peer_info.gpu_id, peer_name));
 
-    // Spin until the remote agent's metadata is fully loaded into our local agent.
-    // Sleep between retries to avoid burning CPU and spamming NIXL_ERROR logs at
-    // multi-MB/s — each failed prepMemView emits an ERROR via NIXL_ERROR_FUNC.
-    while ((st = agent->prepMemView(local_send_dlist, local_mvh)) != NIXL_SUCCESS) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    // Retry briefly while the remote metadata settles, but fail cleanly for
+    // unsupported memory/backend combinations instead of spinning forever.
+    if (params.op == gpu_bench_op::Put) {
+        nixl_local_dlist_t local_send_dlist(VRAM_SEG);
+        local_send_dlist.addDesc(nixlBasicDesc((uintptr_t)send_buf, buf_size, params.gpu_id));
+        st = prep_memview_with_retries(agent.get(), local_send_dlist, local_mvh,
+                                       my_name, "local");
+        if (st != NIXL_SUCCESS) return st;
     }
-    while ((st = agent->prepMemView(remote_dlist,     remote_mvh)) != NIXL_SUCCESS) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
+    st = prep_memview_with_retries(agent.get(), remote_dlist, remote_mvh,
+                                   my_name, "remote");
+    if (st != NIXL_SUCCESS) return st;
     fprintf(stderr, "[%s] memory views ready — setup complete\n", my_name.c_str());
 
     return NIXL_SUCCESS;

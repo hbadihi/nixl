@@ -39,6 +39,34 @@ do_put_async(nixlMemViewH local_mvh,
     return status;
 }
 
+template<nixl_gpu_level_t level>
+__device__ static nixl_status_t
+do_atomic_flag_async(nixlMemViewH remote_mvh,
+                     size_t counter_offset,
+                     nixlGpuXferStatusH &xfer_status) {
+    nixlMemViewElem counter{remote_mvh, 0, counter_offset};
+    nixl_status_t status = nixlAtomicAdd<level>(1, counter, 0, 0, &xfer_status);
+    if (status != NIXL_IN_PROG && threadIdx.x == 0) {
+        printf("nixlAtomicAdd failed with status %d\n", status);
+    }
+    return status;
+}
+
+template<nixl_gpu_level_t level>
+__device__ static nixl_status_t
+do_ping_async(const gpu_bench_ctx &ctx, size_t total_size, nixlGpuXferStatusH &xfer_status) {
+    switch (ctx.op) {
+    case gpu_bench_op::Put:
+        return do_put_async<level>(ctx.local_mvh, ctx.remote_mvh, total_size, xfer_status);
+    case gpu_bench_op::AtomicFlag:
+        return do_atomic_flag_async<level>(ctx.remote_mvh, ctx.msg_size, xfer_status);
+    }
+
+    if (threadIdx.x == 0) {
+        printf("unknown pingpong op %u\n", static_cast<unsigned>(ctx.op));
+    }
+    return NIXL_ERR_INVALID_PARAM;
+}
 
 template<nixl_gpu_level_t level>
 __device__ static nixl_status_t
@@ -124,8 +152,7 @@ nixl_pingpong_latency_kernel(gpu_bench_ctx ctx, uint64_t *elapsed_device) {
             if (timed_iter && measure_submit && lane_id == 0) {
                 issue_start = clock64();
             }
-            nixl_status_t put_status =
-                do_put_async<level>(ctx.local_mvh, ctx.remote_mvh, total_size, xfer_status);
+            nixl_status_t put_status = do_ping_async<level>(ctx, total_size, xfer_status);
             if constexpr (is_warp) {
                 put_status = static_cast<nixl_status_t>(
                     __shfl_sync(0xffffffff, static_cast<int>(put_status), 0));
@@ -235,7 +262,7 @@ nixl_pingpong_latency_kernel(gpu_bench_ctx ctx, uint64_t *elapsed_device) {
                 *send_counter = i + 1; // Increment send counter to signal the sender
             }
 
-            do_put_async<level>(ctx.local_mvh, ctx.remote_mvh, total_size, xfer_status);
+            do_ping_async<level>(ctx, total_size, xfer_status);
         }
     }
 
