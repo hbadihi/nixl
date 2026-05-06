@@ -604,12 +604,6 @@ registerDummyMemViews(nixlProxyRuntime &runtime)
     return handles;
 }
 
-static void
-signalProxyShutdown(nixlProxyRuntime &runtime)
-{
-    runtime.requestShutdown();
-}
-
 // ---------------------------------------------------------------------------
 // Completion round-trip tests
 // ---------------------------------------------------------------------------
@@ -1057,7 +1051,7 @@ TEST_F(ProxyDeviceApiTest, RingOverflowReturnsBackendErrorOnShutdown)
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     ASSERT_EQ(cudaStreamQuery(nullptr), cudaErrorNotReady);
 
-    signalProxyShutdown(runtime);
+    runtime.requestShutdown();
 
     ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
     ASSERT_EQ(cudaGetLastError(), cudaSuccess);

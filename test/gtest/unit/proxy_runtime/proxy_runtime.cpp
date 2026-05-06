@@ -120,8 +120,8 @@ static nixlProxySubmission *
 hostRecordsFromDeviceAlias(nixlProxySubmission *records_dev) {
     cudaPointerAttributes attrs{};
     EXPECT_EQ(cudaPointerGetAttributes(&attrs, records_dev), cudaSuccess);
-    return static_cast<nixlProxySubmission *>(
-        attrs.hostPointer == nullptr ? records_dev : attrs.hostPointer);
+    EXPECT_NE(attrs.hostPointer, nullptr);
+    return static_cast<nixlProxySubmission *>(attrs.hostPointer);
 }
 
 TEST_F(ProxyRuntimeTest, InitCallsBackendInit) {

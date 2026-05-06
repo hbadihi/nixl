@@ -17,7 +17,6 @@
 #ifndef NIXL_SRC_CORE_DEVICE_PROXY_PROXY_RUNTIME_H
 #define NIXL_SRC_CORE_DEVICE_PROXY_PROXY_RUNTIME_H
 
-#include <chrono>
 #include <cstdint>
 #include <deque>
 #include <memory>
@@ -297,7 +296,6 @@ class nixlProxyRuntime {
         std::vector<nixlProxyChannelView> device_channel_views_;
         nixlProxyChannelView *device_channel_views_dev_ = nullptr;
         nixlProxyDeviceContextData *device_context_ = nullptr;
-        nixlProxyDeviceContextData device_context_host_{};
         std::vector<std::unique_ptr<ProxyWorker>> workers_;
         nixlProxyMemViewRegistry memview_registry_;
         std::unique_ptr<nixlDeviceProxyBackendAdapter> backend_;
