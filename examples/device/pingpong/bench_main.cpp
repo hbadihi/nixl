@@ -41,6 +41,7 @@ usage(const char *prog) {
             "    [--warmup    <n>]      (default 100)\n"
             "    [--gpu       <id>]     (default 0)\n"
             "    [--warp]               use WARP level (default: THREAD)\n"
+            "    [--op put|atomic-flag] (default put)\n"
             "    [--no-measure-submit]  skip GPU issue/submit timing metrics\n"
             "\n"
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
@@ -56,12 +57,37 @@ usage(const char *prog) {
             "    [--warmup    <n>]\n"
             "    [--gpu       <id>]\n"
             "    [--warp]\n"
+            "    [--op put|atomic-flag]\n"
             "    [--no-measure-submit]\n"
             "    [--base-port <port>]   loopback listen ports (default 12300);\n"
             "                           sender uses base, receiver uses base+1\n",
             prog, prog);
 #endif
     exit(1);
+}
+
+static const char *
+op_to_string(gpu_bench_op op) {
+    switch (op) {
+    case gpu_bench_op::Put:
+        return "put";
+    case gpu_bench_op::AtomicFlag:
+        return "atomic-flag";
+    }
+    return "unknown";
+}
+
+static bool
+parse_bench_op(const char *value, gpu_bench_op &op) {
+    if (!strcmp(value, "put")) {
+        op = gpu_bench_op::Put;
+        return true;
+    }
+    if (!strcmp(value, "atomic-flag")) {
+        op = gpu_bench_op::AtomicFlag;
+        return true;
+    }
+    return false;
 }
 
 // ----------------------------------------------------------------------------
@@ -116,7 +142,7 @@ print_latency(uint64_t *d_elapsed, gpu_cycle_stats *d_issue_stats,
               gpu_cycle_stats *d_submit_stats, gpu_cycle_stats *d_post_submit_stats,
               gpu_cycle_stats *d_rtt_stats,
               uint64_t num_iters, int gpu_id,
-              size_t msg_size, bool use_warp)
+              size_t msg_size, bool use_warp, gpu_bench_op op)
 {
     uint64_t h_elapsed = 0;
     cudaMemcpy(&h_elapsed, d_elapsed, sizeof(uint64_t), cudaMemcpyDeviceToHost);
@@ -140,13 +166,17 @@ print_latency(uint64_t *d_elapsed, gpu_cycle_stats *d_issue_stats,
     TimingStatsUs rtt = read_cycle_stats_us(d_rtt_stats, clock_hz);
     TimingStatsUs one_way = read_cycle_stats_us(d_rtt_stats, clock_hz, 0.5);
 
-    printf("msg_size=%-6zu  iters=%-6llu  RTT=%.3f us  one-way=%.3f us  [%s]\n",
-           msg_size, (unsigned long long)num_iters, rtt_us, one_way_us,
-           use_warp ? "WARP" : "THREAD");
+    printf("op=%-12s  msg_size=%-6zu  iters=%-6llu  RTT=%.3f us  one-way=%.3f us  [%s]\n",
+           op_to_string(op), msg_size, (unsigned long long)num_iters,
+           rtt_us, one_way_us, use_warp ? "WARP" : "THREAD");
     printf("metrics:\n");
-    printf("  msg_size=%zu  iters=%llu  level=%s  samples=%llu\n",
-           msg_size, (unsigned long long)num_iters, use_warp ? "WARP" : "THREAD",
+    printf("  op=%s  msg_size=%zu  iters=%llu  level=%s  samples=%llu\n",
+           op_to_string(op), msg_size, (unsigned long long)num_iters,
+           use_warp ? "WARP" : "THREAD",
            (unsigned long long)rtt.count);
+    if (op == gpu_bench_op::AtomicFlag) {
+        printf("  atomic-flag mode: msg_size selects counter offset; no payload bytes are transferred\n");
+    }
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
     printf("  stage rows are per-iteration durations; one-way is RTT/2\n");
 #else
@@ -175,13 +205,15 @@ print_latency(uint64_t *d_elapsed, gpu_cycle_stats *d_issue_stats,
 #ifndef NIXL_GPU_DEVICE_BACKEND_PROXY
 static int
 single_process_run(size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
-                   int gpu_id, bool use_warp, int base_port, bool measure_submit)
+                   int gpu_id, bool use_warp, int base_port, bool measure_submit,
+                   gpu_bench_op op)
 {
     fprintf(stderr,
             "[main] single-process mode  msg_size=%zu  iters=%llu  warmup=%llu"
-            "  gpu=%d  level=%s  ports=%d/%d\n",
+            "  gpu=%d  level=%s  op=%s  ports=%d/%d\n",
             msg_size, (unsigned long long)num_iters, (unsigned long long)warmup_iters,
-            gpu_id, use_warp ? "WARP" : "THREAD", base_port, base_port + 1);
+            gpu_id, use_warp ? "WARP" : "THREAD", op_to_string(op),
+            base_port, base_port + 1);
 
     cudaSetDevice(gpu_id);
     uint64_t *d_elapsed_sender = nullptr, *d_elapsed_recvr = nullptr;
@@ -246,6 +278,7 @@ single_process_run(size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
         params.warmup_iters = warmup_iters;
         params.gpu_id       = gpu_id;
         params.is_sender    = true;
+        params.op           = op;
 
         // Sender listens on base_port; receiver listens on base_port+1.
         sender_st = sender_ctx.setup(params, "127.0.0.1",
@@ -265,6 +298,7 @@ single_process_run(size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
         kctx.send_buf     = (uint8_t *)sender_ctx.send_buf;
         kctx.recv_buf     = (uint8_t *)sender_ctx.recv_buf;
         kctx.msg_size     = msg_size;
+        kctx.op           = op;
         kctx.num_iters    = num_iters;
         kctx.warmup_iters = warmup_iters;
         kctx.is_sender    = true;
@@ -299,6 +333,7 @@ single_process_run(size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
         params.warmup_iters = warmup_iters;
         params.gpu_id       = gpu_id;
         params.is_sender    = false;
+        params.op           = op;
 
         // Receiver listens on base_port+1; peer (sender) is on base_port.
         recvr_st = recvr_ctx.setup(params, "127.0.0.1",
@@ -318,6 +353,7 @@ single_process_run(size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
         kctx.send_buf     = (uint8_t *)recvr_ctx.send_buf;
         kctx.recv_buf     = (uint8_t *)recvr_ctx.recv_buf;
         kctx.msg_size     = msg_size;
+        kctx.op           = op;
         kctx.num_iters    = num_iters;
         kctx.warmup_iters = warmup_iters;
         kctx.is_sender    = false;
@@ -357,7 +393,7 @@ single_process_run(size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
 
     print_latency(d_elapsed_sender, d_issue_sender, nullptr, nullptr,
                   d_submit_sender, nullptr, d_rtt_sender,
-                  num_iters, gpu_id, msg_size, use_warp);
+                  num_iters, gpu_id, msg_size, use_warp, op);
     cudaFree(d_elapsed_sender);
     cudaFree(d_elapsed_recvr);
     cudaFree(d_issue_sender);
@@ -375,14 +411,15 @@ single_process_run(size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
 static int
 twoprocess_run(const char *peer_ip, int peer_port, int listen_port,
                size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
-               int gpu_id, bool use_warp, bool is_sender, bool measure_submit)
+               int gpu_id, bool use_warp, bool is_sender, bool measure_submit,
+               gpu_bench_op op)
 {
     const char *role = is_sender ? "sender" : "receiver";
     fprintf(stderr,
             "[main] two-process mode  role=%s  peer=%s:%d  listen=%d"
-            "  msg_size=%zu  level=%s\n",
-            role, peer_ip, peer_port, listen_port, msg_size,
-            use_warp ? "WARP" : "THREAD");
+            "  op=%s  msg_size=%zu  level=%s\n",
+            role, peer_ip, peer_port, listen_port, op_to_string(op),
+            msg_size, use_warp ? "WARP" : "THREAD");
 
     BenchParams params;
     params.msg_size     = msg_size;
@@ -390,6 +427,7 @@ twoprocess_run(const char *peer_ip, int peer_port, int listen_port,
     params.warmup_iters = warmup_iters;
     params.gpu_id       = gpu_id;
     params.is_sender    = is_sender;
+    params.op           = op;
 
     BenchContext ctx;
     nixl_status_t st = ctx.setup(params, peer_ip, peer_port, listen_port);
@@ -465,6 +503,7 @@ twoprocess_run(const char *peer_ip, int peer_port, int listen_port,
     kctx.send_buf     = (uint8_t *)ctx.send_buf;
     kctx.recv_buf     = (uint8_t *)ctx.recv_buf;
     kctx.msg_size     = msg_size;
+    kctx.op           = op;
     kctx.num_iters    = num_iters;
     kctx.warmup_iters = warmup_iters;
     kctx.is_sender    = is_sender;
@@ -491,7 +530,7 @@ twoprocess_run(const char *peer_ip, int peer_port, int listen_port,
     if (is_sender)
         print_latency(d_elapsed, d_issue_stats, d_dequeue_stats, d_prepare_stats,
                       d_submit_stats, d_post_submit_stats, d_rtt_stats,
-                      num_iters, gpu_id, msg_size, use_warp);
+                      num_iters, gpu_id, msg_size, use_warp, op);
 
     cudaFree(d_elapsed);
     cudaFree(d_issue_stats);
@@ -524,6 +563,7 @@ main(int argc, char *argv[]) {
     bool     use_warp     = false;
     bool     measure_submit = true;
     bool     single_process = false;
+    gpu_bench_op op = gpu_bench_op::Put;
 
     for (int i = 1; i < argc; i++) {
         if      (!strcmp(argv[i], "--role")         && i + 1 < argc) role_str    = argv[++i];
@@ -538,6 +578,12 @@ main(int argc, char *argv[]) {
         else if (!strcmp(argv[i], "--warmup")       && i + 1 < argc) warmup_iters = (uint64_t)atoll(argv[++i]);
         else if (!strcmp(argv[i], "--gpu")          && i + 1 < argc) gpu_id      = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--warp"))                          use_warp    = true;
+        else if (!strcmp(argv[i], "--op")           && i + 1 < argc) {
+            if (!parse_bench_op(argv[++i], op)) {
+                fprintf(stderr, "Unknown op '%s'; expected put or atomic-flag\n", argv[i]);
+                usage(argv[0]);
+            }
+        }
         else if (!strcmp(argv[i], "--measure-submit"))                measure_submit = true;
         else if (!strcmp(argv[i], "--no-measure-submit"))             measure_submit = false;
         else if (!strcmp(argv[i], "--single-process"))                single_process = true;
@@ -562,7 +608,7 @@ main(int argc, char *argv[]) {
             usage(argv[0]);
         }
         return single_process_run(msg_size, num_iters, warmup_iters, gpu_id, use_warp,
-                                  base_port, measure_submit);
+                                  base_port, measure_submit, op);
     }
 #endif
 
@@ -577,5 +623,5 @@ main(int argc, char *argv[]) {
 
     return twoprocess_run(peer_ip, peer_port, listen_port,
                           msg_size, num_iters, warmup_iters,
-                          gpu_id, use_warp, is_sender, measure_submit);
+                          gpu_id, use_warp, is_sender, measure_submit, op);
 }

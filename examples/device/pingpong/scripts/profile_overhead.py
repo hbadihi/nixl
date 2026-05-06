@@ -30,6 +30,7 @@
 #   BASE_PORT   first TCP port to use             (default: 19500)
 #   SIZES       space-separated msg sizes         (default: 8 64 512 4096 32768 262144 1048576)
 #   USE_WARP    if 1, pass --warp                 (default: 0)
+#   OP          benchmark op: put or atomic-flag  (default: put)
 #   OUT_DIR     output directory                  (default: $REPO_ROOT/profile_results/<ts>)
 #   KILL_STALE  if 1, pkill stale bench procs     (default: 0)
 #   RECV_WAIT_S receiver-cleanup timeout seconds  (default: 30)
@@ -96,6 +97,7 @@ SEND_GPU = os.environ.get("SEND_GPU", "0")
 RECV_HOST = os.environ.get("RECV_HOST", "127.0.0.1")
 BASE_PORT = int(os.environ.get("BASE_PORT", "19500"))
 USE_WARP = os.environ.get("USE_WARP", "0") == "1"
+OP = os.environ.get("OP", "put")
 SIZES_STR = os.environ.get("SIZES", "8 64 512 4096 32768 262144 1048576")
 SIZES = [int(s) for s in SIZES_STR.split()]
 
@@ -168,6 +170,12 @@ def check_binaries() -> None:
             file=sys.stderr,
         )
         sys.exit(1)
+
+
+def check_op() -> None:
+    if OP not in ("put", "atomic-flag"):
+        print("ERROR: OP must be 'put' or 'atomic-flag'", file=sys.stderr)
+        sys.exit(2)
 
 
 # ---------- port allocation --------------------------------------------------
@@ -267,6 +275,7 @@ class RunSpec:
     iters: int
     warmup: int
     tag: str
+    op: str = OP
     nsys_rep: Optional[Path] = None  # if set, wrap sender in `nsys profile`
     extra_env: Optional[dict] = None  # extra env vars for both procs
     measure_submit: bool = False
@@ -299,6 +308,8 @@ def _build_args(
         str(spec.iters),
         "--warmup",
         str(spec.warmup),
+        "--op",
+        spec.op,
     ]
     if USE_WARP:
         args.append("--warp")
@@ -796,13 +807,17 @@ def fmt_metric(value: Optional[float]) -> str:
 
 def do_sweep(iters: int, warmup: int) -> None:
     csv_path = OUT_DIR / "sweep.csv"
-    log(f"sweep iters={iters} warmup={warmup} sizes=({' '.join(map(str, SIZES))})")
+    log(
+        f"sweep op={OP} iters={iters} "
+        f"warmup={warmup} sizes=({' '.join(map(str, SIZES))})"
+    )
 
     with open(csv_path, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(
             [
                 "variant",
+                "op",
                 "msg_size",
                 "iters",
                 "warmup",
@@ -815,7 +830,7 @@ def do_sweep(iters: int, warmup: int) -> None:
 
         for size in SIZES:
             for variant, binary in (("ucx", UCX_BIN), ("proxy", PROXY_BIN)):
-                tag = f"sweep_{variant}_{size}"
+                tag = f"sweep_{OP}_{variant}_{size}"
                 spec = RunSpec(
                     binary=binary, size=size, iters=iters, warmup=warmup, tag=tag
                 )
@@ -827,6 +842,7 @@ def do_sweep(iters: int, warmup: int) -> None:
                     w.writerow(
                         [
                             variant,
+                            OP,
                             size,
                             iters,
                             warmup,
@@ -841,7 +857,17 @@ def do_sweep(iters: int, warmup: int) -> None:
                     )
                 else:
                     w.writerow(
-                        [variant, size, iters, warmup, "FAIL", "FAIL", "FAIL", "FAIL"]
+                        [
+                            variant,
+                            OP,
+                            size,
+                            iters,
+                            warmup,
+                            "FAIL",
+                            "FAIL",
+                            "FAIL",
+                            "FAIL",
+                        ]
                     )
                 f.flush()
                 time.sleep(1)
@@ -900,7 +926,8 @@ def do_cluster_submit(iters: int, warmup: int) -> None:
     log(
         "cluster-submit "
         f"sender={SENDER_HOST} receiver={RECEIVER_HOST} "
-        f"iters={iters} warmup={warmup} sizes=({' '.join(map(str, SIZES))})"
+        f"op={OP} iters={iters} warmup={warmup} "
+        f"sizes=({' '.join(map(str, SIZES))})"
     )
 
     with open(csv_path, "w", newline="") as f:
@@ -908,6 +935,7 @@ def do_cluster_submit(iters: int, warmup: int) -> None:
         w.writerow(
             [
                 "variant",
+                "op",
                 "msg_size",
                 "iters",
                 "warmup",
@@ -920,7 +948,7 @@ def do_cluster_submit(iters: int, warmup: int) -> None:
 
         for size in SIZES:
             for variant, binary in (("ucx", UCX_BIN), ("proxy", PROXY_BIN)):
-                tag = f"submit_{variant}_{size}"
+                tag = f"submit_{OP}_{variant}_{size}"
                 spec = RunSpec(
                     binary=binary,
                     size=size,
@@ -939,6 +967,7 @@ def do_cluster_submit(iters: int, warmup: int) -> None:
                     w.writerow(
                         [
                             variant,
+                            OP,
                             size,
                             iters,
                             warmup,
@@ -954,7 +983,17 @@ def do_cluster_submit(iters: int, warmup: int) -> None:
                     )
                 else:
                     w.writerow(
-                        [variant, size, iters, warmup, "FAIL", "FAIL", "FAIL", "FAIL"]
+                        [
+                            variant,
+                            OP,
+                            size,
+                            iters,
+                            warmup,
+                            "FAIL",
+                            "FAIL",
+                            "FAIL",
+                            "FAIL",
+                        ]
                     )
                 f.flush()
                 time.sleep(1)
@@ -969,7 +1008,8 @@ def do_slurm_submit(args: argparse.Namespace) -> None:
     log(
         "slurm-submit "
         f"sender={cfg.sender_node}({cfg.sender_ip}) receiver={cfg.receiver_node}({cfg.receiver_ip}) "
-        f"iters={args.iters} warmup={args.warmup} sizes=({' '.join(map(str, SIZES))})"
+        f"op={OP} iters={args.iters} "
+        f"warmup={args.warmup} sizes=({' '.join(map(str, SIZES))})"
     )
     log(
         "  sender env: "
@@ -989,6 +1029,7 @@ def do_slurm_submit(args: argparse.Namespace) -> None:
         w.writerow(
             [
                 "variant",
+                "op",
                 "msg_size",
                 "iters",
                 "warmup",
@@ -1007,7 +1048,7 @@ def do_slurm_submit(args: argparse.Namespace) -> None:
 
         for size in SIZES:
             for variant, binary in (("ucx", UCX_BIN), ("proxy", PROXY_BIN)):
-                tag = f"slurm_submit_{variant}_{size}"
+                tag = f"slurm_submit_{OP}_{variant}_{size}"
                 spec = RunSpec(
                     binary=binary,
                     size=size,
@@ -1019,6 +1060,7 @@ def do_slurm_submit(args: argparse.Namespace) -> None:
                 rc, out = run_slurm_one(spec, cfg)
                 base_row = [
                     variant,
+                    OP,
                     size,
                     args.iters,
                     args.warmup,
@@ -1106,9 +1148,9 @@ def do_nsys(size: int, iters: int, warmup: int) -> None:
     if shutil.which("nsys") is None:
         log("nsys not on PATH — skipping nsys mode")
         return
-    log(f"nsys size={size} iters={iters} warmup={warmup}")
+    log(f"nsys op={OP} size={size} iters={iters} warmup={warmup}")
     for variant, binary in (("ucx", UCX_BIN), ("proxy", PROXY_BIN)):
-        tag = f"nsys_{variant}_{size}"
+        tag = f"nsys_{OP}_{variant}_{size}"
         rep = OUT_DIR / tag  # nsys appends .nsys-rep
         spec = RunSpec(
             binary=binary, size=size, iters=iters, warmup=warmup, tag=tag, nsys_rep=rep
@@ -1122,10 +1164,10 @@ def do_nsys(size: int, iters: int, warmup: int) -> None:
 
 
 def do_ucxinfo(size: int, iters: int, warmup: int) -> None:
-    log(f"ucxinfo size={size} iters={iters} warmup={warmup}")
+    log(f"ucxinfo op={OP} size={size} iters={iters} warmup={warmup}")
     extra = {"UCX_LOG_LEVEL": "info", "UCX_PROTO_INFO": "y"}
     for variant, binary in (("ucx", UCX_BIN), ("proxy", PROXY_BIN)):
-        tag = f"ucxinfo_{variant}"
+        tag = f"ucxinfo_{OP}_{variant}"
         log(f"  {variant}: capturing UCX_PROTO_INFO")
         spec = RunSpec(
             binary=binary,
@@ -1216,6 +1258,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     args = _build_parser().parse_args(list(argv) if argv is not None else None)
     mode = args.mode or "sweep"
 
+    check_op()
     if mode == "cluster-submit":
         check_cluster_submit_config()
     elif mode != "slurm-submit":
