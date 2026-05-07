@@ -23,7 +23,7 @@
 namespace nixl::gpu::proxy_impl {
 
 template<nixl_gpu_level_t level = nixl_gpu_level_t::THREAD>
-__device__ inline nixl_status_t
+__device__ __forceinline__ nixl_status_t
 get_xfer_status(nixlGpuXferStatusH &xfer_status) {
     uint32_t lane_id;
     nixlProxyExecInit<level>(lane_id);
@@ -55,7 +55,7 @@ get_xfer_status(nixlGpuXferStatusH &xfer_status) {
 }
 
 template<nixl_gpu_level_t level = nixl_gpu_level_t::THREAD>
-__device__ inline nixl_status_t
+__device__ __forceinline__ nixl_status_t
 put(const nixlMemViewElem &src,
     const nixlMemViewElem &dst,
     size_t size,
@@ -71,18 +71,19 @@ put(const nixlMemViewElem &src,
         if (ctx == nullptr) {
             status = NIXL_ERR_NOT_SUPPORTED;
         } else {
-            nixlProxySubmission submission{};
-            submission.opcode = nixl_proxy_opcode_t::PUT;
-            submission.channel_id = static_cast<uint32_t>(channel_id);
-            submission.flags = flags;
-            submission.src_proxy_memview_id = proxyMemViewIdFromHandle(src.mvh);
-            submission.src_index = src.index;
-            submission.src_offset = src.offset;
-            submission.dst_proxy_memview_id = proxyMemViewIdFromHandle(dst.mvh);
-            submission.dst_index = dst.index;
-            submission.dst_offset = dst.offset;
-            submission.size = size;
-            status = ctx->enqueue(submission, xfer_status);
+            status = ctx->enqueue(
+                nixlProxySubmission{
+                    .opcode               = nixl_proxy_opcode_t::PUT,
+                    .channel_id           = static_cast<uint32_t>(channel_id),
+                    .flags                = flags,
+                    .src_proxy_memview_id = proxyMemViewIdFromHandle(src.mvh),
+                    .src_index            = src.index,
+                    .src_offset           = src.offset,
+                    .dst_proxy_memview_id = proxyMemViewIdFromHandle(dst.mvh),
+                    .dst_index            = dst.index,
+                    .dst_offset           = dst.offset,
+                    .size                 = size},
+                xfer_status);
         }
     }
     nixlProxySync<level>();
@@ -90,7 +91,7 @@ put(const nixlMemViewElem &src,
 }
 
 template<nixl_gpu_level_t level = nixl_gpu_level_t::THREAD>
-__device__ inline nixl_status_t
+__device__ __forceinline__ nixl_status_t
 atomic_add(uint64_t value,
            const nixlMemViewElem &counter,
            unsigned channel_id = 0,
@@ -104,23 +105,24 @@ atomic_add(uint64_t value,
         if (ctx == nullptr) {
             status = NIXL_ERR_NOT_SUPPORTED;
         } else {
-            nixlProxySubmission submission{};
-            submission.opcode = nixl_proxy_opcode_t::ATOMIC_ADD;
-            submission.channel_id = static_cast<uint32_t>(channel_id);
-            submission.flags = flags;
-            submission.dst_proxy_memview_id = proxyMemViewIdFromHandle(counter.mvh);
-            submission.dst_index = counter.index;
-            submission.dst_offset = counter.offset;
-            submission.size = sizeof(uint64_t);
-            submission.value = value;
-            status = ctx->enqueue(submission, xfer_status);
+            status = ctx->enqueue(
+                nixlProxySubmission{
+                    .opcode               = nixl_proxy_opcode_t::ATOMIC_ADD,
+                    .channel_id           = static_cast<uint32_t>(channel_id),
+                    .flags                = flags,
+                    .dst_proxy_memview_id = proxyMemViewIdFromHandle(counter.mvh),
+                    .dst_index            = counter.index,
+                    .dst_offset           = counter.offset,
+                    .size                 = sizeof(uint64_t),
+                    .value                = value},
+                xfer_status);
         }
     }
     nixlProxySync<level>();
     return status;
 }
 
-__device__ inline void *
+__device__ __forceinline__ void *
 get_ptr(nixlMemViewH, size_t) {
     return nullptr;
 }
