@@ -76,6 +76,7 @@ else
 endif
 
 cpp_flags = []
+cuda_flags = []
 
 gpu_dependencies = []
 if rocm_dep.found()
@@ -84,6 +85,13 @@ if rocm_dep.found()
 elif cuda_dep.found()
     gpu_dependencies = [cuda_dep]
     cpp_flags += ['-DHAVE_GPU', '-DHAVE_CUDA']
+endif
+
+if cuda_dep.found()
+    cuda_flags += '-DHAVE_CUDA'
+    cuda_dependencies = [cuda_dep]
+else
+    cuda_dependencies = []
 endif
 
 if libfabric_dep.found()
@@ -119,13 +127,15 @@ gtest_sources = [
     'configuration.cpp'
     ]
 
-if ucx_gpu_device_api_available
-    gtest_sources += device_api_test_sources
-    device_api_inc = [nixl_gpu_inc_dirs, include_directories('device_api')]
-    device_api_dep = [ucx_dep, doca_gpunetio_dep]
+if gpu_device_api_supported
+    if gpu_device_api_is_proxy
+        gtest_sources += proxy_device_api_test_sources
+    else
+        gtest_sources += device_api_test_sources
+    endif
+    device_api_inc = [nixl_gpu_device_api_inc_dirs, include_directories('device_api')]
 else
     device_api_inc = []
-    device_api_dep = []
 endif
 
 if ucx_dep.found() and is_variable('ucx_backend_interface')
@@ -156,9 +166,10 @@ endif
 test_exe = executable('gtest',
     sources : gtest_sources,
     include_directories: [nixl_inc_dirs, utils_inc_dirs, device_api_inc, include_directories('../doca-telemetry'), include_directories('../../src/plugins/telemetry/common')],
-    cpp_args : cpp_flags,
-    dependencies : [nixl_dep, nixl_common_dep, gpu_dependencies, device_api_dep, gtest_dep, gmock_dep, absl_strings_dep, absl_time_dep, ucx_hw_warning_dep, file_utils_interface, nixl_telemetry_mp_store_dep, telemetry_mp_collector_dep, telemetry_mp_exporter_dep],
-    link_with: [nixl_build_lib],
+    cpp_args : cpp_flags + gpu_device_api_cpp_args,
+    cuda_args : cuda_flags + gpu_device_api_cuda_args,
+    dependencies : [nixl_dep, nixl_common_dep, gpu_dependencies, gpu_device_api_deps, gtest_dep, gmock_dep, absl_strings_dep, absl_time_dep, ucx_hw_warning_dep, file_utils_interface, nixl_telemetry_mp_store_dep, telemetry_mp_collector_dep, telemetry_mp_exporter_dep],
+    link_with: [nixl_build_lib, gpu_device_api_link_with],
     install : true
 )
 
@@ -213,14 +224,14 @@ if proxy_gtest_available
         'common.cpp',
     ] + proxy_device_api_test_sources
 
-    proxy_define = ['-DHAVE_CUDA', '-DNIXL_GPU_DEVICE_BACKEND_PROXY']
+    proxy_define = ['-DNIXL_GPU_DEVICE_BACKEND_PROXY']
 
     proxy_test_exe = executable('gtest_proxy',
         sources : proxy_gtest_sources,
         include_directories : [nixl_inc_dirs, utils_inc_dirs, gtest_inc_dirs,
                                nixl_gpu_proxy_inc_dirs, include_directories('device_api')],
         cpp_args : cpp_flags + proxy_define,
-        cuda_args : proxy_define,
+        cuda_args : cuda_flags + proxy_define,
         dependencies : [nixl_dep, nixl_common_dep, cuda_dep,
                         gtest_dep, gmock_dep, absl_strings_dep, absl_time_dep,
                         file_utils_interface],
