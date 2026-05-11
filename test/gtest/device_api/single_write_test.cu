@@ -22,10 +22,6 @@
 #include <memory>
 #include <gtest/gtest.h>
 
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-#include <nixl_device_proxy.cuh>
-#endif
-
 namespace gtest::nixl::gpu::single_write {
 struct putParams {
     nixlMemViewElem src;
