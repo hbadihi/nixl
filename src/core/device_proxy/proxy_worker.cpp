@@ -124,7 +124,9 @@ ProxyWorker::submitToBackend(nixlProxyChannelState &channel, const nixlProxySubm
                << " local_addr=0x" << std::hex << prepared_submission.local.desc.addr
                << " remote_addr=0x" << prepared_submission.remote.desc.addr << std::dec
                << " size=" << submission.size
-               << " remote_agent='" << prepared_submission.remote_agent << "'";
+               << " remote_agent='"
+               << (prepared_submission.remote_agent ? prepared_submission.remote_agent->c_str() : "<null>")
+               << "'";
 
     uint64_t request_token = 0;
     nixlProxyRequestState inflight{};

@@ -148,8 +148,7 @@ nixlProxyMemViewRegistry::storeMetadata(nixlMemViewH proxy_memview,
         return NIXL_ERR_NOT_FOUND;
     }
 
-    fillLocalMetadata(dlist, entry->local_metadata);
-    entry->remote_metadata = RemoteMetadata{};
+    fillLocalMetadata(dlist, entry->ready_entries);
     entry->metadata_kind = ProxyMemViewRegMetadataKind::METADATA_KIND_LOCAL;
     entry->state = ProxyMemViewRegEntryState::ENTRY_READY;
 
@@ -166,8 +165,7 @@ nixlProxyMemViewRegistry::storeMetadata(nixlMemViewH proxy_memview,
         return NIXL_ERR_NOT_FOUND;
     }
 
-    fillRemoteMetadata(dlist, entry->remote_metadata);
-    entry->local_metadata = LocalMetadata{};
+    fillRemoteMetadata(dlist, entry->ready_entries);
     entry->metadata_kind = ProxyMemViewRegMetadataKind::METADATA_KIND_REMOTE;
     entry->state = ProxyMemViewRegEntryState::ENTRY_READY;
 
@@ -195,57 +193,43 @@ nixlProxyMemViewRegistry::prepareSubmission(const nixlProxySubmission &submissio
         return NIXL_ERR_NOT_SUPPORTED;
     }
 
-    const RemoteMetadata *remote_metadata = nullptr;
-    const ProxyMemViewRegStoredEntry *dst_metadata = nullptr;
+    const ReadyEntry *dst_metadata = nullptr;
     nixl_status_t status = getRemoteEntryForSubmission(
         submission.dst_proxy_memview_id,
         submission.dst_index,
         submission.dst_offset,
         transfer_size,
-        remote_metadata,
         dst_metadata);
     if (status != NIXL_SUCCESS) {
         return status;
     }
 
-    nixlBackendProxySubmission prepared{};
-    prepared.op_idx = submission.op_idx;
-    prepared.opcode = submission.opcode;
-    prepared.channel_id = submission.channel_id;
-    prepared.flags = submission.flags;
-    prepared.size = transfer_size;
-    prepared.value = submission.value;
-    prepared.remote_agent = dst_metadata->remote_agent;
-    prepared.remote.mem_type = remote_metadata->mem_type;
-    prepared.remote.desc = nixlMetaDesc(
-        dst_metadata->base_addr + submission.dst_offset,
-        transfer_size,
-        dst_metadata->dev_id,
-        dst_metadata->metadata);
-
+    const ReadyEntry *src_metadata = nullptr;
     if (needs_source) {
-        const LocalMetadata *local_metadata = nullptr;
-        const ProxyMemViewRegStoredEntry *src_metadata = nullptr;
         status = getLocalEntryForSubmission(
             submission.src_proxy_memview_id,
             submission.src_index,
             submission.src_offset,
             transfer_size,
-            local_metadata,
             src_metadata);
         if (status != NIXL_SUCCESS) {
             return status;
         }
-
-        prepared.local.mem_type = local_metadata->mem_type;
-        prepared.local.desc = nixlMetaDesc(
-            src_metadata->base_addr + submission.src_offset,
-            transfer_size,
-            src_metadata->dev_id,
-            src_metadata->metadata);
     }
 
-    prepared_submission = prepared;
+    prepared_submission.op_idx = submission.op_idx;
+    prepared_submission.opcode = submission.opcode;
+    prepared_submission.channel_id = submission.channel_id;
+    prepared_submission.flags = submission.flags;
+    prepared_submission.size = transfer_size;
+    prepared_submission.value = submission.value;
+    prepared_submission.remote_agent = &dst_metadata->remote_agent;
+    prepared_submission.local = nixlBackendProxyXferDesc{};
+    prepared_submission.remote = nixlBackendProxyXferDesc{};
+    fillXferDesc(prepared_submission.remote, *dst_metadata, submission.dst_offset, transfer_size);
+    if (needs_source) {
+        fillXferDesc(prepared_submission.local, *src_metadata, submission.src_offset, transfer_size);
+    }
     return NIXL_SUCCESS;
 }
 
@@ -291,9 +275,7 @@ nixlProxyMemViewRegistry::getRemoteEntryForSubmission(uint64_t proxy_memview_id,
                                                   size_t index,
                                                   size_t offset,
                                                   size_t size,
-                                                  const RemoteMetadata *&metadata,
-                                                  const ProxyMemViewRegStoredEntry *&entry) const {
-    metadata = nullptr;
+                                                  const ReadyEntry *&entry) const {
     entry = nullptr;
 
     const RegistryEntry *registry_entry = getEntryForId(proxy_memview_id);
@@ -308,21 +290,19 @@ nixlProxyMemViewRegistry::getRemoteEntryForSubmission(uint64_t proxy_memview_id,
         return NIXL_ERR_INVALID_PARAM;
     }
 
-    const auto &remote_metadata = registry_entry->remote_metadata;
-    if (index >= remote_metadata.entries.size()) {
+    if (index >= registry_entry->ready_entries.size()) {
         return NIXL_ERR_INVALID_PARAM;
     }
 
-    const ProxyMemViewRegStoredEntry &remote_entry = remote_metadata.entries[index];
+    const ReadyEntry &remote_entry = registry_entry->ready_entries[index];
     if (!rangeFits(remote_entry, offset, size)) {
         return NIXL_ERR_INVALID_PARAM;
     }
     if (remote_entry.remote_agent.empty() || remote_entry.remote_agent == nixl_null_agent ||
-        remote_entry.metadata == nullptr) {
+        remote_entry.base.desc.metadataP == nullptr) {
         return NIXL_ERR_INVALID_PARAM;
     }
 
-    metadata = &remote_metadata;
     entry = &remote_entry;
     return NIXL_SUCCESS;
 }
@@ -332,9 +312,7 @@ nixlProxyMemViewRegistry::getLocalEntryForSubmission(uint64_t proxy_memview_id,
                                                  size_t index,
                                                  size_t offset,
                                                  size_t size,
-                                                 const LocalMetadata *&metadata,
-                                                 const ProxyMemViewRegStoredEntry *&entry) const {
-    metadata = nullptr;
+                                                 const ReadyEntry *&entry) const {
     entry = nullptr;
 
     const RegistryEntry *registry_entry = getEntryForId(proxy_memview_id);
@@ -349,47 +327,61 @@ nixlProxyMemViewRegistry::getLocalEntryForSubmission(uint64_t proxy_memview_id,
         return NIXL_ERR_INVALID_PARAM;
     }
 
-    const auto &local_metadata = registry_entry->local_metadata;
-    if (index >= local_metadata.entries.size()) {
+    if (index >= registry_entry->ready_entries.size()) {
         return NIXL_ERR_INVALID_PARAM;
     }
 
-    const ProxyMemViewRegStoredEntry &local_entry = local_metadata.entries[index];
+    const ReadyEntry &local_entry = registry_entry->ready_entries[index];
     if (!rangeFits(local_entry, offset, size)) {
         return NIXL_ERR_INVALID_PARAM;
     }
 
-    metadata = &local_metadata;
     entry = &local_entry;
     return NIXL_SUCCESS;
 }
 
 bool
-nixlProxyMemViewRegistry::rangeFits(const ProxyMemViewRegStoredEntry &entry, size_t offset, size_t size) {
-    return offset <= entry.len && size <= entry.len - offset;
+nixlProxyMemViewRegistry::rangeFits(const ReadyEntry &entry, size_t offset, size_t size) {
+    return offset <= entry.base.desc.len && size <= entry.base.desc.len - offset;
+}
+
+void
+nixlProxyMemViewRegistry::fillXferDesc(nixlBackendProxyXferDesc &out,
+                                       const ReadyEntry &entry,
+                                       size_t offset,
+                                       size_t size) {
+    out.mem_type = entry.base.mem_type;
+    out.desc = nixlMetaDesc(entry.base.desc.addr + offset,
+                            size,
+                            entry.base.desc.devId,
+                            entry.base.desc.metadataP);
 }
 
 void
 nixlProxyMemViewRegistry::fillLocalMetadata(const nixl_meta_dlist_t &dlist,
-                                        LocalMetadata &out) {
-    out = LocalMetadata{};
-    out.mem_type = dlist.getType();
-    out.entries.reserve(dlist.descCount());
+                                            std::vector<ReadyEntry> &out) {
+    out.clear();
+    out.reserve(dlist.descCount());
     for (const auto &desc : dlist) {
-        out.entries.push_back(
-            ProxyMemViewRegStoredEntry{desc.addr, desc.len, desc.devId, desc.metadataP});
+        out.push_back(ReadyEntry{
+            nixlBackendProxyXferDesc{
+                dlist.getType(),
+                nixlMetaDesc(desc.addr, desc.len, desc.devId, desc.metadataP)},
+            {}});
     }
 }
 
 void
 nixlProxyMemViewRegistry::fillRemoteMetadata(const nixl_remote_meta_dlist_t &dlist,
-                                         RemoteMetadata &out) {
-    out = RemoteMetadata{};
-    out.mem_type = dlist.getType();
-    out.entries.reserve(dlist.descCount());
+                                             std::vector<ReadyEntry> &out) {
+    out.clear();
+    out.reserve(dlist.descCount());
     for (const auto &desc : dlist) {
-        out.entries.push_back(ProxyMemViewRegStoredEntry{
-            desc.addr, desc.len, desc.devId, desc.metadataP, desc.remoteAgent});
+        out.push_back(ReadyEntry{
+            nixlBackendProxyXferDesc{
+                dlist.getType(),
+                nixlMetaDesc(desc.addr, desc.len, desc.devId, desc.metadataP)},
+            desc.remoteAgent});
     }
 }
 

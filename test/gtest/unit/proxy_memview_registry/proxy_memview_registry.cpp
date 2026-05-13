@@ -178,7 +178,8 @@ namespace proxy_memview_registry {
         EXPECT_EQ(prepared_submission.remote.desc.addr, 0x2009u);
         EXPECT_EQ(prepared_submission.remote.desc.len, 16u);
         EXPECT_EQ(prepared_submission.remote.desc.metadataP, &remote_md_);
-        EXPECT_EQ(prepared_submission.remote_agent, "remote-agent");
+        ASSERT_NE(prepared_submission.remote_agent, nullptr);
+        EXPECT_EQ(*prepared_submission.remote_agent, "remote-agent");
     }
 
     TEST_F(ProxyMemViewRegistryTest, PreparedSubmissionUsesDestinationEntryRemoteAgent) {
@@ -213,12 +214,14 @@ namespace proxy_memview_registry {
         submission.dst_index = 0;
         ASSERT_EQ(registry_.prepareSubmission(submission, prepared_submission), NIXL_SUCCESS);
         EXPECT_EQ(prepared_submission.remote.desc.addr, 0x2000u);
-        EXPECT_EQ(prepared_submission.remote_agent, "peer-0");
+        ASSERT_NE(prepared_submission.remote_agent, nullptr);
+        EXPECT_EQ(*prepared_submission.remote_agent, "peer-0");
 
         submission.dst_index = 1;
         ASSERT_EQ(registry_.prepareSubmission(submission, prepared_submission), NIXL_SUCCESS);
         EXPECT_EQ(prepared_submission.remote.desc.addr, 0x3000u);
-        EXPECT_EQ(prepared_submission.remote_agent, "peer-1");
+        ASSERT_NE(prepared_submission.remote_agent, nullptr);
+        EXPECT_EQ(*prepared_submission.remote_agent, "peer-1");
     }
 
     TEST_F(ProxyMemViewRegistryTest, PrepareSubmissionRejectsUnusableRemoteEntries) {
@@ -465,7 +468,8 @@ namespace proxy_memview_registry {
         EXPECT_EQ(prepared_submission.remote.desc.addr, 0x2009u);
         EXPECT_EQ(prepared_submission.remote.desc.len, sizeof(uint64_t));
         EXPECT_EQ(prepared_submission.remote.desc.metadataP, &remote_md_);
-        EXPECT_EQ(prepared_submission.remote_agent, "remote-agent");
+        ASSERT_NE(prepared_submission.remote_agent, nullptr);
+        EXPECT_EQ(*prepared_submission.remote_agent, "remote-agent");
         EXPECT_EQ(prepared_submission.value, 42u);
     }
 
