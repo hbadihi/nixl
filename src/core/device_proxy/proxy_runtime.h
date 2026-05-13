@@ -127,6 +127,7 @@ class nixlProxyMemViewRegistry {
             size_t len = 0;
             uint64_t dev_id = 0;
             nixlBackendMD *metadata = nullptr;
+            std::string remote_agent;
         };
 
         struct LocalMetadata {
@@ -136,7 +137,6 @@ class nixlProxyMemViewRegistry {
 
         struct RemoteMetadata {
             nixl_mem_t mem_type = DRAM_SEG;
-            std::string remote_agent;
             std::vector<ProxyMemViewRegStoredEntry> entries;
         };
 

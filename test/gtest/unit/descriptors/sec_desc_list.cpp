@@ -212,4 +212,39 @@ TEST_F(secDescListTest, AddRandomBatches) {
     }
 }
 
+class DummyBackendMD : public nixlBackendMD {
+public:
+    DummyBackendMD() : nixlBackendMD(false) {}
+};
+
+class TestMemSection : public nixlMemSection {
+public:
+    ~TestMemSection() = default;
+
+    void
+    addBaseDesc(nixlBackendEngine *backend, const nixlSectionDesc &desc) {
+        emplace(VRAM_SEG, backend).addDesc(desc);
+    }
+};
+
+TEST(MemSectionTest, AddElementPreservesRemoteAgent) {
+    TestMemSection section;
+    DummyBackendMD md;
+    auto *backend = reinterpret_cast<nixlBackendEngine *>(uintptr_t{0x1});
+
+    nixlSectionDesc base(0x1000, 64, 7, &md);
+    section.addBaseDesc(backend, base);
+
+    nixlRemoteDesc query(0x1010, 16, 7, "peer-a");
+    nixl_remote_meta_dlist_t out(VRAM_SEG);
+    ASSERT_EQ(section.addElement(query, backend, out), NIXL_SUCCESS);
+
+    ASSERT_EQ(out.descCount(), 1);
+    EXPECT_EQ(out[0].addr, 0x1010u);
+    EXPECT_EQ(out[0].len, 16u);
+    EXPECT_EQ(out[0].devId, 7u);
+    EXPECT_EQ(out[0].metadataP, &md);
+    EXPECT_EQ(out[0].remoteAgent, "peer-a");
+}
+
 } // namespace descriptors

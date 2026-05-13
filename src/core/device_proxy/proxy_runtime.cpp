@@ -215,7 +215,7 @@ nixlProxyMemViewRegistry::prepareSubmission(const nixlProxySubmission &submissio
     prepared.flags = submission.flags;
     prepared.size = transfer_size;
     prepared.value = submission.value;
-    prepared.remote_agent = remote_metadata->remote_agent;
+    prepared.remote_agent = dst_metadata->remote_agent;
     prepared.remote.mem_type = remote_metadata->mem_type;
     prepared.remote.desc = nixlMetaDesc(
         dst_metadata->base_addr + submission.dst_offset,
@@ -317,6 +317,10 @@ nixlProxyMemViewRegistry::getRemoteEntryForSubmission(uint64_t proxy_memview_id,
     if (!rangeFits(remote_entry, offset, size)) {
         return NIXL_ERR_INVALID_PARAM;
     }
+    if (remote_entry.remote_agent.empty() || remote_entry.remote_agent == nixl_null_agent ||
+        remote_entry.metadata == nullptr) {
+        return NIXL_ERR_INVALID_PARAM;
+    }
 
     metadata = &remote_metadata;
     entry = &remote_entry;
@@ -372,7 +376,8 @@ nixlProxyMemViewRegistry::fillLocalMetadata(const nixl_meta_dlist_t &dlist,
     out.mem_type = dlist.getType();
     out.entries.reserve(dlist.descCount());
     for (const auto &desc : dlist) {
-        out.entries.push_back(ProxyMemViewRegStoredEntry{desc.addr, desc.len, desc.devId, desc.metadataP});
+        out.entries.push_back(
+            ProxyMemViewRegStoredEntry{desc.addr, desc.len, desc.devId, desc.metadataP});
     }
 }
 
@@ -383,10 +388,8 @@ nixlProxyMemViewRegistry::fillRemoteMetadata(const nixl_remote_meta_dlist_t &dli
     out.mem_type = dlist.getType();
     out.entries.reserve(dlist.descCount());
     for (const auto &desc : dlist) {
-        if (out.remote_agent.empty() && desc.remoteAgent != nixl_null_agent) {
-            out.remote_agent = desc.remoteAgent;
-        }
-        out.entries.push_back(ProxyMemViewRegStoredEntry{desc.addr, desc.len, desc.devId, desc.metadataP});
+        out.entries.push_back(ProxyMemViewRegStoredEntry{
+            desc.addr, desc.len, desc.devId, desc.metadataP, desc.remoteAgent});
     }
 }
 
