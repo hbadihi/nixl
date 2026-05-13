@@ -136,22 +136,9 @@ class nixlProxyMemViewRegistry {
         clear() noexcept;
 
     private:
-        struct ProxyMemViewRegStoredEntry {
-            uintptr_t base_addr = 0;
-            size_t len = 0;
-            uint64_t dev_id = 0;
-            nixlBackendMD *metadata = nullptr;
+        struct ReadyEntry {
+            nixlBackendProxyXferDesc base{};
             std::string remote_agent;
-        };
-
-        struct LocalMetadata {
-            nixl_mem_t mem_type = DRAM_SEG;
-            std::vector<ProxyMemViewRegStoredEntry> entries;
-        };
-
-        struct RemoteMetadata {
-            nixl_mem_t mem_type = DRAM_SEG;
-            std::vector<ProxyMemViewRegStoredEntry> entries;
         };
 
         enum class ProxyMemViewRegEntryState : uint8_t {
@@ -171,8 +158,7 @@ class nixlProxyMemViewRegistry {
             nixlMemViewH backend_memview = nullptr;
             ProxyMemViewRegEntryState state = ProxyMemViewRegEntryState::ENTRY_ALLOCATED;
             ProxyMemViewRegMetadataKind metadata_kind = ProxyMemViewRegMetadataKind::METADATA_KIND_NONE;
-            LocalMetadata local_metadata{};
-            RemoteMetadata remote_metadata{};
+            std::vector<ReadyEntry> ready_entries;
         };
 
         RegistryEntry *
@@ -192,25 +178,29 @@ class nixlProxyMemViewRegistry {
                                     size_t index,
                                     size_t offset,
                                     size_t size,
-                                    const RemoteMetadata *&metadata,
-                                    const ProxyMemViewRegStoredEntry *&entry) const;
+                                    const ReadyEntry *&entry) const;
 
         nixl_status_t
         getLocalEntryForSubmission(uint64_t proxy_memview_id,
                                    size_t index,
                                    size_t offset,
                                    size_t size,
-                                   const LocalMetadata *&metadata,
-                                   const ProxyMemViewRegStoredEntry *&entry) const;
+                                   const ReadyEntry *&entry) const;
 
         static bool
-        rangeFits(const ProxyMemViewRegStoredEntry &entry, size_t offset, size_t size);
+        rangeFits(const ReadyEntry &entry, size_t offset, size_t size);
 
         static void
-        fillLocalMetadata(const nixl_meta_dlist_t &dlist, LocalMetadata &out);
+        fillXferDesc(nixlBackendProxyXferDesc &out,
+                     const ReadyEntry &entry,
+                     size_t offset,
+                     size_t size);
 
         static void
-        fillRemoteMetadata(const nixl_remote_meta_dlist_t &dlist, RemoteMetadata &out);
+        fillLocalMetadata(const nixl_meta_dlist_t &dlist, std::vector<ReadyEntry> &out);
+
+        static void
+        fillRemoteMetadata(const nixl_remote_meta_dlist_t &dlist, std::vector<ReadyEntry> &out);
 
         std::vector<RegistryEntry> entries_;
         uint64_t next_proxy_memview_id_ = 1;

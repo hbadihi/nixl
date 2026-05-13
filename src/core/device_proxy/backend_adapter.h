@@ -38,7 +38,7 @@ struct nixlBackendProxySubmission {
 
     nixlBackendProxyXferDesc local{};
     nixlBackendProxyXferDesc remote{};
-    std::string remote_agent;
+    const std::string *remote_agent = nullptr;
 
     size_t size = 0;
     uint64_t value = 0;
