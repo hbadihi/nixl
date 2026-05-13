@@ -44,6 +44,11 @@ nixlUcxProxyBackendAdapter::submit(const nixlBackendProxySubmission &submission,
 nixl_status_t
 nixlUcxProxyBackendAdapter::submitPut(const nixlBackendProxySubmission &submission,
                                       uint64_t &request_token) {
+    if (submission.remote_agent == nullptr) {
+        return NIXL_ERR_INVALID_PARAM;
+    }
+    const std::string &remote_agent = *submission.remote_agent;
+
     nixlBackendReqH *handle = nullptr;
     nixl_status_t status = engine_->submitRmaWrite(submission.local.desc,
                                                    submission.remote.desc,
@@ -62,7 +67,7 @@ nixlUcxProxyBackendAdapter::submitPut(const nixlBackendProxySubmission &submissi
                << " dst_addr=0x" << std::hex
                << submission.remote.desc.addr << std::dec
                << " size=" << submission.size
-               << " remote_agent='" << submission.remote_agent << "'"
+               << " remote_agent='" << remote_agent << "'"
                << " token=" << request_token;
     return NIXL_SUCCESS;
 }
@@ -70,6 +75,11 @@ nixlUcxProxyBackendAdapter::submitPut(const nixlBackendProxySubmission &submissi
 nixl_status_t
 nixlUcxProxyBackendAdapter::submitAtomicAdd(const nixlBackendProxySubmission &submission,
                                             uint64_t &request_token) {
+    if (submission.remote_agent == nullptr) {
+        return NIXL_ERR_INVALID_PARAM;
+    }
+    const std::string &remote_agent = *submission.remote_agent;
+
     nixlBackendReqH *handle = nullptr;
     const size_t atomic_size = submission.size == 0 ? sizeof(uint64_t) : submission.size;
     nixl_status_t status = engine_->submitAtomicAdd(submission.remote.desc,
@@ -89,7 +99,7 @@ nixlUcxProxyBackendAdapter::submitAtomicAdd(const nixlBackendProxySubmission &su
                << submission.remote.desc.addr << std::dec
                << " size=" << submission.size
                << " value=" << submission.value
-               << " remote_agent='" << submission.remote_agent << "'"
+               << " remote_agent='" << remote_agent << "'"
                << " token=" << request_token;
     return NIXL_SUCCESS;
 }
