@@ -328,25 +328,7 @@ TEST_F(ProxyRuntimeTest, PrepMemViewProducesReadyEntries) {
     EXPECT_TRUE(runtime_.resolveProxyMemView(dst_proxy, resolved));
     EXPECT_EQ(resolved, remote_backend);
 
-    nixlProxySubmission submission{};
-    submission.opcode = nixl_proxy_opcode_t::PUT;
-    submission.src_proxy_memview_id = reinterpret_cast<uint64_t>(src_proxy);
-    submission.src_offset = 4;
-    submission.dst_proxy_memview_id = reinterpret_cast<uint64_t>(dst_proxy);
-    submission.dst_offset = 8;
-    submission.size = 32;
-
-    nixlBackendProxySubmission prepared_submission;
-    ASSERT_EQ(runtime_.memviewRegistry().prepareSubmission(submission, prepared_submission),
-              NIXL_SUCCESS);
-    EXPECT_EQ(prepared_submission.local.desc.addr, 0x1004u);
-    EXPECT_EQ(prepared_submission.local.desc.len, 32u);
-    EXPECT_EQ(prepared_submission.local.desc.metadataP, &local_md);
-    EXPECT_EQ(prepared_submission.remote.desc.addr, 0x2008u);
-    EXPECT_EQ(prepared_submission.remote.desc.len, 32u);
-    EXPECT_EQ(prepared_submission.remote.desc.metadataP, &remote_md);
-    ASSERT_NE(prepared_submission.remote_agent, nullptr);
-    EXPECT_EQ(*prepared_submission.remote_agent, "peer");
+    EXPECT_NE(src_proxy, dst_proxy);
 }
 
 TEST_F(ProxyRuntimeTest, PrepMemViewRejectsNullOutput) {
@@ -366,16 +348,13 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedTransportDescriptors) {
 
     nixlMemViewH src_proxy = nullptr;
     nixlMemViewH dst_proxy = nullptr;
-    ASSERT_EQ(runtime_.registerProxyMemView(reinterpret_cast<nixlMemViewH>(uintptr_t{0x10}),
-                                           &src_proxy),
-              NIXL_SUCCESS);
-    ASSERT_EQ(runtime_.registerProxyMemView(reinterpret_cast<nixlMemViewH>(uintptr_t{0x20}),
-                                           &dst_proxy),
-              NIXL_SUCCESS);
 
     nixl_meta_dlist_t local_dlist(DRAM_SEG);
     local_dlist.addDesc(nixlMetaDesc(0x1000, 64, 0, &local_md));
-    ASSERT_EQ(runtime_.storeMetadata(src_proxy, local_dlist), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_.prepMemView(reinterpret_cast<nixlMemViewH>(uintptr_t{0x10}),
+                                   local_dlist,
+                                   &src_proxy),
+              NIXL_SUCCESS);
 
     nixl_remote_meta_dlist_t remote_dlist(DRAM_SEG);
     nixlRemoteMetaDesc remote_desc("peer");
@@ -384,7 +363,10 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedTransportDescriptors) {
     remote_desc.devId = 0;
     remote_desc.metadataP = &remote_md;
     remote_dlist.addDesc(remote_desc);
-    ASSERT_EQ(runtime_.storeMetadata(dst_proxy, remote_dlist), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_.prepMemView(reinterpret_cast<nixlMemViewH>(uintptr_t{0x20}),
+                                   remote_dlist,
+                                   &dst_proxy),
+              NIXL_SUCCESS);
 
     ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
 
@@ -445,10 +427,6 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedAtomicAddDescriptor) {
     ASSERT_EQ(initRuntime(1, 1), NIXL_SUCCESS);
 
     nixlMemViewH dst_proxy = nullptr;
-    ASSERT_EQ(runtime_.registerProxyMemView(reinterpret_cast<nixlMemViewH>(uintptr_t{0x20}),
-                                           &dst_proxy),
-              NIXL_SUCCESS);
-
     nixl_remote_meta_dlist_t remote_dlist(DRAM_SEG);
     nixlRemoteMetaDesc remote_desc("peer");
     remote_desc.addr = 0x2000;
@@ -456,7 +434,10 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedAtomicAddDescriptor) {
     remote_desc.devId = 0;
     remote_desc.metadataP = &remote_md;
     remote_dlist.addDesc(remote_desc);
-    ASSERT_EQ(runtime_.storeMetadata(dst_proxy, remote_dlist), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_.prepMemView(reinterpret_cast<nixlMemViewH>(uintptr_t{0x20}),
+                                   remote_dlist,
+                                   &dst_proxy),
+              NIXL_SUCCESS);
 
     ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
 

@@ -585,12 +585,9 @@ registerDummyMemViews(nixlProxyRuntime &runtime)
     nixlMemViewH dummy_local_backend = reinterpret_cast<nixlMemViewH>(uintptr_t{0xBEEF});
     nixlMemViewH dummy_remote_backend = reinterpret_cast<nixlMemViewH>(uintptr_t{0xFEED});
 
-    EXPECT_EQ(runtime.registerProxyMemView(dummy_local_backend, &handles.src), NIXL_SUCCESS);
-    EXPECT_EQ(runtime.registerProxyMemView(dummy_remote_backend, &handles.dst), NIXL_SUCCESS);
-
     nixl_meta_dlist_t local_dlist(DRAM_SEG);
     local_dlist.addDesc(nixlMetaDesc(0x1000, 64, 0, &local_md));
-    EXPECT_EQ(runtime.storeMetadata(handles.src, local_dlist), NIXL_SUCCESS);
+    EXPECT_EQ(runtime.prepMemView(dummy_local_backend, local_dlist, &handles.src), NIXL_SUCCESS);
 
     nixl_remote_meta_dlist_t remote_dlist(DRAM_SEG);
     nixlRemoteMetaDesc remote_desc("peer");
@@ -599,7 +596,7 @@ registerDummyMemViews(nixlProxyRuntime &runtime)
     remote_desc.devId = 0;
     remote_desc.metadataP = &remote_md;
     remote_dlist.addDesc(remote_desc);
-    EXPECT_EQ(runtime.storeMetadata(handles.dst, remote_dlist), NIXL_SUCCESS);
+    EXPECT_EQ(runtime.prepMemView(dummy_remote_backend, remote_dlist, &handles.dst), NIXL_SUCCESS);
 
     return handles;
 }
