@@ -25,8 +25,10 @@
 #include <cuda_runtime.h>
 
 nixl_status_t
-nixlProxyMemViewRegistry::registerProxyMemView(nixlMemViewH backend_memview,
-                                           nixlMemViewH *proxy_memview) {
+nixlProxyMemViewRegistry::addReadyEntry(nixlMemViewH backend_memview,
+                                        ProxyMemViewRegMetadataKind metadata_kind,
+                                        std::vector<ReadyEntry> ready_entries,
+                                        nixlMemViewH *proxy_memview) {
     if (proxy_memview == nullptr) {
         return NIXL_ERR_INVALID_PARAM;
     }
@@ -34,11 +36,18 @@ nixlProxyMemViewRegistry::registerProxyMemView(nixlMemViewH backend_memview,
     RegistryEntry entry;
     entry.proxy_memview_id = next_proxy_memview_id_;
     entry.backend_memview = backend_memview;
-    entries_.push_back(entry);
+    entry.state = ProxyMemViewRegEntryState::ENTRY_READY;
+    entry.metadata_kind = metadata_kind;
+    entry.ready_entries = std::move(ready_entries);
 
-    *proxy_memview = reinterpret_cast<nixlMemViewH>(entry.proxy_memview_id);
+    if (entries_.empty()) {
+        first_proxy_memview_id_ = next_proxy_memview_id_;
+    }
+    entries_.push_back(std::move(entry));
+
+    *proxy_memview = reinterpret_cast<nixlMemViewH>(next_proxy_memview_id_);
     ++next_proxy_memview_id_;
-    NIXL_DEBUG << "nixlProxyMemViewRegistry::register: backend_mvh="
+    NIXL_DEBUG << "nixlProxyMemViewRegistry::prepMemView: backend_mvh="
                << backend_memview << " -> proxy_id="
                << (next_proxy_memview_id_ - 1);
     return NIXL_SUCCESS;
@@ -59,26 +68,14 @@ nixlProxyMemViewRegistry::prepMemView(
 
 nixl_status_t
 nixlProxyMemViewRegistry::prepMemView(nixlMemViewH backend_memview,
-                                  const nixl_meta_dlist_t &dlist,
-                                  nixlMemViewH *proxy_memview) {
-    if (proxy_memview == nullptr) {
-        return NIXL_ERR_INVALID_PARAM;
-    }
-
-    nixlMemViewH registered_proxy_memview = nullptr;
-    nixl_status_t status = registerProxyMemView(backend_memview, &registered_proxy_memview);
-    if (status != NIXL_SUCCESS) {
-        return status;
-    }
-
-    status = storeMetadata(registered_proxy_memview, dlist);
-    if (status != NIXL_SUCCESS) {
-        unregisterProxyMemView(registered_proxy_memview);
-        return status;
-    }
-
-    *proxy_memview = registered_proxy_memview;
-    return NIXL_SUCCESS;
+                                      const nixl_meta_dlist_t &dlist,
+                                      nixlMemViewH *proxy_memview) {
+    std::vector<ReadyEntry> ready_entries;
+    fillLocalMetadata(dlist, ready_entries);
+    return addReadyEntry(backend_memview,
+                         ProxyMemViewRegMetadataKind::METADATA_KIND_LOCAL,
+                         std::move(ready_entries),
+                         proxy_memview);
 }
 
 nixl_status_t
@@ -86,24 +83,12 @@ nixlProxyMemViewRegistry::prepMemView(
     nixlMemViewH backend_memview,
     const nixl_remote_meta_dlist_t &dlist,
     nixlMemViewH *proxy_memview) {
-    if (proxy_memview == nullptr) {
-        return NIXL_ERR_INVALID_PARAM;
-    }
-
-    nixlMemViewH registered_proxy_memview = nullptr;
-    nixl_status_t status = registerProxyMemView(backend_memview, &registered_proxy_memview);
-    if (status != NIXL_SUCCESS) {
-        return status;
-    }
-
-    status = storeMetadata(registered_proxy_memview, dlist);
-    if (status != NIXL_SUCCESS) {
-        unregisterProxyMemView(registered_proxy_memview);
-        return status;
-    }
-
-    *proxy_memview = registered_proxy_memview;
-    return NIXL_SUCCESS;
+    std::vector<ReadyEntry> ready_entries;
+    fillRemoteMetadata(dlist, ready_entries);
+    return addReadyEntry(backend_memview,
+                         ProxyMemViewRegMetadataKind::METADATA_KIND_REMOTE,
+                         std::move(ready_entries),
+                         proxy_memview);
 }
 
 nixl_status_t
@@ -112,9 +97,10 @@ nixlProxyMemViewRegistry::unregisterProxyMemView(nixlMemViewH proxy_memview) {
     if (entry == nullptr) {
         return NIXL_ERR_INVALID_PARAM;
     }
-    entry->state = ProxyMemViewRegEntryState::ENTRY_RETIRED;
+    const uint64_t proxy_memview_id = entry->proxy_memview_id;
+    resetEntry(*entry);
     NIXL_DEBUG << "nixlProxyMemViewRegistry::unregister: proxy_id="
-               << entry->proxy_memview_id;
+               << proxy_memview_id;
     return NIXL_SUCCESS;
 }
 
@@ -122,61 +108,16 @@ bool
 nixlProxyMemViewRegistry::resolveProxyMemView(nixlMemViewH proxy_memview,
                                           nixlMemViewH &backend_memview) const {
     const RegistryEntry *entry = getEntryForHandle(proxy_memview);
-    if (entry == nullptr || entry->state == ProxyMemViewRegEntryState::ENTRY_RETIRED) {
+    if (entry == nullptr || entry->state != ProxyMemViewRegEntryState::ENTRY_READY) {
         return false;
     }
     backend_memview = entry->backend_memview;
     return true;
-}
-
-bool
-nixlProxyMemViewRegistry::resolveProxyMemViewId(uint64_t proxy_memview_id,
-                                            nixlMemViewH &backend_memview) const {
-    const RegistryEntry *entry = getEntryForId(proxy_memview_id);
-    if (entry == nullptr || entry->state == ProxyMemViewRegEntryState::ENTRY_RETIRED) {
-        return false;
-    }
-    backend_memview = entry->backend_memview;
-    return true;
-}
-
-nixl_status_t
-nixlProxyMemViewRegistry::storeMetadata(nixlMemViewH proxy_memview,
-                                    const nixl_meta_dlist_t &dlist) {
-    RegistryEntry *entry = getEntryForHandle(proxy_memview);
-    if (entry == nullptr || entry->state == ProxyMemViewRegEntryState::ENTRY_RETIRED) {
-        return NIXL_ERR_NOT_FOUND;
-    }
-
-    fillLocalMetadata(dlist, entry->ready_entries);
-    entry->metadata_kind = ProxyMemViewRegMetadataKind::METADATA_KIND_LOCAL;
-    entry->state = ProxyMemViewRegEntryState::ENTRY_READY;
-
-    NIXL_DEBUG << "nixlProxyMemViewRegistry::storeMetadata(local): proxy_id="
-               << entry->proxy_memview_id << " entries=" << dlist.descCount();
-    return NIXL_SUCCESS;
-}
-
-nixl_status_t
-nixlProxyMemViewRegistry::storeMetadata(nixlMemViewH proxy_memview,
-                                    const nixl_remote_meta_dlist_t &dlist) {
-    RegistryEntry *entry = getEntryForHandle(proxy_memview);
-    if (entry == nullptr || entry->state == ProxyMemViewRegEntryState::ENTRY_RETIRED) {
-        return NIXL_ERR_NOT_FOUND;
-    }
-
-    fillRemoteMetadata(dlist, entry->ready_entries);
-    entry->metadata_kind = ProxyMemViewRegMetadataKind::METADATA_KIND_REMOTE;
-    entry->state = ProxyMemViewRegEntryState::ENTRY_READY;
-
-    NIXL_DEBUG << "nixlProxyMemViewRegistry::storeMetadata(remote): proxy_id="
-               << entry->proxy_memview_id << " entries=" << dlist.descCount();
-    return NIXL_SUCCESS;
 }
 
 nixl_status_t
 nixlProxyMemViewRegistry::prepareSubmission(const nixlProxySubmission &submission,
-                                        nixlBackendProxySubmission &prepared_submission) const {
+                                            nixlBackendProxySubmission &prepared_submission) const {
     bool needs_source = false;
     size_t transfer_size = 0;
     switch (submission.opcode) {
@@ -235,9 +176,16 @@ nixlProxyMemViewRegistry::prepareSubmission(const nixlProxySubmission &submissio
 
 void
 nixlProxyMemViewRegistry::clear() noexcept {
-    for (auto &entry : entries_) {
-        entry.state = ProxyMemViewRegEntryState::ENTRY_RETIRED;
-    }
+    std::vector<RegistryEntry>().swap(entries_);
+    first_proxy_memview_id_ = next_proxy_memview_id_;
+}
+
+void
+nixlProxyMemViewRegistry::resetEntry(RegistryEntry &entry) noexcept {
+    entry.backend_memview = nullptr;
+    entry.state = ProxyMemViewRegEntryState::ENTRY_RETIRED;
+    entry.metadata_kind = ProxyMemViewRegMetadataKind::METADATA_KIND_NONE;
+    std::vector<ReadyEntry>().swap(entry.ready_entries);
 }
 
 nixlProxyMemViewRegistry::RegistryEntry *
@@ -252,22 +200,28 @@ nixlProxyMemViewRegistry::getEntryForHandle(nixlMemViewH proxy_memview) const {
 
 nixlProxyMemViewRegistry::RegistryEntry *
 nixlProxyMemViewRegistry::getEntryForId(uint64_t proxy_memview_id) {
-    if (proxy_memview_id < 1
-        || proxy_memview_id >= next_proxy_memview_id_
-        || proxy_memview_id > entries_.size()) {
+    if (proxy_memview_id < first_proxy_memview_id_
+        || proxy_memview_id >= next_proxy_memview_id_) {
         return nullptr;
     }
-    return &entries_[proxy_memview_id - 1];
+    const uint64_t index = proxy_memview_id - first_proxy_memview_id_;
+    if (index >= entries_.size()) {
+        return nullptr;
+    }
+    return &entries_[index];
 }
 
 const nixlProxyMemViewRegistry::RegistryEntry *
 nixlProxyMemViewRegistry::getEntryForId(uint64_t proxy_memview_id) const {
-    if (proxy_memview_id < 1
-        || proxy_memview_id >= next_proxy_memview_id_
-        || proxy_memview_id > entries_.size()) {
+    if (proxy_memview_id < first_proxy_memview_id_
+        || proxy_memview_id >= next_proxy_memview_id_) {
         return nullptr;
     }
-    return &entries_[proxy_memview_id - 1];
+    const uint64_t index = proxy_memview_id - first_proxy_memview_id_;
+    if (index >= entries_.size()) {
+        return nullptr;
+    }
+    return &entries_[index];
 }
 
 nixl_status_t
@@ -768,12 +722,6 @@ nixlProxyRuntime::loadRemoteConnInfo(const std::string &remote_name,
 }
 
 nixl_status_t
-nixlProxyRuntime::registerProxyMemView(nixlMemViewH backend_memview,
-                                   nixlMemViewH *proxy_memview) {
-    return memview_registry_.registerProxyMemView(backend_memview, proxy_memview);
-}
-
-nixl_status_t
 nixlProxyRuntime::prepMemView(const nixl_meta_dlist_t &dlist,
                               nixlMemViewH *proxy_memview) {
     return memview_registry_.prepMemView(dlist, proxy_memview);
@@ -805,28 +753,10 @@ nixlProxyRuntime::unregisterProxyMemView(nixlMemViewH proxy_memview) {
     return memview_registry_.unregisterProxyMemView(proxy_memview);
 }
 
-nixl_status_t
-nixlProxyRuntime::storeMetadata(nixlMemViewH proxy_memview,
-                            const nixl_meta_dlist_t &dlist) {
-    return memview_registry_.storeMetadata(proxy_memview, dlist);
-}
-
-nixl_status_t
-nixlProxyRuntime::storeMetadata(nixlMemViewH proxy_memview,
-                            const nixl_remote_meta_dlist_t &dlist) {
-    return memview_registry_.storeMetadata(proxy_memview, dlist);
-}
-
 bool
 nixlProxyRuntime::resolveProxyMemView(nixlMemViewH proxy_memview,
-                                  nixlMemViewH &backend_memview) const {
+                                      nixlMemViewH &backend_memview) const {
     return memview_registry_.resolveProxyMemView(proxy_memview, backend_memview);
-}
-
-bool
-nixlProxyRuntime::resolveProxyMemViewId(uint64_t proxy_memview_id,
-                                    nixlMemViewH &backend_memview) const {
-    return memview_registry_.resolveProxyMemViewId(proxy_memview_id, backend_memview);
 }
 
 nixl_status_t
@@ -837,11 +767,9 @@ nixlProxyRuntime::startWorkers() {
         NIXL_ERROR << "ProxyRuntime::startWorkers: runtime not initialized";
         return NIXL_ERR_NOT_SUPPORTED;
     }
-    requestShutdown();
-    joinWorkerThreads();
-    for (auto &channel : channels_) {
-        channel.inflight_requests.clear();
-        channel.error_latched = false;
+    if (workers_started_) {
+        NIXL_ERROR << "ProxyRuntime::startWorkers: workers already started";
+        return NIXL_ERR_INVALID_PARAM;
     }
 
     __atomic_store_n(shutdown_word_host_,

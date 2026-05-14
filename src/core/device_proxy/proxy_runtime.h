@@ -88,10 +88,6 @@ struct alignas(64) nixlProxyChannelState {
 class nixlProxyMemViewRegistry {
     public:
         nixl_status_t
-        registerProxyMemView(nixlMemViewH backend_memview,
-                             nixlMemViewH *proxy_memview);
-
-        nixl_status_t
         prepMemView(const nixl_meta_dlist_t &dlist,
                     nixlMemViewH *proxy_memview);
 
@@ -112,21 +108,9 @@ class nixlProxyMemViewRegistry {
         nixl_status_t
         unregisterProxyMemView(nixlMemViewH proxy_memview);
 
-        nixl_status_t
-        storeMetadata(nixlMemViewH proxy_memview,
-                      const nixl_meta_dlist_t &dlist);
-
-        nixl_status_t
-        storeMetadata(nixlMemViewH proxy_memview,
-                      const nixl_remote_meta_dlist_t &dlist);
-
         bool
         resolveProxyMemView(nixlMemViewH proxy_memview,
                             nixlMemViewH &backend_memview) const;
-
-        bool
-        resolveProxyMemViewId(uint64_t proxy_memview_id,
-                              nixlMemViewH &backend_memview) const;
 
         nixl_status_t
         prepareSubmission(const nixlProxySubmission &submission,
@@ -142,7 +126,6 @@ class nixlProxyMemViewRegistry {
         };
 
         enum class ProxyMemViewRegEntryState : uint8_t {
-            ENTRY_ALLOCATED,
             ENTRY_READY,
             ENTRY_RETIRED,
         };
@@ -156,10 +139,19 @@ class nixlProxyMemViewRegistry {
         struct RegistryEntry {
             uint64_t proxy_memview_id = 0;
             nixlMemViewH backend_memview = nullptr;
-            ProxyMemViewRegEntryState state = ProxyMemViewRegEntryState::ENTRY_ALLOCATED;
+            ProxyMemViewRegEntryState state = ProxyMemViewRegEntryState::ENTRY_RETIRED;
             ProxyMemViewRegMetadataKind metadata_kind = ProxyMemViewRegMetadataKind::METADATA_KIND_NONE;
             std::vector<ReadyEntry> ready_entries;
         };
+
+        nixl_status_t
+        addReadyEntry(nixlMemViewH backend_memview,
+                      ProxyMemViewRegMetadataKind metadata_kind,
+                      std::vector<ReadyEntry> ready_entries,
+                      nixlMemViewH *proxy_memview);
+
+        static void
+        resetEntry(RegistryEntry &entry) noexcept;
 
         RegistryEntry *
         getEntryForHandle(nixlMemViewH proxy_memview);
@@ -203,6 +195,7 @@ class nixlProxyMemViewRegistry {
         fillRemoteMetadata(const nixl_remote_meta_dlist_t &dlist, std::vector<ReadyEntry> &out);
 
         std::vector<RegistryEntry> entries_;
+        uint64_t first_proxy_memview_id_ = 1;
         uint64_t next_proxy_memview_id_ = 1;
 };
 
@@ -227,10 +220,6 @@ class nixlProxyRuntime {
                            const nixl_blob_t &conn_info);
 
         nixl_status_t
-        registerProxyMemView(nixlMemViewH backend_memview,
-                             nixlMemViewH *proxy_memview);
-
-        nixl_status_t
         prepMemView(const nixl_meta_dlist_t &dlist,
                     nixlMemViewH *proxy_memview);
 
@@ -251,21 +240,9 @@ class nixlProxyRuntime {
         nixl_status_t
         unregisterProxyMemView(nixlMemViewH proxy_memview);
 
-        nixl_status_t
-        storeMetadata(nixlMemViewH proxy_memview,
-                      const nixl_meta_dlist_t &dlist);
-
-        nixl_status_t
-        storeMetadata(nixlMemViewH proxy_memview,
-                      const nixl_remote_meta_dlist_t &dlist);
-
         bool
         resolveProxyMemView(nixlMemViewH proxy_memview,
                             nixlMemViewH &backend_memview) const;
-
-        bool
-        resolveProxyMemViewId(uint64_t proxy_memview_id,
-                              nixlMemViewH &backend_memview) const;
 
         nixl_status_t
         startWorkers();
@@ -275,9 +252,6 @@ class nixlProxyRuntime {
 
         void
         requestShutdown() noexcept;
-
-        const nixlProxyMemViewRegistry &
-        memviewRegistry() const { return memview_registry_; }
 
         uint32_t
         channelCount() const { return static_cast<uint32_t>(channels_.size()); }
