@@ -19,4 +19,61 @@
 // through load_proxy_context().
 #include "nixl_device_proxy.cuh"
 
+#include <cstdio>
+
 __device__ __constant__ ProxyDeviceContext *g_nixl_proxy_ctx = nullptr;
+
+__global__ void
+nixlProxyDeviceLinkKernel() {}
+
+namespace {
+cudaError_t
+ensureProxyDeviceModuleLoaded() {
+    cudaFuncAttributes attributes{};
+    return cudaFuncGetAttributes(&attributes, nixlProxyDeviceLinkKernel);
+}
+} // namespace
+
+__host__ cudaError_t
+nixlProxyPublishContext(nixlProxyDeviceContextData *ctx) {
+    cudaError_t err = ensureProxyDeviceModuleLoaded();
+    if (err != cudaSuccess) {
+        std::fprintf(stderr,
+                     "nixlProxyPublishContext: cudaFuncGetAttributes failed: code=%d msg=%s\n",
+                     static_cast<int>(err),
+                     cudaGetErrorString(err));
+        return err;
+    }
+
+    ProxyDeviceContext *device_ctx = reinterpret_cast<ProxyDeviceContext *>(ctx);
+    err = cudaMemcpyToSymbol(g_nixl_proxy_ctx, &device_ctx, sizeof(ProxyDeviceContext *));
+    if (err != cudaSuccess) {
+        std::fprintf(stderr,
+                     "nixlProxyPublishContext: cudaMemcpyToSymbol failed: code=%d msg=%s\n",
+                     static_cast<int>(err),
+                     cudaGetErrorString(err));
+    }
+    return err;
+}
+
+__host__ cudaError_t
+nixlProxyClearContext() {
+    cudaError_t err = ensureProxyDeviceModuleLoaded();
+    if (err != cudaSuccess) {
+        std::fprintf(stderr,
+                     "nixlProxyClearContext: cudaFuncGetAttributes failed: code=%d msg=%s\n",
+                     static_cast<int>(err),
+                     cudaGetErrorString(err));
+        return err;
+    }
+
+    ProxyDeviceContext *null_ctx = nullptr;
+    err = cudaMemcpyToSymbol(g_nixl_proxy_ctx, &null_ctx, sizeof(ProxyDeviceContext *));
+    if (err != cudaSuccess) {
+        std::fprintf(stderr,
+                     "nixlProxyClearContext: cudaMemcpyToSymbol failed: code=%d msg=%s\n",
+                     static_cast<int>(err),
+                     cudaGetErrorString(err));
+    }
+    return err;
+}

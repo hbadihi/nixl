@@ -181,6 +181,9 @@ show_build_options() {
         echo "NIXL EP: Disabled"
     fi
     echo "Build Type: ${BUILD_TYPE}"
+    if [ -n "$DOCKER_BUILD_OPTS" ]; then
+        echo "Docker Build Options: ${DOCKER_BUILD_OPTS}"
+    fi
 }
 
 show_help() {
@@ -197,6 +200,7 @@ show_help() {
     echo "  [--build-nixl-ep build NIXL with NIXL EP support (requires UCX >= 1.21)]"
     echo "  [--arch [x86_64|aarch64] to select target architecture]"
     echo "  [--dockerfile path to a dockerfile to use]"
+    echo "  DOCKER_BUILD_OPTS can be set to pass extra options to docker build"
     exit 0
 }
 
@@ -229,4 +233,4 @@ BUILD_ARGS+=" --build-arg BUILD_TYPE=$BUILD_TYPE"
 
 show_build_options
 
-docker build --platform linux/$ARCH -f $DOCKER_FILE $BUILD_ARGS $TAG $NO_CACHE $BUILD_CONTEXT
+docker build $DOCKER_BUILD_OPTS --platform linux/$ARCH -f $DOCKER_FILE $BUILD_ARGS $TAG $NO_CACHE $BUILD_CONTEXT

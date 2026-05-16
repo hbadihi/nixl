@@ -36,6 +36,7 @@
 #   RECV_WAIT_S receiver-cleanup timeout seconds  (default: 30)
 #   NIXL_LOG_LEVEL    forwarded to bench          (default: FATAL)
 #   NIXL_PROXY_STATS  forwarded to bench          (default: 1)
+#   NIXL_PLUGIN_DIR   forwarded if set; otherwise auto-derived from BUILD_DIR
 #
 # Two-host submit sweep env vars:
 #   SENDER_HOST     ssh target and advertised sender peer IP
@@ -137,6 +138,21 @@ _CHILD_ENV_DEFAULTS = {
     "NIXL_LOG_LEVEL": os.environ.get("NIXL_LOG_LEVEL", "FATAL"),
     "NIXL_PROXY_STATS": os.environ.get("NIXL_PROXY_STATS", "1"),
 }
+
+
+def _default_nixl_plugin_dir() -> Optional[str]:
+    if "NIXL_PLUGIN_DIR" in os.environ:
+        return None
+
+    plugin_dir = BUILD_DIR / "src" / "plugins" / "ucx"
+    if plugin_dir.is_dir():
+        return str(plugin_dir)
+    return None
+
+
+_PLUGIN_DIR_DEFAULT = _default_nixl_plugin_dir()
+if _PLUGIN_DIR_DEFAULT:
+    _CHILD_ENV_DEFAULTS["NIXL_PLUGIN_DIR"] = _PLUGIN_DIR_DEFAULT
 
 
 # ---------- small helpers ----------------------------------------------------
