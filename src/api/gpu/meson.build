@@ -22,6 +22,7 @@ if cuda_dep.found()
         'proxy/nixl_device_proxy.cu',
         dependencies: [cuda_dep],
         include_directories: [nixl_inc_dirs],
+        cuda_args: ['-gencode', 'arch=compute_89,code=sm_89'],
         install: false)
 
     nixl_gpu_proxy_dep = declare_dependency(link_with: nixl_gpu_proxy_lib)

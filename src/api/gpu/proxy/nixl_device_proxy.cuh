@@ -42,33 +42,13 @@ static_assert(sizeof(ProxyXferStatus) <= sizeof(nixlGpuXferStatusH),
 extern __device__ __constant__ ProxyDeviceContext *g_nixl_proxy_ctx;
 
 // Host-callable helpers. ctx is the device pointer returned by ProxyRuntime.
-// Keeping these inline in CUDA translation units avoids cross-DSO symbol
-// ownership issues for g_nixl_proxy_ctx.
-__host__ inline cudaError_t
-nixlProxyPublishContext(nixlProxyDeviceContextData *ctx) {
-    ProxyDeviceContext *device_ctx = reinterpret_cast<ProxyDeviceContext *>(ctx);
-    cudaError_t err = cudaMemcpyToSymbol(g_nixl_proxy_ctx, &device_ctx, sizeof(ProxyDeviceContext *));
-    if (err != cudaSuccess) {
-        fprintf(stderr,
-                "nixlProxyPublishContext: cudaMemcpyToSymbol failed: code=%d msg=%s\n",
-                static_cast<int>(err),
-                cudaGetErrorString(err));
-    }
-    return err;
-}
+// Defined in nixl_device_proxy.cu next to g_nixl_proxy_ctx so CUDA runtime
+// symbol lookup uses the same translation unit that owns the device symbol.
+__host__ cudaError_t
+nixlProxyPublishContext(nixlProxyDeviceContextData *ctx);
 
-__host__ inline cudaError_t
-nixlProxyClearContext() {
-    ProxyDeviceContext *null_ctx = nullptr;
-    cudaError_t err = cudaMemcpyToSymbol(g_nixl_proxy_ctx, &null_ctx, sizeof(ProxyDeviceContext *));
-    if (err != cudaSuccess) {
-        fprintf(stderr,
-                "nixlProxyClearContext: cudaMemcpyToSymbol failed: code=%d msg=%s\n",
-                static_cast<int>(err),
-                cudaGetErrorString(err));
-    }
-    return err;
-}
+__host__ cudaError_t
+nixlProxyClearContext();
 
 __device__ __forceinline__  uint64_t
 proxyMemViewIdFromHandle(nixlMemViewH mvh) {

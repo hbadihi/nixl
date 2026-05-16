@@ -271,7 +271,7 @@ RUN rm -rf build && \
     mkdir build && \
     if [ "$BUILD_NIXL_EP" = "true" ]; then \
         echo "=== BUILD_NIXL_EP=true: Building NIXL with NIXL EP support ===" && \
-        NIXL_EP_FLAG="-Dbuild_nixl_ep=true -Dbuild_examples=true"; \
+        NIXL_EP_FLAG="-Dbuild_nixl_ep=true -Dbuild_examples=true -Dbuild_device_pingpong=true"; \
     else \
         NIXL_EP_FLAG=""; \
     fi && \

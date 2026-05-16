@@ -35,6 +35,10 @@ struct nixlProxyRequestState {
     uint64_t op_idx = 0;
     uint64_t backend_req_token = 0;
     nixl_status_t status = NIXL_IN_PROG;
+    uint64_t submit_done_ns = 0;
+    uint64_t progress_ns = 0;
+    uint64_t check_completion_ns = 0;
+    uint32_t completion_polls = 0;
 };
 
 struct alignas(64) nixlProxyChannelState {

@@ -58,9 +58,14 @@ pingpong_cpp_args = [
 
 pingpong_cuda_args = [
     '-DHAVE_CUDA',
+    '-gencode', 'arch=compute_89,code=sm_89',
     '--expt-relaxed-constexpr',
     '-Xcompiler', '-Wno-deprecated-declarations',
     '-Xcompiler', '-Wno-unused-variable',
+]
+
+pingpong_link_args = [
+    '-gencode=arch=compute_89,code=sm_89',
 ]
 
 # NVCC 12.9 workaround (same bug as in ep/meson.build)
@@ -76,6 +81,7 @@ executable('nixl_device_pingpong',
     include_directories: pingpong_inc_dirs,
     cpp_args: pingpong_cpp_args + gpu_device_api_cpp_args,
     cuda_args: pingpong_cuda_args + gpu_device_api_cuda_args,
+    link_args: pingpong_link_args,
     link_with: gpu_device_api_link_with,
     build_rpath: nixl_lib_dir + ':' + nixl_infra_dir,
     install: false,
@@ -98,6 +104,7 @@ if gpu_device_api_is_ucx
         include_directories: pingpong_proxy_inc_dirs,
         cpp_args: pingpong_cpp_args + pingpong_proxy_define,
         cuda_args: pingpong_cuda_args + pingpong_proxy_define,
+        link_args: pingpong_link_args,
         link_with: [nixl_gpu_proxy_lib],
         build_rpath: nixl_lib_dir + ':' + nixl_infra_dir,
         install: false,

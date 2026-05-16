@@ -194,19 +194,48 @@ BenchContext::setup(const BenchParams &params,
 
     fprintf(stderr, "[%s] waiting for peer recv_buf addr...\n", my_name.c_str());
     nixl_notifs_t notifs;
-    while (notifs[peer_name].empty()) {
-        agent->getNotifs(notifs);
-        if (notifs[peer_name].empty())
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    bool logged_unexpected_notifs = false;
+    const auto notif_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while (true) {
+        st = agent->getNotifs(notifs, &notif_args);
+        if (st != NIXL_SUCCESS) {
+            fprintf(stderr, "[%s] getNotifs failed while waiting for peer recv_buf addr: %d\n",
+                    my_name.c_str(), st);
+            return st;
+        }
+
+        const auto peer_notifs = notifs.find(peer_name);
+        if (peer_notifs != notifs.end() && !peer_notifs->second.empty()) {
+            break;
+        }
+
+        if (!notifs.empty() && !logged_unexpected_notifs) {
+            fprintf(stderr, "[%s] received notifications, but none from expected peer '%s':",
+                    my_name.c_str(), peer_name.c_str());
+            for (const auto &entry : notifs) {
+                fprintf(stderr, " '%s'(%zu)", entry.first.c_str(), entry.second.size());
+            }
+            fprintf(stderr, "\n");
+            logged_unexpected_notifs = true;
+        }
+
+        if (std::chrono::steady_clock::now() >= notif_deadline) {
+            fprintf(stderr, "[%s] timed out waiting for peer recv_buf addr from '%s'\n",
+                    my_name.c_str(), peer_name.c_str());
+            return NIXL_ERR_NOT_FOUND;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    if (notifs[peer_name][0].size() < sizeof(PeerRecvInfo)) {
+    auto &peer_notifs = notifs[peer_name];
+    if (peer_notifs[0].size() < sizeof(PeerRecvInfo)) {
         fprintf(stderr, "[%s] peer info notification too small (%zu bytes)\n",
-                my_name.c_str(), notifs[peer_name][0].size());
+                my_name.c_str(), peer_notifs[0].size());
         return NIXL_ERR_MISMATCH;
     }
 
     PeerRecvInfo peer_info{};
-    memcpy(&peer_info, notifs[peer_name][0].data(), sizeof(PeerRecvInfo));
+    memcpy(&peer_info, peer_notifs[0].data(), sizeof(PeerRecvInfo));
     fprintf(stderr, "[%s] peer recv_buf addr: 0x%lx gpu=%lu\n",
             my_name.c_str(), peer_info.recv_addr, peer_info.gpu_id);
 
