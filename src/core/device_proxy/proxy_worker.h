@@ -17,9 +17,11 @@
 #ifndef NIXL_SRC_CORE_DEVICE_PROXY_PROXY_WORKER_H
 #define NIXL_SRC_CORE_DEVICE_PROXY_PROXY_WORKER_H
 
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <thread>
+#include <vector>
 #include "proxy_protocol.h"
 
 class nixlDeviceProxyBackendAdapter;
@@ -44,10 +46,16 @@ class ProxyWorker {
 
     private:
         struct TimingStats {
+            static constexpr size_t kHistBucketCount = 9;
+
             uint64_t count = 0;
             uint64_t sum_ns = 0;
             uint64_t min_ns = std::numeric_limits<uint64_t>::max();
             uint64_t max_ns = 0;
+            double welford_mean_ns = 0.0;
+            double welford_m2_ns = 0.0;
+            std::vector<uint64_t> samples_ns;
+            std::array<uint64_t, kHistBucketCount> hist_buckets{};
 
             void
             record(uint64_t duration_ns) noexcept;
