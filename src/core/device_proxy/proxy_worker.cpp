@@ -18,9 +18,13 @@
 #include "proxy_runtime.h"
 #include "backend_adapter.h"
 #include "nixl_log.h"
+#include <algorithm>
+#include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cuda_runtime.h>
+#include <vector>
 
 namespace {
 uint64_t
@@ -28,6 +32,51 @@ steadyClockNs() noexcept {
     using namespace std::chrono;
     return static_cast<uint64_t>(
         duration_cast<nanoseconds>(steady_clock::now().time_since_epoch()).count());
+}
+
+// Microsecond histogram buckets. Each upper bound is exclusive and corresponds
+// 1:1 to the labels printed below; the final bucket catches everything else.
+// Keep in sync with TimingStats::kHistBucketCount (linked via static_assert in
+// printStats(), which has access to the private nested struct).
+constexpr std::array<uint64_t, 8> kHistUpperBoundNs = {
+    100, 500, 1000, 2000, 5000, 10000, 50000, 100000};
+constexpr std::array<const char *, 9> kHistLabels = {
+    "<0.1", "<0.5", "<1", "<2", "<5", "<10", "<50", "<100", ">=100"};
+
+size_t
+histogramBucketIndex(uint64_t duration_ns) noexcept {
+    for (size_t i = 0; i < kHistUpperBoundNs.size(); ++i) {
+        if (duration_ns < kHistUpperBoundNs[i]) {
+            return i;
+        }
+    }
+    return kHistLabels.size() - 1;
+}
+
+uint64_t
+percentileNearestRankNs(const std::vector<uint64_t> &sorted_samples, double percentile) noexcept {
+    if (sorted_samples.empty()) {
+        return 0;
+    }
+    const size_t n = sorted_samples.size();
+    const size_t rank =
+        static_cast<size_t>(std::ceil(percentile / 100.0 * static_cast<double>(n)));
+    const size_t idx = rank == 0 ? 0 : rank - 1;
+    return sorted_samples[std::min(idx, n - 1)];
+}
+
+double
+nsToUs(uint64_t ns) noexcept {
+    return static_cast<double>(ns) / 1000.0;
+}
+
+double
+sampleStddevUs(uint64_t count, double welford_m2_ns) noexcept {
+    if (count <= 1) {
+        return 0.0;
+    }
+    const double variance = welford_m2_ns / static_cast<double>(count - 1);
+    return std::sqrt(variance) / 1000.0;
 }
 } // namespace
 
@@ -41,6 +90,20 @@ ProxyWorker::TimingStats::record(uint64_t duration_ns) noexcept {
     if (duration_ns > max_ns) {
         max_ns = duration_ns;
     }
+
+    samples_ns.push_back(duration_ns);
+
+    const double sample_ns = static_cast<double>(duration_ns);
+    if (count == 1) {
+        welford_mean_ns = sample_ns;
+    } else {
+        const double delta = sample_ns - welford_mean_ns;
+        welford_mean_ns += delta / static_cast<double>(count);
+        const double delta2 = sample_ns - welford_mean_ns;
+        welford_m2_ns += delta * delta2;
+    }
+
+    ++hist_buckets[histogramBucketIndex(duration_ns)];
 }
 
 ProxyWorker::ProxyWorker(nixlDeviceProxyBackendAdapter *backend,
@@ -263,21 +326,51 @@ ProxyWorker::publishCompletions(nixlProxyChannelState &channel) {
 
 void
 ProxyWorker::printStats(uint32_t worker_idx) const noexcept {
+    static_assert(kHistLabels.size() == TimingStats::kHistBucketCount);
+    static_assert(kHistUpperBoundNs.size() + 1 == TimingStats::kHistBucketCount);
+
     auto print_timing = [worker_idx](const char *name, const TimingStats &stats) {
-        const double avg_us = stats.count == 0 ? 0.0 :
+        if (stats.count == 0) {
+            std::fprintf(stderr, "[proxy-worker-stats][w%u] %-11s n=0\n", worker_idx, name);
+            return;
+        }
+
+        const double avg_us =
             static_cast<double>(stats.sum_ns) / static_cast<double>(stats.count) / 1000.0;
-        const double min_us = stats.count == 0 ? 0.0 :
-            static_cast<double>(stats.min_ns) / 1000.0;
-        const double max_us = stats.count == 0 ? 0.0 :
-            static_cast<double>(stats.max_ns) / 1000.0;
+        const double stddev_us = sampleStddevUs(stats.count, stats.welford_m2_ns);
+
+        std::vector<uint64_t> sorted_samples = stats.samples_ns;
+        std::sort(sorted_samples.begin(), sorted_samples.end());
+
         std::fprintf(stderr,
-                     "[proxy-worker-stats][w%u] %-11s n=%llu avg=%9.3f us min=%9.3f us max=%9.3f us\n",
+                     "[proxy-worker-stats][w%u] %-11s n=%llu avg=%9.3f us p50=%9.3f us "
+                     "p90=%9.3f us p99=%9.3f us min=%9.3f us max=%9.3f us stddev=%9.3f us\n",
                      worker_idx,
                      name,
                      static_cast<unsigned long long>(stats.count),
                      avg_us,
-                     min_us,
-                     max_us);
+                     nsToUs(percentileNearestRankNs(sorted_samples, 50.0)),
+                     nsToUs(percentileNearestRankNs(sorted_samples, 90.0)),
+                     nsToUs(percentileNearestRankNs(sorted_samples, 99.0)),
+                     nsToUs(stats.min_ns),
+                     nsToUs(stats.max_ns),
+                     stddev_us);
+
+        char hist_line[256];
+        int offset = 0;
+        for (size_t i = 0; i < stats.hist_buckets.size(); ++i) {
+            offset += std::snprintf(hist_line + offset,
+                                    sizeof(hist_line) - static_cast<size_t>(offset),
+                                    "%s%s:%llu",
+                                    i == 0 ? "" : " ",
+                                    kHistLabels[i],
+                                    static_cast<unsigned long long>(stats.hist_buckets[i]));
+        }
+        std::fprintf(stderr,
+                     "[proxy-worker-stats][w%u] %-11s hist_us=%s\n",
+                     worker_idx,
+                     name,
+                     hist_line);
     };
 
     print_timing("prepare", prepare_stats_);
