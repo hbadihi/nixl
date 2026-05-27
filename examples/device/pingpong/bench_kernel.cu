@@ -19,9 +19,15 @@ record_cycle_sample(gpu_cycle_stats *s, uint64_t c) {
         s->min = min(s->min, c);
         s->max = max(s->max, c);
     }
+    const uint64_t idx = s->count;
     ++s->count;
     s->sum += c;
     s->sum_sq += double(c) * double(c);
+    // Append the raw sample for host-side percentile / histogram computation
+    // (matches src/core/device_proxy/proxy_worker.cpp TimingStats::record).
+    if (s->samples != nullptr && idx < s->capacity) {
+        s->samples[idx] = c;
+    }
 }
 
 template<nixl_gpu_level_t level>
@@ -86,18 +92,6 @@ do_put_sync(nixlMemViewH local_mvh,
     return status;
 }
 
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-template<nixl_gpu_level_t level, ProxyStageAck stage>
-__device__ static nixl_status_t
-wait_proxy_stage(nixlGpuXferStatusH &xfer_status) {
-    nixl_status_t status;
-    do {
-        status = nixlProxyPollStage<stage, level>(xfer_status);
-    } while (status == NIXL_IN_PROG);
-    return status;
-}
-#endif
-
 template<nixl_gpu_level_t level>
 __global__ void
 nixl_pingpong_latency_kernel(gpu_bench_ctx ctx, uint64_t *elapsed_device) {
@@ -117,13 +111,15 @@ nixl_pingpong_latency_kernel(gpu_bench_ctx ctx, uint64_t *elapsed_device) {
 
     const size_t total_size = ctx.msg_size + sizeof(uint64_t); // Message size + counter
     nixlGpuXferStatusH xfer_status;
-    const bool measure_submit =
-        ctx.is_sender && ctx.issue_stats != nullptr && ctx.submit_stats != nullptr;
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-    const bool measure_proxy_stages =
-        measure_submit && ctx.dequeue_stats != nullptr && ctx.prepare_stats != nullptr
-        && ctx.post_submit_stats != nullptr;
-#endif
+    // Single sender-side measurement gate. The proxy worker's internal stage
+    // acknowledgements (dequeued/prepared/submitted) deliberately are not
+    // polled here: they live in host-mapped memory, so reading them from the
+    // GPU would inject a PCIe round-trip into the timed loop and perturb the
+    // very thing we're measuring. Those phases are still observable in the
+    // worker's own [proxy-worker-stats] block.
+    const bool measure_completion =
+        ctx.is_sender && ctx.issue_stats != nullptr &&
+        ctx.completion_stats != nullptr && ctx.peer_wait_stats != nullptr;
     const bool measure_rtt = ctx.is_sender && ctx.rtt_stats != nullptr;
 
     // warmup
@@ -149,7 +145,7 @@ nixl_pingpong_latency_kernel(gpu_bench_ctx ctx, uint64_t *elapsed_device) {
                 __syncwarp(); // Ensure all threads see the updated counter
             }
             uint64_t issue_start = 0;
-            if (timed_iter && measure_submit && lane_id == 0) {
+            if (timed_iter && measure_completion && lane_id == 0) {
                 issue_start = clock64();
             }
             nixl_status_t put_status = do_ping_async<level>(ctx, total_size, xfer_status);
@@ -161,56 +157,31 @@ nixl_pingpong_latency_kernel(gpu_bench_ctx ctx, uint64_t *elapsed_device) {
                 return;
             }
             uint64_t issue_end = 0;
-            if (timed_iter && measure_submit && lane_id == 0) {
+            if (timed_iter && measure_completion && lane_id == 0) {
                 issue_end = clock64();
             }
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-            uint64_t dequeue_end = 0;
-            uint64_t prepare_end = 0;
-#endif
-            uint64_t submit_end = 0;
-            if (timed_iter && measure_submit) {
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-                nixl_status_t stage_status = NIXL_SUCCESS;
 
-                if (measure_proxy_stages) {
-                    stage_status = wait_proxy_stage<level, ProxyStageAck::Dequeued>(xfer_status);
-                    if (stage_status != NIXL_SUCCESS) {
-                        if (lane_id == 0) {
-                            printf("dequeue boundary failed with status %d\n", stage_status);
-                        }
-                        return;
-                    }
+            // Wait for terminal completion of this op as observed by the CPU
+            // worker (proxy build) or UCX device API (non-proxy build). For
+            // pingpong this is unambiguous because only one request is in
+            // flight per side. The two buckets split the issue->rtt interval
+            // into the worker's per-request completion latency (`complete`,
+            // measured from issue_end) and the pure peer/network turnaround
+            // (`peer-wait`).
+            uint64_t completion_end = 0;
+            if (measure_completion) {
+                nixl_status_t cpl_status;
+                do {
+                    cpl_status = nixlGpuGetXferStatus<level>(xfer_status);
+                } while (cpl_status == NIXL_IN_PROG);
+                if (cpl_status != NIXL_SUCCESS) {
                     if (lane_id == 0) {
-                        dequeue_end = clock64();
-                    }
-
-                    stage_status = wait_proxy_stage<level, ProxyStageAck::Prepared>(xfer_status);
-                    if (stage_status != NIXL_SUCCESS) {
-                        if (lane_id == 0) {
-                            printf("prepare boundary failed with status %d\n", stage_status);
-                        }
-                        return;
-                    }
-                    if (lane_id == 0) {
-                        prepare_end = clock64();
-                    }
-                }
-
-                stage_status = wait_proxy_stage<level, ProxyStageAck::Submitted>(xfer_status);
-                if (stage_status != NIXL_SUCCESS) {
-                    if (lane_id == 0) {
-                        printf("submit boundary failed with status %d\n", stage_status);
+                        printf("xfer completion failed with status %d\n", cpl_status);
                     }
                     return;
                 }
-#endif
-                if (lane_id == 0) {
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-                    submit_end = clock64();
-#else
-                    submit_end = issue_end;
-#endif
+                if (timed_iter && lane_id == 0) {
+                    completion_end = clock64();
                 }
             }
 
@@ -221,29 +192,14 @@ nixl_pingpong_latency_kernel(gpu_bench_ctx ctx, uint64_t *elapsed_device) {
                 if (timed_iter && measure_rtt) {
                     rtt_end = clock64();
                 }
-                if (timed_iter && measure_submit) {
+                if (timed_iter && measure_completion) {
                     record_cycle_sample(ctx.issue_stats, issue_end - issue_start);
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-                    if (measure_proxy_stages) {
-                        record_cycle_sample(ctx.dequeue_stats, dequeue_end - issue_end);
-                        record_cycle_sample(ctx.prepare_stats, prepare_end - dequeue_end);
-                    }
-#endif
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-                    if (measure_proxy_stages) {
-                        record_cycle_sample(ctx.submit_stats, submit_end - prepare_end);
-                    } else
-#endif
-                    {
-                        record_cycle_sample(ctx.submit_stats, submit_end - issue_start);
+                    record_cycle_sample(ctx.completion_stats, completion_end - issue_end);
+                    if (measure_rtt) {
+                        record_cycle_sample(ctx.peer_wait_stats, rtt_end - completion_end);
                     }
                 }
                 if (timed_iter && measure_rtt) {
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-                    if (measure_proxy_stages) {
-                        record_cycle_sample(ctx.post_submit_stats, rtt_end - submit_end);
-                    }
-#endif
                     record_cycle_sample(ctx.rtt_stats, rtt_end - rtt_start);
                 }
             }

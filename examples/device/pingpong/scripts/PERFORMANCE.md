@@ -15,6 +15,14 @@
 >
 > Reproduce with: `examples/device/pingpong/scripts/profile_overhead.sh`
 > (see [`README.md`](README.md)).
+>
+> **Stats format note.** The captures in §2 use the **older** worker
+> output (`[proxy-stats]`, three rows: `prep+submit / inflight / publish`).
+> The current code emits the format described in §1.5 below
+> (`[proxy-worker-stats][wN]` + `[pingpong-stats]`, with percentiles and a
+> microsecond histogram, and a finer GPU-side phase split). Numbers from
+> new runs should be read against §1.5; the historical captures still
+> stand as evidence for the bullet claims in §1.
 
 ---
 
@@ -131,6 +139,65 @@ measurable:
 > dominated by the UCX data plane, not by the proxy — making the proxy a
 > practical drop-in for environments where GPU-initiated UCX (GDA-KI) is
 > unavailable.
+
+### 1.5 Reading the current per-phase output
+
+A run today emits two flat lines per phase from **both** the CPU worker
+([`src/core/device_proxy/proxy_worker.cpp`](../../../src/core/device_proxy/proxy_worker.cpp)
+`printStats()`) and the GPU bench
+([`examples/device/pingpong/bench_main.cpp`](../bench_main.cpp)
+`print_phase_stats()`). Both sides use the same nine microsecond histogram
+buckets (`<0.1`, `<0.5`, `<1`, `<2`, `<5`, `<10`, `<50`, `<100`, `>=100`)
+and the same nearest-rank percentile rule, so the two streams can be read
+side-by-side and grepped uniformly.
+
+**CPU worker** (one block per worker, e.g. `[proxy-worker-stats][w0]`):
+
+```
+[proxy-worker-stats][w0] submit      n=1100 avg=   12.249 us p50=   11.889 us p90=   12.541 us p99=   15.798 us min=   10.268 us max=  168.137 us stddev=    5.396 us
+[proxy-worker-stats][w0] submit      hist_us=<0.1:0 <0.5:0 <1:0 <2:0 <5:0 <10:0 <50:1097 <100:2 >=100:1
+[proxy-worker-stats][w0] post_check  n=1100 avg=    0.348 us p50= ...
+[proxy-worker-stats][w0] post_check  hist_us=...
+...
+[proxy-worker-stats][w0] polls/request=    1.000 progress_calls=605973646 runOnce_iters=605973646
+```
+
+Per-phase semantics are documented in
+[`proxy-worker-stats-handoff.md`](../../../proxy-worker-stats-handoff.md).
+
+**GPU bench** (sender only, `[pingpong-stats]`):
+
+```
+op=put          msg_size=8     iters=1000  RTT=… us  one-way=… us  [THREAD]
+[pingpong-stats] meta op=put msg_size=8 iters=1000 warmup_skipped level=THREAD
+[pingpong-stats] issue       n=1000 avg=    0.642 us p50=    0.620 us p90=    0.710 us p99=    1.180 us min=    0.510 us max=    8.430 us stddev=    0.310 us
+[pingpong-stats] issue       hist_us=<0.1:0 <0.5:23 <1:962 <2:14 <5:0 <10:1 <50:0 <100:0 >=100:0
+[pingpong-stats] complete    n=1000 ...
+[pingpong-stats] peer-wait   n=1000 ...
+[pingpong-stats] one-way     n=1000 ...
+[pingpong-stats] rtt         n=1000 ...
+```
+
+| Row | Boundaries on the request lifecycle |
+|---|---|
+| `issue` | GPU enters `nixlPut` → kernel-side wrapper returns. |
+| `complete` | wrapper returns → `nixlGpuGetXferStatus` observes terminal status. This covers the worker's dequeue + `prepareSubmission` + `backend_->submit()` + `checkCompletion` + `publishCompletions` interval as observed from the GPU; pairs with the CPU-side `[proxy-worker-stats] prepare` + `submit` + `post_check` + `post_submit` rows. |
+| `peer-wait` | local completion → peer's response counter advances. Pure peer/network turnaround. |
+| `one-way` | `rtt / 2` (each rtt sample halved before bucketizing). |
+| `rtt` | full sender-side ping-pong RTT measured on the GPU. |
+
+The row set is intentionally identical for the proxy and UCX device
+builds. The GPU bench deliberately does not poll the proxy worker's
+internal stage acknowledgements (`dequeued_idx` / `prepared_idx` /
+`submitted_idx`). Those live in host-mapped memory, so polling them from
+the GPU would inject a PCIe round-trip per sample into the timed loop
+and perturb the very thing we're trying to measure. The internal worker
+phases are still observable in the worker's own `[proxy-worker-stats]`
+block, where they can be measured without perturbing the GPU side.
+
+On UCX `put` the `complete` row is dominated by worker
+`checkCompletion` polling latency; on slow networks `peer-wait` is
+dominated by network + peer kernel turnaround.
 
 ---
 
