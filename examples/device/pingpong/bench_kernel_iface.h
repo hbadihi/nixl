@@ -16,6 +16,13 @@ struct gpu_cycle_stats {
     uint64_t min;
     uint64_t max;
     double   sum_sq;
+    // Optional device buffer of raw per-iteration cycle samples. When non-null
+    // and count < capacity, the kernel writes each sample into samples[count]
+    // alongside the running summary updates. Host-side post-processing uses the
+    // raw samples to compute percentiles and a microsecond histogram in the
+    // same format as src/core/device_proxy/proxy_worker.cpp printStats().
+    uint64_t *samples;
+    uint64_t  capacity;
 };
 
 enum class gpu_bench_op : uint32_t {
@@ -34,10 +41,8 @@ struct gpu_bench_ctx {
     uint64_t     warmup_iters;
     bool         is_sender;
     gpu_cycle_stats *issue_stats;  // optional: nixlPut issue-cycle samples
-    gpu_cycle_stats *dequeue_stats; // optional: issue return to dequeue duration samples
-    gpu_cycle_stats *prepare_stats; // optional: dequeue to prepare duration samples
-    gpu_cycle_stats *submit_stats; // optional: prepare to submit duration samples
-    gpu_cycle_stats *post_submit_stats; // optional: submit-to-pong cycle samples
+    gpu_cycle_stats *completion_stats; // optional: issue_end -> nixlGpuGetXferStatus terminal
+    gpu_cycle_stats *peer_wait_stats;  // optional: completion -> recv_counter advance
     gpu_cycle_stats *rtt_stats;    // optional: pingpong RTT cycle samples
 };
 

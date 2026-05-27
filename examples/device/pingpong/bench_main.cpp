@@ -16,6 +16,8 @@
 #include "bench_host.h"
 #include "bench_kernel_iface.h"
 #include <cuda_runtime.h>
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <condition_variable>
 #include <cstdio>
@@ -24,6 +26,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 // ----------------------------------------------------------------------------
 // Usage
@@ -91,56 +94,275 @@ parse_bench_op(const char *value, gpu_bench_op &op) {
 }
 
 // ----------------------------------------------------------------------------
-// Shared helper: print latency from sender's elapsed tick counter
+// Per-phase GPU timing stats: allocation, sample reduction, and worker-style
+// output. The output format is intentionally identical to the host-side worker
+// ([src/core/device_proxy/proxy_worker.cpp] printStats()) so the two halves of
+// a run can be read side-by-side and grepped uniformly.
+//
+// Each PhaseStats owns one device-resident gpu_cycle_stats summary struct plus
+// one device-side raw-sample buffer (sized to num_iters). After the kernel
+// runs, samples are copied to host and used to compute nearest-rank
+// percentiles (p50/p90/p99) and a microsecond histogram with the same bucket
+// bounds as the worker.
 // ----------------------------------------------------------------------------
-struct TimingStatsUs {
-    double avg = -1.0;
-    double min = -1.0;
-    double max = -1.0;
-    double stddev = -1.0;
-    uint64_t count = 0;
+
+// Keep in sync with kHistUpperBoundNs / kHistLabels in
+// src/core/device_proxy/proxy_worker.cpp (bucket bounds expressed in µs here
+// since GPU samples are converted from cycles to µs before bucketizing).
+static constexpr std::array<double, 8> kHistUpperBoundUs = {
+    0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 50.0, 100.0};
+static constexpr std::array<const char *, 9> kHistLabels = {
+    "<0.1", "<0.5", "<1", "<2", "<5", "<10", "<50", "<100", ">=100"};
+
+struct PhaseStats {
+    const char      *name      = nullptr;
+    gpu_cycle_stats *d_stats   = nullptr; // device summary struct
+    uint64_t        *d_samples = nullptr; // device buffer of raw cycle samples
+    uint64_t         capacity  = 0;
 };
 
-static TimingStatsUs
-read_cycle_stats_us(gpu_cycle_stats *d_stats, double clock_hz, double scale = 1.0)
-{
-    TimingStatsUs out;
-    if (d_stats == nullptr) {
+static bool
+alloc_phase_stats(PhaseStats &p, const char *name, uint64_t capacity, const char *role) {
+    p.name     = name;
+    p.capacity = capacity;
+    if (cudaMalloc(&p.d_stats, sizeof(gpu_cycle_stats)) != cudaSuccess) {
+        fprintf(stderr, "[%s] cudaMalloc %s summary failed\n", role, name);
+        return false;
+    }
+    if (cudaMalloc(&p.d_samples, capacity * sizeof(uint64_t)) != cudaSuccess) {
+        fprintf(stderr, "[%s] cudaMalloc %s samples (%llu entries) failed\n",
+                role, name, static_cast<unsigned long long>(capacity));
+        cudaFree(p.d_stats);
+        p.d_stats = nullptr;
+        return false;
+    }
+    cudaMemset(p.d_stats,   0, sizeof(gpu_cycle_stats));
+    cudaMemset(p.d_samples, 0, capacity * sizeof(uint64_t));
+
+    gpu_cycle_stats h_init{};
+    h_init.samples  = p.d_samples;
+    h_init.capacity = capacity;
+    cudaMemcpy(p.d_stats, &h_init, sizeof(gpu_cycle_stats), cudaMemcpyHostToDevice);
+    return true;
+}
+
+static void
+free_phase_stats(PhaseStats &p) {
+    cudaFree(p.d_stats);
+    cudaFree(p.d_samples);
+    p.d_stats   = nullptr;
+    p.d_samples = nullptr;
+}
+
+static double
+percentile_nearest_rank_us(const std::vector<double> &sorted_samples_us, double p) {
+    if (sorted_samples_us.empty()) {
+        return 0.0;
+    }
+    const size_t n    = sorted_samples_us.size();
+    const size_t rank = static_cast<size_t>(std::ceil(p / 100.0 * static_cast<double>(n)));
+    const size_t idx  = rank == 0 ? 0 : rank - 1;
+    return sorted_samples_us[std::min(idx, n - 1)];
+}
+
+static size_t
+histogram_bucket_index_us(double us) {
+    for (size_t i = 0; i < kHistUpperBoundUs.size(); ++i) {
+        if (us < kHistUpperBoundUs[i]) {
+            return i;
+        }
+    }
+    return kHistLabels.size() - 1;
+}
+
+struct PhaseSummary {
+    const char *name = nullptr;
+    uint64_t count = 0;
+    double avg_us = 0.0;
+    double p50_us = 0.0;
+    double p90_us = 0.0;
+    double p99_us = 0.0;
+    double min_us = 0.0;
+    double max_us = 0.0;
+    double stddev_us = 0.0;
+    std::array<uint64_t, 9> hist{};
+};
+
+static PhaseSummary
+summarize_phase(const PhaseStats &p, double clock_hz, double scale = 1.0) {
+    PhaseSummary out;
+    out.name = p.name;
+    if (p.d_stats == nullptr) {
         return out;
     }
 
     gpu_cycle_stats h_stats{};
-    cudaMemcpy(&h_stats, d_stats, sizeof(gpu_cycle_stats), cudaMemcpyDeviceToHost);
+    cudaMemcpy(&h_stats, p.d_stats, sizeof(gpu_cycle_stats), cudaMemcpyDeviceToHost);
+    out.count = h_stats.count;
     if (h_stats.count == 0) {
         return out;
     }
 
-    const double count = static_cast<double>(h_stats.count);
-    const double avg_cycles = static_cast<double>(h_stats.sum) / count;
-    const double mean_sq_cycles = h_stats.sum_sq / count;
-    const double variance_cycles = std::fmax(0.0, mean_sq_cycles - avg_cycles * avg_cycles);
-    const double cycles_to_us = 1e6 / clock_hz * scale;
+    const uint64_t n_kept = std::min<uint64_t>(h_stats.count, p.capacity);
+    std::vector<uint64_t> cycles(n_kept);
+    if (n_kept > 0 && p.d_samples != nullptr) {
+        cudaMemcpy(cycles.data(), p.d_samples,
+                   n_kept * sizeof(uint64_t), cudaMemcpyDeviceToHost);
+    }
 
-    out.avg = avg_cycles * cycles_to_us;
-    out.min = static_cast<double>(h_stats.min) * cycles_to_us;
-    out.max = static_cast<double>(h_stats.max) * cycles_to_us;
-    out.stddev = std::sqrt(variance_cycles) * cycles_to_us;
-    out.count = h_stats.count;
+    const double cycles_to_us = 1e6 / clock_hz * scale;
+    std::vector<double> samples_us;
+    samples_us.reserve(n_kept);
+    for (uint64_t c : cycles) {
+        samples_us.push_back(static_cast<double>(c) * cycles_to_us);
+    }
+    std::sort(samples_us.begin(), samples_us.end());
+
+    const double count_d    = static_cast<double>(h_stats.count);
+    const double avg_cycles = static_cast<double>(h_stats.sum) / count_d;
+    out.avg_us = avg_cycles * cycles_to_us;
+    out.min_us = static_cast<double>(h_stats.min) * cycles_to_us;
+    out.max_us = static_cast<double>(h_stats.max) * cycles_to_us;
+
+    // Sample stddev with (n-1) divisor, matching the worker's sampleStddevUs.
+    // M2 = sum_sq - n * mean^2; sample variance = M2 / (n - 1).
+    if (h_stats.count > 1) {
+        const double m2_cycles =
+            std::fmax(0.0, h_stats.sum_sq - count_d * avg_cycles * avg_cycles);
+        const double sample_variance_cycles = m2_cycles / (count_d - 1.0);
+        out.stddev_us = std::sqrt(sample_variance_cycles) * cycles_to_us;
+    }
+
+    out.p50_us = percentile_nearest_rank_us(samples_us, 50.0);
+    out.p90_us = percentile_nearest_rank_us(samples_us, 90.0);
+    out.p99_us = percentile_nearest_rank_us(samples_us, 99.0);
+
+    for (double us : samples_us) {
+        ++out.hist[histogram_bucket_index_us(us)];
+    }
+
     return out;
 }
 
+// Emit two lines per phase in the same format as
+// [proxy-worker-stats][wN] <name> ... from the worker's printStats().
 static void
-print_timing_row(const char *name, const TimingStatsUs &stats)
-{
-    printf("  %-11s %14.6f  %14.6f  %14.6f  %14.6f\n",
-           name, stats.avg, stats.min, stats.max, stats.stddev);
+print_phase_summary_lines(const PhaseSummary &s) {
+    if (s.name == nullptr) {
+        return;
+    }
+    if (s.count == 0) {
+        printf("[pingpong-stats] %-11s n=0\n", s.name);
+        return;
+    }
+
+    printf("[pingpong-stats] %-11s n=%llu avg=%9.3f us p50=%9.3f us "
+           "p90=%9.3f us p99=%9.3f us min=%9.3f us max=%9.3f us stddev=%9.3f us\n",
+           s.name,
+           static_cast<unsigned long long>(s.count),
+           s.avg_us, s.p50_us, s.p90_us, s.p99_us,
+           s.min_us, s.max_us, s.stddev_us);
+
+    char hist_line[256];
+    int offset = 0;
+    for (size_t i = 0; i < s.hist.size(); ++i) {
+        offset += std::snprintf(hist_line + offset,
+                                sizeof(hist_line) - static_cast<size_t>(offset),
+                                "%s%s:%llu",
+                                i == 0 ? "" : " ",
+                                kHistLabels[i],
+                                static_cast<unsigned long long>(s.hist[i]));
+    }
+    printf("[pingpong-stats] %-11s hist_us=%s\n", s.name, hist_line);
+}
+
+// Print an ASCII bar chart showing the average per-phase contribution to the
+// sender's RTT. Bar width is scaled so the longest phase fills the bar; the
+// `share` column shows each phase as a fraction of the sum of all phases in
+// the chart, and a trailing line cross-checks the sum against the measured
+// rtt avg so the reader can see how much of the RTT was unaccounted for.
+//
+// The row set is identical for the proxy and UCX device builds:
+//   issue + complete + peer-wait ≈ rtt
+// The proxy worker's internal stage acknowledgements
+// (dequeued/prepared/submitted) are intentionally omitted from the GPU-side
+// output: polling them from the GPU would inject a PCIe round-trip into the
+// timed loop. The internal worker phases remain visible in the worker's own
+// [proxy-worker-stats] block.
+static void
+print_breakdown_chart(const std::vector<PhaseSummary> &phases,
+                      const PhaseSummary &rtt) {
+    constexpr int kBarWidth = 40;
+
+    double sum_avg = 0.0;
+    double max_avg = 0.0;
+    for (const PhaseSummary &p : phases) {
+        if (p.count == 0) continue;
+        sum_avg += p.avg_us;
+        max_avg = std::fmax(max_avg, p.avg_us);
+    }
+    if (max_avg <= 0.0) {
+        return;
+    }
+
+    printf("[pingpong-stats] breakdown (avg us, bar width = %d chars at the longest phase)\n",
+           kBarWidth);
+
+    for (const PhaseSummary &p : phases) {
+        if (p.count == 0) continue;
+        const double frac_bar  = p.avg_us / max_avg;
+        const double frac_sum  = sum_avg > 0.0 ? p.avg_us / sum_avg : 0.0;
+        const int    bar_chars =
+            std::max(0, std::min(kBarWidth, static_cast<int>(std::lround(frac_bar * kBarWidth))));
+
+        char bar[kBarWidth + 1];
+        for (int i = 0; i < kBarWidth; ++i) {
+            bar[i] = (i < bar_chars) ? '#' : '.';
+        }
+        bar[kBarWidth] = '\0';
+
+        printf("[pingpong-stats]   %-11s |%s| %9.3f us  (%5.1f%%)\n",
+               p.name, bar, p.avg_us, frac_sum * 100.0);
+    }
+
+    const double unaccounted_us  = rtt.avg_us - sum_avg;
+    const double unaccounted_pct = rtt.avg_us > 0.0 ? unaccounted_us / rtt.avg_us * 100.0 : 0.0;
+    printf("[pingpong-stats]   sum_phases  %9.3f us\n", sum_avg);
+    printf("[pingpong-stats]   rtt_avg     %9.3f us  (unaccounted %+9.3f us; %+5.1f%%)\n",
+           rtt.avg_us, unaccounted_us, unaccounted_pct);
+}
+
+// Holds every per-phase PhaseStats owned by a sender. Phases populated only
+// when the corresponding measurement is enabled by the caller; unused phases
+// stay default-constructed (d_stats == nullptr) and are silently skipped by
+// print_phase_stats().
+struct SenderPhaseStats {
+    PhaseStats issue;
+    PhaseStats completion;
+    PhaseStats peer_wait;
+    PhaseStats rtt;
+};
+
+static void
+free_sender_phase_stats(SenderPhaseStats &s) {
+    free_phase_stats(s.issue);
+    free_phase_stats(s.completion);
+    free_phase_stats(s.peer_wait);
+    free_phase_stats(s.rtt);
+}
+
+// Fan SenderPhaseStats out into gpu_bench_ctx (the kernel expects raw
+// device pointers, one per phase).
+static void
+attach_phase_stats(gpu_bench_ctx &kctx, const SenderPhaseStats &s) {
+    kctx.issue_stats      = s.issue.d_stats;
+    kctx.completion_stats = s.completion.d_stats;
+    kctx.peer_wait_stats  = s.peer_wait.d_stats;
+    kctx.rtt_stats        = s.rtt.d_stats;
 }
 
 static void
-print_latency(uint64_t *d_elapsed, gpu_cycle_stats *d_issue_stats,
-              gpu_cycle_stats *d_dequeue_stats, gpu_cycle_stats *d_prepare_stats,
-              gpu_cycle_stats *d_submit_stats, gpu_cycle_stats *d_post_submit_stats,
-              gpu_cycle_stats *d_rtt_stats,
+print_latency(uint64_t *d_elapsed, const SenderPhaseStats &stats,
               uint64_t num_iters, int gpu_id,
               size_t msg_size, bool use_warp, gpu_bench_op op)
 {
@@ -154,45 +376,56 @@ print_latency(uint64_t *d_elapsed, gpu_cycle_stats *d_issue_stats,
     double clock_hz = (double)clock_khz * 1000.0;
     fprintf(stderr, "[main] GPU SM clock: %.3f GHz\n", clock_hz / 1e9);
 
-    double rtt_us     = (double)h_elapsed / (double)num_iters / clock_hz * 1e6;
-    double one_way_us = rtt_us / 2.0;
-    TimingStatsUs issue = read_cycle_stats_us(d_issue_stats, clock_hz);
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-    TimingStatsUs dequeue = read_cycle_stats_us(d_dequeue_stats, clock_hz);
-    TimingStatsUs prepare = read_cycle_stats_us(d_prepare_stats, clock_hz);
-    TimingStatsUs submit = read_cycle_stats_us(d_submit_stats, clock_hz);
-    TimingStatsUs post_submit = read_cycle_stats_us(d_post_submit_stats, clock_hz);
-#endif
-    TimingStatsUs rtt = read_cycle_stats_us(d_rtt_stats, clock_hz);
-    TimingStatsUs one_way = read_cycle_stats_us(d_rtt_stats, clock_hz, 0.5);
+    const PhaseSummary issue      = summarize_phase(stats.issue,      clock_hz);
+    const PhaseSummary completion = summarize_phase(stats.completion, clock_hz);
+    const PhaseSummary peer_wait  = summarize_phase(stats.peer_wait,  clock_hz);
+    // one-way is just rtt with each sample halved; reuse the rtt buffer.
+    PhaseStats one_way_phase = stats.rtt;
+    one_way_phase.name = "one-way";
+    const PhaseSummary one_way    = summarize_phase(one_way_phase,    clock_hz, /*scale=*/0.5);
+    const PhaseSummary rtt        = summarize_phase(stats.rtt,        clock_hz);
+
+    // Headline RTT/one-way come from the per-iteration `rtt` histogram, NOT the
+    // d_elapsed wall clock. d_elapsed spans the entire timed loop (start_time to
+    // end_time), so per iteration it also includes the cost of writing the
+    // timing samples themselves -- the four record_cycle_sample() global-memory
+    // writes plus the extra clock64() reads -- which all happen *after* rtt_end
+    // and therefore sit outside every histogram window. Sourcing the headline
+    // from the rtt histogram keeps it consistent with the per-phase stats and
+    // the breakdown below (sum_phases ~= rtt_avg). The wall-clock figure is
+    // still reported as a diagnostic so the recording overhead stays visible.
+    const double wall_rtt_us = (double)h_elapsed / (double)num_iters / clock_hz * 1e6;
+    const double rtt_us      = rtt.avg_us;
+    const double one_way_us  = one_way.avg_us;
 
     printf("op=%-12s  msg_size=%-6zu  iters=%-6llu  RTT=%.3f us  one-way=%.3f us  [%s]\n",
            op_to_string(op), msg_size, (unsigned long long)num_iters,
            rtt_us, one_way_us, use_warp ? "WARP" : "THREAD");
-    printf("metrics:\n");
-    printf("  op=%s  msg_size=%zu  iters=%llu  level=%s  samples=%llu\n",
+    printf("[pingpong-stats] meta op=%s msg_size=%zu iters=%llu warmup_skipped level=%s%s\n",
            op_to_string(op), msg_size, (unsigned long long)num_iters,
            use_warp ? "WARP" : "THREAD",
-           (unsigned long long)rtt.count);
-    if (op == gpu_bench_op::AtomicFlag) {
-        printf("  atomic-flag mode: msg_size selects counter offset; no payload bytes are transferred\n");
-    }
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-    printf("  stage rows are per-iteration durations; one-way is RTT/2\n");
-#else
-    printf("  one-way includes: issue/submit + backend progress/completion + network/peer response\n");
-#endif
-    printf("  %-11s %14s  %14s  %14s  %14s\n",
-           "", "avg_us", "min_us", "max_us", "stddev_us");
-    print_timing_row("issue", issue);
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-    print_timing_row("issue->deq", dequeue);
-    print_timing_row("prepare", prepare);
-    print_timing_row("submit", submit);
-    print_timing_row("post-submit", post_submit);
-#endif
-    print_timing_row("one-way", one_way);
-    print_timing_row("rtt", rtt);
+           op == gpu_bench_op::AtomicFlag
+               ? " note=atomic-flag-uses-msg_size-as-counter-offset"
+               : "");
+    fprintf(stderr,
+            "[main] wall-clock RTT incl. instrumentation: %.3f us/iter "
+            "(rtt histogram avg %.3f us/iter; +%.3f us/iter recording overhead)\n",
+            wall_rtt_us, rtt_us, wall_rtt_us - rtt_us);
+
+    print_phase_summary_lines(issue);
+    print_phase_summary_lines(completion);
+    print_phase_summary_lines(peer_wait);
+    print_phase_summary_lines(one_way);
+    print_phase_summary_lines(rtt);
+
+    // Non-overlapping lifecycle phases that should sum to ~rtt avg. Identical
+    // for proxy and UCX device builds; the proxy worker's internal stage
+    // acknowledgements are deliberately not polled from the GPU.
+    std::vector<PhaseSummary> breakdown;
+    breakdown.push_back(issue);
+    breakdown.push_back(completion);
+    breakdown.push_back(peer_wait);
+    print_breakdown_chart(breakdown, rtt);
 }
 
 // ----------------------------------------------------------------------------
@@ -217,7 +450,6 @@ single_process_run(size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
 
     cudaSetDevice(gpu_id);
     uint64_t *d_elapsed_sender = nullptr, *d_elapsed_recvr = nullptr;
-    gpu_cycle_stats *d_issue_sender = nullptr, *d_submit_sender = nullptr, *d_rtt_sender = nullptr;
     if (cudaMalloc(&d_elapsed_sender, sizeof(uint64_t)) != cudaSuccess ||
         cudaMalloc(&d_elapsed_recvr,  sizeof(uint64_t)) != cudaSuccess) {
         fprintf(stderr, "[main] cudaMalloc d_elapsed failed\n");
@@ -225,26 +457,23 @@ single_process_run(size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
     }
     cudaMemset(d_elapsed_sender, 0, sizeof(uint64_t));
     cudaMemset(d_elapsed_recvr,  0, sizeof(uint64_t));
-    if (cudaMalloc(&d_rtt_sender, sizeof(gpu_cycle_stats)) != cudaSuccess) {
-        fprintf(stderr, "[main] cudaMalloc RTT stats failed\n");
+
+    SenderPhaseStats sender_stats;
+    if (!alloc_phase_stats(sender_stats.rtt, "rtt", num_iters, "main")) {
         cudaFree(d_elapsed_sender);
         cudaFree(d_elapsed_recvr);
+        free_sender_phase_stats(sender_stats);
         return 1;
     }
-    cudaMemset(d_rtt_sender, 0, sizeof(gpu_cycle_stats));
     if (measure_submit) {
-        if (cudaMalloc(&d_issue_sender, sizeof(gpu_cycle_stats)) != cudaSuccess ||
-            cudaMalloc(&d_submit_sender, sizeof(gpu_cycle_stats)) != cudaSuccess) {
-            fprintf(stderr, "[main] cudaMalloc timing counters failed\n");
+        if (!alloc_phase_stats(sender_stats.issue,      "issue",     num_iters, "main") ||
+            !alloc_phase_stats(sender_stats.completion, "complete",  num_iters, "main") ||
+            !alloc_phase_stats(sender_stats.peer_wait,  "peer-wait", num_iters, "main")) {
             cudaFree(d_elapsed_sender);
             cudaFree(d_elapsed_recvr);
-            cudaFree(d_issue_sender);
-            cudaFree(d_submit_sender);
-            cudaFree(d_rtt_sender);
+            free_sender_phase_stats(sender_stats);
             return 1;
         }
-        cudaMemset(d_issue_sender, 0, sizeof(gpu_cycle_stats));
-        cudaMemset(d_submit_sender, 0, sizeof(gpu_cycle_stats));
     }
 
     BenchContext  sender_ctx, recvr_ctx;
@@ -302,12 +531,7 @@ single_process_run(size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
         kctx.num_iters    = num_iters;
         kctx.warmup_iters = warmup_iters;
         kctx.is_sender    = true;
-        kctx.issue_stats = d_issue_sender;
-        kctx.dequeue_stats = nullptr;
-        kctx.prepare_stats = nullptr;
-        kctx.submit_stats = d_submit_sender;
-        kctx.post_submit_stats = nullptr;
-        kctx.rtt_stats = d_rtt_sender;
+        attach_phase_stats(kctx, sender_stats);
 
         cudaStream_t stream;
         cudaStreamCreate(&stream);
@@ -357,12 +581,10 @@ single_process_run(size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
         kctx.num_iters    = num_iters;
         kctx.warmup_iters = warmup_iters;
         kctx.is_sender    = false;
-        kctx.issue_stats = nullptr;
-        kctx.dequeue_stats = nullptr;
-        kctx.prepare_stats = nullptr;
-        kctx.submit_stats = nullptr;
-        kctx.post_submit_stats = nullptr;
-        kctx.rtt_stats = nullptr;
+        kctx.issue_stats      = nullptr;
+        kctx.completion_stats = nullptr;
+        kctx.peer_wait_stats  = nullptr;
+        kctx.rtt_stats        = nullptr;
 
         cudaStream_t stream;
         cudaStreamCreate(&stream);
@@ -384,21 +606,16 @@ single_process_run(size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
         fprintf(stderr, "[main] one or both sides failed — no latency output\n");
         cudaFree(d_elapsed_sender);
         cudaFree(d_elapsed_recvr);
-        cudaFree(d_issue_sender);
-        cudaFree(d_submit_sender);
-        cudaFree(d_rtt_sender);
+        free_sender_phase_stats(sender_stats);
         return 1;
         // BenchContext destructors run here regardless
     }
 
-    print_latency(d_elapsed_sender, d_issue_sender, nullptr, nullptr,
-                  d_submit_sender, nullptr, d_rtt_sender,
+    print_latency(d_elapsed_sender, sender_stats,
                   num_iters, gpu_id, msg_size, use_warp, op);
     cudaFree(d_elapsed_sender);
     cudaFree(d_elapsed_recvr);
-    cudaFree(d_issue_sender);
-    cudaFree(d_submit_sender);
-    cudaFree(d_rtt_sender);
+    free_sender_phase_stats(sender_stats);
     fprintf(stderr, "[main] done\n");
     return 0;
     // sender_ctx and recvr_ctx destructors run here — NIXL teardown is automatic
@@ -438,63 +655,29 @@ twoprocess_run(const char *peer_ip, int peer_port, int listen_port,
 
     cudaSetDevice(gpu_id);
     uint64_t *d_elapsed = nullptr;
-    gpu_cycle_stats *d_issue_stats = nullptr;
-    gpu_cycle_stats *d_dequeue_stats = nullptr;
-    gpu_cycle_stats *d_prepare_stats = nullptr;
-    gpu_cycle_stats *d_submit_stats = nullptr;
-    gpu_cycle_stats *d_post_submit_stats = nullptr;
-    gpu_cycle_stats *d_rtt_stats = nullptr;
     if (cudaMalloc(&d_elapsed, sizeof(uint64_t)) != cudaSuccess) {
         fprintf(stderr, "[%s] cudaMalloc d_elapsed failed\n", role);
         return 1;
     }
     cudaMemset(d_elapsed, 0, sizeof(uint64_t));
+
+    SenderPhaseStats sender_stats;
+    auto bail = [&]() {
+        cudaFree(d_elapsed);
+        free_sender_phase_stats(sender_stats);
+        return 1;
+    };
     if (is_sender) {
-        if (cudaMalloc(&d_rtt_stats, sizeof(gpu_cycle_stats)) != cudaSuccess) {
-            fprintf(stderr, "[%s] cudaMalloc RTT stats failed\n", role);
-            cudaFree(d_elapsed);
-            return 1;
+        if (!alloc_phase_stats(sender_stats.rtt, "rtt", num_iters, role)) {
+            return bail();
         }
-        cudaMemset(d_rtt_stats, 0, sizeof(gpu_cycle_stats));
     }
     if (measure_submit && is_sender) {
-        if (cudaMalloc(&d_issue_stats, sizeof(gpu_cycle_stats)) != cudaSuccess ||
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-            cudaMalloc(&d_dequeue_stats, sizeof(gpu_cycle_stats)) != cudaSuccess ||
-            cudaMalloc(&d_prepare_stats, sizeof(gpu_cycle_stats)) != cudaSuccess ||
-#endif
-            cudaMalloc(&d_submit_stats, sizeof(gpu_cycle_stats)) != cudaSuccess) {
-            fprintf(stderr, "[%s] cudaMalloc timing counters failed\n", role);
-            cudaFree(d_elapsed);
-            cudaFree(d_issue_stats);
-            cudaFree(d_dequeue_stats);
-            cudaFree(d_prepare_stats);
-            cudaFree(d_submit_stats);
-            cudaFree(d_post_submit_stats);
-            cudaFree(d_rtt_stats);
-            return 1;
+        if (!alloc_phase_stats(sender_stats.issue,      "issue",     num_iters, role) ||
+            !alloc_phase_stats(sender_stats.completion, "complete",  num_iters, role) ||
+            !alloc_phase_stats(sender_stats.peer_wait,  "peer-wait", num_iters, role)) {
+            return bail();
         }
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-        if (cudaMalloc(&d_post_submit_stats, sizeof(gpu_cycle_stats)) != cudaSuccess) {
-            fprintf(stderr, "[%s] cudaMalloc post-submit stats failed\n", role);
-            cudaFree(d_elapsed);
-            cudaFree(d_issue_stats);
-            cudaFree(d_dequeue_stats);
-            cudaFree(d_prepare_stats);
-            cudaFree(d_submit_stats);
-            cudaFree(d_rtt_stats);
-            return 1;
-        }
-#endif
-        cudaMemset(d_issue_stats, 0, sizeof(gpu_cycle_stats));
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-        cudaMemset(d_dequeue_stats, 0, sizeof(gpu_cycle_stats));
-        cudaMemset(d_prepare_stats, 0, sizeof(gpu_cycle_stats));
-#endif
-        cudaMemset(d_submit_stats, 0, sizeof(gpu_cycle_stats));
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-        cudaMemset(d_post_submit_stats, 0, sizeof(gpu_cycle_stats));
-#endif
     }
 
     gpu_bench_ctx kctx;
@@ -507,12 +690,7 @@ twoprocess_run(const char *peer_ip, int peer_port, int listen_port,
     kctx.num_iters    = num_iters;
     kctx.warmup_iters = warmup_iters;
     kctx.is_sender    = is_sender;
-    kctx.issue_stats = d_issue_stats;
-    kctx.dequeue_stats = d_dequeue_stats;
-    kctx.prepare_stats = d_prepare_stats;
-    kctx.submit_stats = d_submit_stats;
-    kctx.post_submit_stats = d_post_submit_stats;
-    kctx.rtt_stats = d_rtt_stats;
+    attach_phase_stats(kctx, sender_stats);
 
     cudaStream_t stream;
     cudaStreamCreate(&stream);
@@ -528,17 +706,11 @@ twoprocess_run(const char *peer_ip, int peer_port, int listen_port,
     fprintf(stderr, "[%s] kernel finished\n", role);
 
     if (is_sender)
-        print_latency(d_elapsed, d_issue_stats, d_dequeue_stats, d_prepare_stats,
-                      d_submit_stats, d_post_submit_stats, d_rtt_stats,
+        print_latency(d_elapsed, sender_stats,
                       num_iters, gpu_id, msg_size, use_warp, op);
 
     cudaFree(d_elapsed);
-    cudaFree(d_issue_stats);
-    cudaFree(d_dequeue_stats);
-    cudaFree(d_prepare_stats);
-    cudaFree(d_submit_stats);
-    cudaFree(d_post_submit_stats);
-    cudaFree(d_rtt_stats);
+    free_sender_phase_stats(sender_stats);
     fprintf(stderr, "[main] done\n");
     return 0;
     // ctx destructor runs here — NIXL teardown is automatic
