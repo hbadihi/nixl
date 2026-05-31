@@ -52,6 +52,8 @@ struct alignas(64) nixlProxyChannelState {
     uint64_t        *consumer_idx_host_  = nullptr;
     /** Same word as consumer_idx_host_, for nixlProxyWorkRing::consumer_idx (GPU-readable). */
     uint64_t        *consumer_idx_dev_   = nullptr;
+    /** Device-resident cache of consumer_idx_host_ used by GPU enqueue backpressure. */
+    uint64_t        *consumer_idx_cache_dev_ = nullptr;
     /** Host-side ring depth for the CPU worker; nixlProxyWorkRing itself is device-only. */
     uint32_t         ring_depth_         = 0;
     /** Mapped pinned host memory; proxy worker writes directly via host alias. */
