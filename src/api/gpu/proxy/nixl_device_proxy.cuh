@@ -135,7 +135,7 @@ struct ProxyDeviceContext : nixlProxyDeviceContextData {
         if (ticket - cached_consumer_idx >= ring->depth) {
             do {
                 cached_consumer_idx = cons.load(cuda::memory_order_acquire);
-                cons_cache.store(cached_consumer_idx, cuda::memory_order_relaxed);
+                *ring->consumer_idx_cache = cached_consumer_idx;
                 if (ticket - cached_consumer_idx < ring->depth) {
                     break;
                 }
