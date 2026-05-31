@@ -85,6 +85,7 @@ class ProxyWorker {
         uint64_t run_once_iters_ = 0;
         uint64_t progress_calls_ = 0;
         uint64_t total_completion_polls_ = 0;
+        TimingStats dequeue_stats_;
         TimingStats prepare_stats_;
         TimingStats submit_stats_;
         TimingStats post_submit_stats_;
