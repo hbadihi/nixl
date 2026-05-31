@@ -348,6 +348,8 @@ nixlProxyChannelState::allocate(uint32_t channel_id, uint32_t depth) {
                    sizeof(nixlProxyWorkRing))                             != cudaSuccess
      || cudaMalloc(reinterpret_cast<void **>(&producer_ticket_dev_),
                    sizeof(uint64_t))                                      != cudaSuccess
+     || cudaMalloc(reinterpret_cast<void **>(&consumer_idx_cache_dev_),
+                   sizeof(uint64_t))                                      != cudaSuccess
      || cudaMallocHost(&records_,         sizeof(nixlProxySubmission) * depth) != cudaSuccess
      || cudaMallocHost(reinterpret_cast<void **>(&consumer_idx_host_),
                        sizeof(uint64_t))                                  != cudaSuccess
@@ -409,7 +411,8 @@ nixlProxyChannelState::allocate(uint32_t channel_id, uint32_t depth) {
     for (uint32_t i = 0; i < depth; ++i) {
         records_[i] = nixlProxySubmission{};
     }
-    if (cudaMemset(producer_ticket_dev_, 0, sizeof(*producer_ticket_dev_)) != cudaSuccess) {
+    if (cudaMemset(producer_ticket_dev_, 0, sizeof(*producer_ticket_dev_)) != cudaSuccess
+        || cudaMemset(consumer_idx_cache_dev_, 0, sizeof(*consumer_idx_cache_dev_)) != cudaSuccess) {
         deallocate();
         return NIXL_ERR_BACKEND;
     }
@@ -424,6 +427,7 @@ nixlProxyChannelState::allocate(uint32_t channel_id, uint32_t depth) {
         records_dev_,
         producer_ticket_dev_,
         consumer_idx_dev_,
+        consumer_idx_cache_dev_,
         depth,
     };
     if (cudaMemcpy(work_ring_dev_,
@@ -445,6 +449,7 @@ nixlProxyChannelState::allocate(uint32_t channel_id, uint32_t depth) {
               << " producer_ticket(dev)=" << producer_ticket_dev_
               << " consumer_idx(host)=" << consumer_idx_host_
               << " consumer_idx(dev)=" << consumer_idx_dev_
+              << " consumer_idx_cache(dev)=" << consumer_idx_cache_dev_
               << " completion_slot(host)=" << completion_slot_host_
               << " completion_slot(dev)=" << completion_slot_dev_
               << " dequeued_idx(host)=" << dequeued_idx_host_
@@ -481,6 +486,10 @@ nixlProxyChannelState::deallocate() noexcept {
     if (producer_ticket_dev_) {
         cudaFree(producer_ticket_dev_);
         producer_ticket_dev_ = nullptr;
+    }
+    if (consumer_idx_cache_dev_) {
+        cudaFree(consumer_idx_cache_dev_);
+        consumer_idx_cache_dev_ = nullptr;
     }
     if (consumer_idx_host_) {
         cudaFreeHost(consumer_idx_host_);
@@ -520,6 +529,7 @@ nixlProxyChannelState::operator=(nixlProxyChannelState &&other) noexcept {
         producer_ticket_dev_ = other.producer_ticket_dev_;
         consumer_idx_host_   = other.consumer_idx_host_;
         consumer_idx_dev_    = other.consumer_idx_dev_;
+        consumer_idx_cache_dev_ = other.consumer_idx_cache_dev_;
         ring_depth_          = other.ring_depth_;
         completion_slot_host_    = other.completion_slot_host_;
         completion_slot_dev_     = other.completion_slot_dev_;
@@ -535,6 +545,7 @@ nixlProxyChannelState::operator=(nixlProxyChannelState &&other) noexcept {
         other.producer_ticket_dev_  = nullptr;
         other.consumer_idx_host_    = nullptr;
         other.consumer_idx_dev_     = nullptr;
+        other.consumer_idx_cache_dev_ = nullptr;
         other.ring_depth_           = 0;
         other.completion_slot_host_ = nullptr;
         other.completion_slot_dev_  = nullptr;
