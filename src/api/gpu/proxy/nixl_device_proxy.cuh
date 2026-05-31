@@ -124,8 +124,6 @@ struct ProxyDeviceContext : nixlProxyDeviceContextData {
         cuda::atomic_ref<uint64_t, cuda::thread_scope_device> producer_ticket(
             *ring->producer_ticket);
         cuda::atomic_ref<uint64_t, cuda::thread_scope_system> cons(*ring->consumer_idx);
-        cuda::atomic_ref<uint64_t, cuda::thread_scope_device> cons_cache(
-            *ring->consumer_idx_cache);
         cuda::atomic_ref<uint32_t, cuda::thread_scope_system> shut(*shutdown_word);
 
         // Atomically claim a unique slot in the ring.
