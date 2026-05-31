@@ -165,6 +165,7 @@ ProxyWorker::runOnce() {
 
 bool
 ProxyWorker::tryDequeue(nixlProxyChannelState &channel, nixlProxySubmission &submission) {
+    const uint64_t dequeue_start_ns = steadyClockNs();
     // Sole writer of consumer_idx on host — relaxed load is sufficient.
     uint64_t local_consumer_idx =
         __atomic_load_n(channel.consumer_idx_host_, __ATOMIC_RELAXED);
@@ -188,6 +189,7 @@ ProxyWorker::tryDequeue(nixlProxyChannelState &channel, nixlProxySubmission &sub
                << " opcode=" << static_cast<int>(submission.opcode)
                << " op_idx=" << submission.op_idx
                << " size=" << submission.size;
+    dequeue_stats_.record(steadyClockNs() - dequeue_start_ns);
     return true;
 }
 
@@ -373,6 +375,7 @@ ProxyWorker::printStats(uint32_t worker_idx) const noexcept {
                      hist_line);
     };
 
+    print_timing("dequeue", dequeue_stats_);
     print_timing("prepare", prepare_stats_);
     print_timing("submit", submit_stats_);
     print_timing("post_submit", post_submit_stats_);
