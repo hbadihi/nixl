@@ -131,7 +131,7 @@ struct ProxyDeviceContext : nixlProxyDeviceContextData {
 
         // Fast path: use the device cache. Refresh from host only if the ring
         // appears full, since mapped-host loads are much slower than HBM loads.
-        uint64_t cached_consumer_idx = cons_cache.load(cuda::memory_order_relaxed);
+        uint64_t cached_consumer_idx = *ring->consumer_idx_cache;
         if (ticket - cached_consumer_idx >= ring->depth) {
             do {
                 cached_consumer_idx = cons.load(cuda::memory_order_acquire);
