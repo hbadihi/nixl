@@ -297,7 +297,7 @@ namespace proxy_memview_registry {
         submission.opcode = nixl_proxy_opcode_t::PUT;
         submission.src_proxy_memview_id = reinterpret_cast<uint64_t>(src_proxy);
         submission.dst_proxy_memview_id = reinterpret_cast<uint64_t>(dst_proxy);
-        submission.dst_offset = std::numeric_limits<size_t>::max();
+        submission.dst_offset = std::numeric_limits<uint32_t>::max();
         submission.size = 1;
 
         nixlBackendProxySubmission prepared_submission;
