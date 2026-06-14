@@ -21,3 +21,5 @@ cufile.log
 
 # Asio
 subprojects/asio-*
+
+profile_results/**
