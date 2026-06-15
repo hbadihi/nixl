@@ -46,6 +46,7 @@ usage(const char *prog) {
             "    [--warp]               use WARP level (default: THREAD)\n"
             "    [--op put|atomic-flag] (default put)\n"
             "    [--no-measure-submit]  skip GPU issue/submit timing metrics\n"
+            "    [--measure-stages]     (proxy build) GPU-clock call->doorbell diag\n"
             "\n"
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
             "Single-process mode is not supported in the CPU-proxy build:\n"
@@ -341,6 +342,8 @@ struct SenderPhaseStats {
     PhaseStats completion;
     PhaseStats peer_wait;
     PhaseStats rtt;
+    PhaseStats stage_dequeued;   // proxy-only call->doorbell diagnostic
+    PhaseStats stage_submitted;  // proxy-only call->doorbell diagnostic
 };
 
 static void
@@ -349,16 +352,20 @@ free_sender_phase_stats(SenderPhaseStats &s) {
     free_phase_stats(s.completion);
     free_phase_stats(s.peer_wait);
     free_phase_stats(s.rtt);
+    free_phase_stats(s.stage_dequeued);
+    free_phase_stats(s.stage_submitted);
 }
 
 // Fan SenderPhaseStats out into gpu_bench_ctx (the kernel expects raw
 // device pointers, one per phase).
 static void
 attach_phase_stats(gpu_bench_ctx &kctx, const SenderPhaseStats &s) {
-    kctx.issue_stats      = s.issue.d_stats;
-    kctx.completion_stats = s.completion.d_stats;
-    kctx.peer_wait_stats  = s.peer_wait.d_stats;
-    kctx.rtt_stats        = s.rtt.d_stats;
+    kctx.issue_stats            = s.issue.d_stats;
+    kctx.completion_stats       = s.completion.d_stats;
+    kctx.peer_wait_stats        = s.peer_wait.d_stats;
+    kctx.rtt_stats              = s.rtt.d_stats;
+    kctx.stage_dequeued_stats   = s.stage_dequeued.d_stats;
+    kctx.stage_submitted_stats  = s.stage_submitted.d_stats;
 }
 
 static void
@@ -404,9 +411,58 @@ print_latency(uint64_t *d_elapsed, const SenderPhaseStats &stats,
     print_phase_summary_lines(one_way);
     print_phase_summary_lines(rtt);
 
-    // Non-overlapping lifecycle phases that should sum to ~rtt avg. Identical
-    // for proxy and UCX device builds; the proxy worker's internal stage
-    // acknowledgements are deliberately not polled from the GPU.
+    // "network" = the clean outbound on-the-wire cost of the transfer, reported
+    // separately from `peer-wait` (which also folds in the receiver's reaction
+    // time + return-path transit + the sender's own counter-poll, so it is NOT a
+    // clean network number).
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    // CPU-proxy build: the GPU's `complete` interval is the time until the GPU
+    // observes the worker's completion slot over PCIe. A real proxy data path
+    // never polls local completion (it fires the put and waits on the
+    // destination flag), so `complete` here is a benchmark-only artifact, NOT
+    // the network cost. The worker times the real submit->completion wire cost
+    // on its host steady clock and prints it as `post_submit` in the
+    // [proxy-worker-stats] block; that is the authoritative network number.
+    printf("[pingpong-stats] %-11s note=benchmark-only (GPU sees worker "
+           "completion slot over PCIe; not in the real data path)\n",
+           "complete");
+    printf("[pingpong-stats] %-11s note=see [proxy-worker-stats] post_submit "
+           "(backend submit->completion = outbound RDMA wire cost)\n",
+           "network");
+    // Call->doorbell diagnostic (only populated with --measure-stages). Measured
+    // on the GPU clock from just before the enqueue until the worker advances the
+    // dequeued / submitted stage acks. submitted == NIC doorbell rung. These reads
+    // cross PCIe, so they over-state the true handoff somewhat; see note below.
+    const PhaseSummary stage_deq = summarize_phase(stats.stage_dequeued,  clock_hz);
+    const PhaseSummary stage_sub = summarize_phase(stats.stage_submitted, clock_hz);
+    if (stage_sub.count > 0) {
+        PhaseSummary deq = stage_deq; deq.name = "to_dequeued";
+        PhaseSummary sub = stage_sub; sub.name = "to_doorbell";
+        print_phase_summary_lines(deq);
+        print_phase_summary_lines(sub);
+        printf("[pingpong-stats] note to_dequeued/to_doorbell = GPU-clock call->stage; "
+               "each poll adds a PCIe read, so these over-state the true handoff/doorbell\n");
+    }
+#else
+    // UCX-direct build: local completion IS the NIC CQE, i.e. the kernel's
+    // `complete` interval already is the outbound wire cost (RDMA write
+    // acknowledged by the remote NIC). Surface it under the `network` label so
+    // both builds expose a uniformly-named series. The CQE poll is on-device and
+    // cheap (no host hop), so it does not perturb the measurement the way the
+    // proxy's PCIe completion poll would.
+    PhaseStats network_phase = stats.completion;
+    network_phase.name = "network";
+    const PhaseSummary network = summarize_phase(network_phase, clock_hz);
+    print_phase_summary_lines(network);
+#endif
+
+    printf("[pingpong-stats] note peer-wait = receiver reaction + return-path "
+           "transit + sender counter-poll; not a clean network number\n");
+
+    // Non-overlapping lifecycle phases that sum to ~rtt avg. In the CPU-proxy
+    // build the `complete` row is the benchmark's local-completion poll (PCIe
+    // visibility), NOT real-data-path network time; see the per-row notes above
+    // and the [proxy-worker-stats] post_submit line for the true wire cost.
     std::vector<PhaseSummary> breakdown;
     breakdown.push_back(issue);
     breakdown.push_back(completion);
@@ -571,6 +627,8 @@ single_process_run(size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
         kctx.completion_stats = nullptr;
         kctx.peer_wait_stats  = nullptr;
         kctx.rtt_stats        = nullptr;
+        kctx.stage_dequeued_stats  = nullptr;
+        kctx.stage_submitted_stats = nullptr;
 
         cudaStream_t stream;
         cudaStreamCreate(&stream);
@@ -615,7 +673,7 @@ static int
 twoprocess_run(const char *peer_ip, int peer_port, int listen_port,
                size_t msg_size, uint64_t num_iters, uint64_t warmup_iters,
                int gpu_id, bool use_warp, bool is_sender, bool measure_submit,
-               gpu_bench_op op)
+               bool measure_stages, gpu_bench_op op)
 {
     const char *role = is_sender ? "sender" : "receiver";
     fprintf(stderr,
@@ -665,6 +723,16 @@ twoprocess_run(const char *peer_ip, int peer_port, int listen_port,
             return bail();
         }
     }
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    if (measure_stages && is_sender) {
+        if (!alloc_phase_stats(sender_stats.stage_dequeued,  "to_dequeued", num_iters, role) ||
+            !alloc_phase_stats(sender_stats.stage_submitted, "to_doorbell", num_iters, role)) {
+            return bail();
+        }
+    }
+#else
+    (void)measure_stages;
+#endif
 
     gpu_bench_ctx kctx;
     kctx.local_mvh    = ctx.local_mvh;
@@ -720,6 +788,7 @@ main(int argc, char *argv[]) {
     int      gpu_id       = 0;
     bool     use_warp     = false;
     bool     measure_submit = true;
+    bool     measure_stages = false;
     bool     single_process = false;
     gpu_bench_op op = gpu_bench_op::Put;
 
@@ -744,6 +813,7 @@ main(int argc, char *argv[]) {
         }
         else if (!strcmp(argv[i], "--measure-submit"))                measure_submit = true;
         else if (!strcmp(argv[i], "--no-measure-submit"))             measure_submit = false;
+        else if (!strcmp(argv[i], "--measure-stages"))                measure_stages = true;
         else if (!strcmp(argv[i], "--single-process"))                single_process = true;
         else usage(argv[0]);
     }
@@ -781,5 +851,6 @@ main(int argc, char *argv[]) {
 
     return twoprocess_run(peer_ip, peer_port, listen_port,
                           msg_size, num_iters, warmup_iters,
-                          gpu_id, use_warp, is_sender, measure_submit, op);
+                          gpu_id, use_warp, is_sender, measure_submit,
+                          measure_stages, op);
 }

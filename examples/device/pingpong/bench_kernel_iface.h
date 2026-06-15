@@ -44,6 +44,14 @@ struct gpu_bench_ctx {
     gpu_cycle_stats *completion_stats; // optional: issue_end -> nixlGpuGetXferStatus terminal
     gpu_cycle_stats *peer_wait_stats;  // optional: completion -> recv_counter advance
     gpu_cycle_stats *rtt_stats;    // optional: pingpong RTT cycle samples
+    // Proxy-only "call -> doorbell" diagnostic (--measure-stages). Measured on the
+    // GPU clock from just before the enqueue call until the worker advances the
+    // corresponding stage ack (read over PCIe, so these polls themselves add a
+    // PCIe round-trip — this is a diagnostic, not a hot-path metric):
+    //   stage_dequeued_stats  = call -> worker dequeued the record (enqueue + handoff + dequeue)
+    //   stage_submitted_stats = call -> worker returned from backend submit (== NIC doorbell rung)
+    gpu_cycle_stats *stage_dequeued_stats;
+    gpu_cycle_stats *stage_submitted_stats;
 };
 
 // ---- Launch wrappers ----------------------------------------------------------

@@ -3,10 +3,33 @@
 #include "nixl_types.h"
 #include <cstdint>
 
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+// Pulled in early (also re-included at the bottom for the publish/clear helpers)
+// so the kernel can poll the worker's per-stage acknowledgements for the
+// call->doorbell diagnostic. Header has its own include guard.
+#include "nixl_device_proxy.cuh"
+#endif
+
 __device__ static void
 wait_sequence_number(volatile uint64_t *counter, uint64_t expected_value) {
-    while (*counter < expected_value) {
-        __nanosleep(50); // Sleep for 50 nanoseconds to reduce contention, taken from UCX
+    // Busy-spin directly on the volatile counter (no __nanosleep backoff).
+    //
+    // This wait sits on the latency critical path: the sender stamps rtt_end the
+    // instant it returns, and the receiver issues its reply put the instant it
+    // returns. A __nanosleep() hint here adds quantization + wakeup jitter (its
+    // real SM wakeup latency is not the requested ns and varies per call), which
+    // was the dominant noise source in the `peer-wait` phase. With a single
+    // in-flight op per side, spinning on a volatile load is the standard
+    // low-latency wait (cf. NVSHMEM wait_until / UCX device poll).
+    //
+    // The loop is NOT optimized away: `counter` is volatile, so each iteration
+    // re-issues a real ld.volatile (the compiler may not hoist or elide it). The
+    // explicit per-iteration load below makes that guarantee obvious.
+    for (;;) {
+        const uint64_t observed = *counter; // ld.volatile, re-read every spin
+        if (observed >= expected_value) {
+            break;
+        }
     }
 }
 
@@ -121,6 +144,8 @@ nixl_pingpong_latency_kernel(gpu_bench_ctx ctx, uint64_t *elapsed_device) {
         ctx.is_sender && ctx.issue_stats != nullptr &&
         ctx.completion_stats != nullptr && ctx.peer_wait_stats != nullptr;
     const bool measure_rtt = ctx.is_sender && ctx.rtt_stats != nullptr;
+    // Proxy-only call->doorbell diagnostic. Independent of measure_completion.
+    const bool measure_stages = ctx.is_sender && ctx.stage_submitted_stats != nullptr;
 
     // warmup
     const uint64_t total_iters = ctx.num_iters + ctx.warmup_iters;
@@ -148,6 +173,10 @@ nixl_pingpong_latency_kernel(gpu_bench_ctx ctx, uint64_t *elapsed_device) {
             if (timed_iter && measure_completion && lane_id == 0) {
                 issue_start = clock64();
             }
+            uint64_t stage_start = 0;
+            if (timed_iter && measure_stages && lane_id == 0) {
+                stage_start = clock64(); // "call" timestamp for the call->doorbell diagnostic
+            }
             nixl_status_t put_status = do_ping_async<level>(ctx, total_size, xfer_status);
             if constexpr (is_warp) {
                 put_status = static_cast<nixl_status_t>(
@@ -160,6 +189,25 @@ nixl_pingpong_latency_kernel(gpu_bench_ctx ctx, uint64_t *elapsed_device) {
             if (timed_iter && measure_completion && lane_id == 0) {
                 issue_end = clock64();
             }
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+            // Call->doorbell diagnostic: spin (collectively) on the worker's stage
+            // acks. dequeued = record picked up; submitted = backend submit returned
+            // (NIC doorbell rung). These host-mapped reads add a PCIe hop per poll,
+            // so treat the numbers as an upper bound on the true handoff/doorbell.
+            if (timed_iter && measure_stages) {
+                nixl_status_t sst;
+                while ((sst = nixlProxyPollDequeued<level>(xfer_status)) == NIXL_IN_PROG) { }
+                uint64_t deq_t = 0;
+                if (lane_id == 0) deq_t = clock64();
+                while ((sst = nixlProxyPollSubmitted<level>(xfer_status)) == NIXL_IN_PROG) { }
+                if (lane_id == 0) {
+                    const uint64_t sub_t = clock64();
+                    record_cycle_sample(ctx.stage_dequeued_stats,  deq_t - stage_start);
+                    record_cycle_sample(ctx.stage_submitted_stats, sub_t - stage_start);
+                }
+                (void)sst;
+            }
+#endif
 
             // Wait for terminal completion of this op as observed by the CPU
             // worker (proxy build) or UCX device API (non-proxy build). For
