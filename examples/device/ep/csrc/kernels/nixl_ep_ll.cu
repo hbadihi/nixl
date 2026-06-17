@@ -36,7 +36,13 @@ __device__ inline void* p2p_ptr_get(gpu_nixl_ctx& ctx, uint64_t dst_ptr, int dst
     if (dst_rank == ctx.rank) return (void*) dst_ptr;
 
     void *remote_ptr = nixlGetPtr(ctx.remote_mvh, dst_rank);
-    if (remote_ptr == nullptr) return nullptr;
+    if (remote_ptr == nullptr) {
+        if (ctx.ll_all_rdma_fallback_counter != nullptr) {
+            atomicAdd(reinterpret_cast<unsigned long long*>(ctx.ll_all_rdma_fallback_counter),
+                      1ULL);
+        }
+        return nullptr;
+    }
 
     return (void*) ((uint64_t) remote_ptr + ctx.offset_get(dst_ptr));
 }

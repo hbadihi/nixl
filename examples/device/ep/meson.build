@@ -18,8 +18,11 @@ if not cuda_dep.found()
     subdir_done()
 endif
 
-if gpu_device_api_backend_resolved != 'ucx'
-    error('nixl_ep requires gpu_device_api_backend=ucx because it currently uses the UCX GPU Device API')
+if gpu_device_api_backend_resolved == 'none'
+    warning('GPU Device API backend disabled, skipping nixl_ep build')
+    subdir_done()
+elif gpu_device_api_backend_resolved != 'ucx' and gpu_device_api_backend_resolved != 'proxy'
+    error('nixl_ep requires gpu_device_api_backend=ucx or gpu_device_api_backend=proxy')
 endif
 
 py = import('python').find_installation('python3', pure: false)
@@ -81,6 +84,13 @@ nixl_ep_inc_dirs = [
     include_directories('csrc/kernels'),
     torch_inc_dirs,
 ]
+
+nixl_ep_link_with = [nixl_lib]
+if gpu_device_api_is_proxy
+    nixl_ep_sources += ['csrc/kernels/proxy_publish.cu']
+    nixl_ep_inc_dirs += [nixl_gpu_proxy_inc_dirs]
+    nixl_ep_link_with += gpu_device_api_link_with
+endif
 
 nixl_ep_cpp_args = [
     '-DHAVE_CUDA',
@@ -150,7 +160,7 @@ nixl_ep_ext = py.extension_module('nixl_ep_cpp',
     include_directories: nixl_ep_inc_dirs,
     cpp_args: nixl_ep_cpp_args,
     cuda_args: nixl_ep_cuda_args,
-    link_with: [nixl_lib],
+    link_with: nixl_ep_link_with,
     build_rpath: nixl_ep_rpath,
     install_rpath: nixl_ep_install_rpath,
     override_options: nixl_ep_override_options,
