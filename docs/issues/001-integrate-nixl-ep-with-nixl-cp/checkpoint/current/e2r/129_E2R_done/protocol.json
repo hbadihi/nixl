@@ -1,0 +1,15 @@
+{
+  "id": "001-integrate-nixl-ep-with-nixl-cp",
+  "node_type": "error",
+  "payload": {
+    "workflow_status": "failed",
+    "final_state": "done",
+    "error_code": "PIPELINE-TERMINAL-FAILED",
+    "response_contract": {
+      "contract_file": "/scrap/cpu-proxy/nixl/.tmp/001-integrate-nixl-ep-with-nixl-cp/relay/129_E2R_done/response-contract.json",
+      "responds_to_file": "/scrap/cpu-proxy/nixl/.tmp/001-integrate-nixl-ep-with-nixl-cp/relay/129_E2R_done/protocol.json",
+      "expected_response_file": "/scrap/cpu-proxy/nixl/.tmp/001-integrate-nixl-ep-with-nixl-cp/relay/130_R2E_recovery_ack/protocol.json"
+    },
+    "run_context_file": "/scrap/cpu-proxy/nixl/.tmp/001-integrate-nixl-ep-with-nixl-cp/relay/run_context.json"
+  }
+}
