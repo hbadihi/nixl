@@ -23,6 +23,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDADataType.h>
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -50,6 +51,11 @@
 #include <sstream>
 #include <unordered_set>
 
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+extern "C" cudaError_t nixl_ep_proxy_publish_context(void *ctx, uint64_t owner_id);
+extern "C" cudaError_t nixl_ep_proxy_clear_context(uint64_t owner_id);
+#endif
+
 #define NIXL_ETCD_WATCH_TIMEOUT std::chrono::microseconds(1000000000) // 1000 seconds
 
 namespace nixl_ep {
@@ -65,12 +71,83 @@ uint64_t milliseconds_to_cycles(uint64_t milliseconds, int device_clock_rate_khz
     return milliseconds * static_cast<uint64_t>(device_clock_rate_khz);
 }
 
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+uint64_t next_proxy_context_owner_id() {
+    static std::atomic<uint64_t> next_owner_id{1};
+    return next_owner_id.fetch_add(1, std::memory_order_relaxed);
+}
+
+int require_explicit_proxy_lane_ceiling(const std::optional<int>& proxy_lane_ceiling) {
+    if (!proxy_lane_ceiling.has_value()) {
+        throw std::runtime_error(
+            "EP_PROXY_LANE_CEILING_REQUIRED: proxy_lane_ceiling must be provided for the proxy backend");
+    }
+    if (*proxy_lane_ceiling <= 0) {
+        throw std::runtime_error(
+            "EP_PROXY_LANE_CEILING_INVALID: proxy_lane_ceiling must be a positive integer for the proxy backend");
+    }
+    return *proxy_lane_ceiling;
+}
+
+uint32_t parse_proxy_channel_count(const char* env_value, int required_lane_ceiling) {
+    std::string raw(env_value);
+    if (raw.empty()) {
+        throw std::runtime_error(
+            "EP_PROXY_CHANNELS_INVALID: NIXL_EP_PROXY_CHANNELS must be a positive integer");
+    }
+    for (char ch : raw) {
+        if (ch < '0' || ch > '9') {
+            throw std::runtime_error(
+                "EP_PROXY_CHANNELS_INVALID: NIXL_EP_PROXY_CHANNELS must be a positive integer");
+        }
+    }
+
+    unsigned long long parsed = 0;
+    try {
+        parsed = std::stoull(raw);
+    } catch (const std::exception&) {
+        throw std::runtime_error(
+            "EP_PROXY_CHANNELS_INVALID: NIXL_EP_PROXY_CHANNELS must be a positive integer");
+    }
+    if (parsed == 0 || parsed > std::numeric_limits<uint32_t>::max()) {
+        throw std::runtime_error(
+            "EP_PROXY_CHANNELS_INVALID: NIXL_EP_PROXY_CHANNELS must be a positive integer");
+    }
+    if (parsed < static_cast<unsigned long long>(required_lane_ceiling)) {
+        throw std::runtime_error(
+            "EP_PROXY_CHANNELS_TOO_SMALL: NIXL_EP_PROXY_CHANNELS (" + raw +
+            ") must be >= proxy_lane_ceiling (" + std::to_string(required_lane_ceiling) + ")");
+    }
+    return static_cast<uint32_t>(parsed);
+}
+
+uint32_t proxy_channel_count_for_lane_ceiling(int required_lane_ceiling) {
+    EP_HOST_ASSERT(required_lane_ceiling > 0);
+    const char* proxy_channels_env = std::getenv("NIXL_EP_PROXY_CHANNELS");
+    if (proxy_channels_env == nullptr) {
+        return static_cast<uint32_t>(required_lane_ceiling);
+    }
+    return parse_proxy_channel_count(proxy_channels_env, required_lane_ceiling);
+}
+#endif
+
 } // namespace
 
-void Buffer::update_memory_buffers(int num_ranks, int num_experts_per_rank, int64_t num_rdma_bytes, int64_t num_nvl_bytes)
+const char* get_gpu_device_api_backend() {
+#if defined(NIXL_GPU_DEVICE_BACKEND_UCX)
+    return "ucx";
+#elif defined(NIXL_GPU_DEVICE_BACKEND_PROXY)
+    return "proxy";
+#else
+    return "none";
+#endif
+}
+
+void Buffer::update_memory_buffers(int num_ranks, int num_experts_per_rank, int64_t num_rdma_bytes, int64_t num_nvl_bytes,
+                                   std::optional<int> proxy_lane_ceiling)
 {
     if (!available) {
-        init(num_ranks, num_experts_per_rank, num_nvl_bytes, num_rdma_bytes);
+        init(num_ranks, num_experts_per_rank, num_nvl_bytes, num_rdma_bytes, proxy_lane_ceiling);
         available = true;
     } else {
         throw std::runtime_error("Multiple calls to update_memory_buffers are not supported");
@@ -85,15 +162,24 @@ Buffer::Buffer(int rank, bool explicitly_destroy, bool low_latency_mode, int tim
         }()),
         rank(rank), num_ranks(1),
         explicitly_destroy(explicitly_destroy),
-        comm_stream(at::cuda::getStreamFromPool(true)) {}
+        comm_stream(at::cuda::getStreamFromPool(true)) {
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    proxy_context_owner_id = next_proxy_context_owner_id();
+#endif
+}
 
-void Buffer::init(int num_ranks, int num_experts_per_rank, int64_t num_nvl_bytes, int64_t num_rdma_bytes)
+void Buffer::init(int num_ranks, int num_experts_per_rank, int64_t num_nvl_bytes, int64_t num_rdma_bytes,
+                  std::optional<int> proxy_lane_ceiling)
 {
     // Update buffer attributes
     this->max_num_ranks = num_ranks;
     this->max_experts_per_rank = num_experts_per_rank;
+    this->proxy_lane_ceiling = proxy_lane_ceiling;
     this->num_nvl_bytes = num_nvl_bytes;
     this->num_rdma_bytes = num_rdma_bytes;
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    require_explicit_proxy_lane_ceiling(this->proxy_lane_ceiling);
+#endif
 
     // Metadata memory
     int64_t barrier_signal_bytes = NUM_MAX_NVL_PEERS * sizeof(int);
@@ -187,6 +273,11 @@ void Buffer::init(int num_ranks, int num_experts_per_rank, int64_t num_nvl_bytes
         CUDA_CHECK(cudaMemset(last_ht_barrier_counter, 0, sizeof(uint64_t)));
     }
 
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    CUDA_CHECK(cudaMalloc(&ll_all_rdma_fallback_counter, sizeof(uint64_t)));
+    CUDA_CHECK(cudaMemset(ll_all_rdma_fallback_counter, 0, sizeof(uint64_t)));
+#endif
+
     CUDA_CHECK(cudaDeviceSynchronize());
 
     my_peer_info.rdma_buffer_ptr = rdma_buffer_ptr;
@@ -252,6 +343,87 @@ torch::Stream Buffer::get_comm_stream() const {
     return comm_stream;
 }
 
+uint64_t Buffer::get_proxy_activity_count() const {
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    if (nixl_agent_info && nixl_agent_info->agent != nullptr) {
+        return nixl_agent_info->agent->getProxySubmittedWorkCount();
+    }
+#endif
+    return 0;
+}
+
+void Buffer::reset_proxy_activity_count() {
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    if (nixl_agent_info && nixl_agent_info->agent != nullptr) {
+        nixl_agent_info->agent->resetProxySubmittedWorkCount();
+    }
+#endif
+}
+
+uint64_t Buffer::get_ll_all_rdma_fallback_count() const {
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    if (ll_all_rdma_fallback_counter != nullptr) {
+        uint64_t count = 0;
+        CUDA_CHECK(cudaDeviceSynchronize());
+        CUDA_CHECK(cudaMemcpy(&count,
+                              ll_all_rdma_fallback_counter,
+                              sizeof(count),
+                              cudaMemcpyDeviceToHost));
+        return count;
+    }
+#endif
+    return 0;
+}
+
+void Buffer::reset_ll_all_rdma_fallback_count() {
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    if (ll_all_rdma_fallback_counter != nullptr) {
+        CUDA_CHECK(cudaMemset(ll_all_rdma_fallback_counter, 0, sizeof(uint64_t)));
+        CUDA_CHECK(cudaDeviceSynchronize());
+    }
+#endif
+}
+
+bool Buffer::is_proxy_context_published() const {
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    return proxy_context_published;
+#else
+    return false;
+#endif
+}
+
+uint64_t Buffer::get_proxy_context_owner_id() const {
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    return proxy_context_owner_id;
+#else
+    return 0;
+#endif
+}
+
+int Buffer::get_required_proxy_channels() const {
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    return required_proxy_channels;
+#else
+    return 0;
+#endif
+}
+
+int Buffer::get_configured_proxy_channels() const {
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    return configured_proxy_channels;
+#else
+    return 0;
+#endif
+}
+
+int Buffer::get_proxy_worker_count() const {
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    return proxy_worker_count;
+#else
+    return 0;
+#endif
+}
+
 void Buffer::destroy() {
     auto warn_cuda = [](cudaError_t status, const char *operation) noexcept {
         if (status != cudaSuccess) {
@@ -273,6 +445,16 @@ void Buffer::destroy() {
 
     // Synchronize
     warn_cuda(cudaDeviceSynchronize(), "synchronize device");
+
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    if (proxy_context_published) {
+        cudaError_t proxy_clear_status = ::nixl_ep_proxy_clear_context(proxy_context_owner_id);
+        warn_cuda(proxy_clear_status, "clear proxy device context");
+        if (proxy_clear_status == cudaSuccess) {
+            proxy_context_published = false;
+        }
+    }
+#endif
 
     _nixl_ep_destroy();
 
@@ -324,6 +506,13 @@ void Buffer::destroy() {
     sync_buffer_ptr = nullptr;
     m_sync_count_alloc.reset();
     sync_count_ptr = nullptr;
+
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    if (ll_all_rdma_fallback_counter != nullptr) {
+        warn_cuda(cudaFree(ll_all_rdma_fallback_counter), "free LL all-RDMA fallback counter");
+        ll_all_rdma_fallback_counter = nullptr;
+    }
+#endif
 
     if (!low_latency_mode) {
         warn_cuda(cudaFree(local_ht_barrier_counter), "free local ht barrier counter");
@@ -1320,6 +1509,12 @@ void Buffer::_nixl_ep_init(void) {
         .last_ht_barrier_counter = last_ht_barrier_counter,
         .local_ht_barrier_counter_ptr = local_ht_barrier_counter,
         .rdma_buffer_ptr = rdma_buffer_ptr,
+        .ll_all_rdma_fallback_counter =
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+            ll_all_rdma_fallback_counter,
+#else
+            nullptr,
+#endif
         .max_num_ranks = max_num_ranks,
         .num_rdma_ranks = num_rdma_ranks,
         .rank = rank,
@@ -1342,6 +1537,15 @@ void Buffer::_nixl_agent_init() {
     cfg.useProgThread = true;
     cfg.syncMode = nixl_thread_sync_t::NIXL_THREAD_SYNC_RW;
     cfg.etcdWatchTimeout = NIXL_ETCD_WATCH_TIMEOUT;
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    cfg.enableDeviceProxy = true;
+    required_proxy_channels = require_explicit_proxy_lane_ceiling(proxy_lane_ceiling);
+    configured_proxy_channels = static_cast<int>(
+        proxy_channel_count_for_lane_ceiling(required_proxy_channels));
+    proxy_worker_count = 1;
+    cfg.proxyWorkerCount = static_cast<uint32_t>(proxy_worker_count);
+    cfg.proxyChannelCount = static_cast<uint32_t>(configured_proxy_channels);
+#endif
     auto agent = std::make_shared<nixlAgent>(agent_name, cfg);
 
     // Create UCX backend
@@ -1443,6 +1647,7 @@ static std::optional<std::vector<nixl_blob_t>> convert_mds(const std::optional<s
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.doc() = "NIXL_EP: an efficient expert-parallel communication library";
     m.def("get_low_latency_buffer_size_hint", &nixl_ep::get_low_latency_buffer_size_hint);
+    m.def("get_gpu_device_api_backend", &nixl_ep::get_gpu_device_api_backend);
 
     pybind11::class_<nixl_ep::Config>(m, "Config")
         .def(pybind11::init<int, int, int, int, int>(),
@@ -1458,7 +1663,9 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
 
     pybind11::class_<nixl_ep::Buffer>(m, "Buffer")
         .def(pybind11::init<int, bool, bool, int>())
-        .def("update_memory_buffers", &nixl_ep::Buffer::update_memory_buffers)
+        .def("update_memory_buffers", &nixl_ep::Buffer::update_memory_buffers,
+             py::arg("num_ranks"), py::arg("num_experts_per_rank"), py::arg("num_rdma_bytes"),
+             py::arg("num_nvl_bytes") = 0, py::arg("proxy_lane_ceiling") = std::nullopt)
         .def("barrier", &nixl_ep::Buffer::barrier)
         .def("connect_ranks", [](nixl_ep::Buffer &buffer, const std::vector<int>& remote_ranks, const std::optional<std::vector<pybind11::bytes>>& remote_mds, const std::vector<std::optional<pybind11::bytearray>> &all_gathered_handles, bool activate) {
             buffer.connect_ranks(remote_ranks, nixl_ep::convert_mds(remote_mds), all_gathered_handles, activate);
@@ -1472,6 +1679,15 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         .def("get_local_ipc_handle", &nixl_ep::Buffer::get_local_ipc_handle)
         .def("get_local_buffer_tensor", &nixl_ep::Buffer::get_local_buffer_tensor)
         .def("get_comm_stream", &nixl_ep::Buffer::get_comm_stream)
+        .def("get_proxy_activity_count", &nixl_ep::Buffer::get_proxy_activity_count)
+        .def("reset_proxy_activity_count", &nixl_ep::Buffer::reset_proxy_activity_count)
+        .def("get_ll_all_rdma_fallback_count", &nixl_ep::Buffer::get_ll_all_rdma_fallback_count)
+        .def("reset_ll_all_rdma_fallback_count", &nixl_ep::Buffer::reset_ll_all_rdma_fallback_count)
+        .def("is_proxy_context_published", &nixl_ep::Buffer::is_proxy_context_published)
+        .def("get_proxy_context_owner_id", &nixl_ep::Buffer::get_proxy_context_owner_id)
+        .def("get_required_proxy_channels", &nixl_ep::Buffer::get_required_proxy_channels)
+        .def("get_configured_proxy_channels", &nixl_ep::Buffer::get_configured_proxy_channels)
+        .def("get_proxy_worker_count", &nixl_ep::Buffer::get_proxy_worker_count)
         .def("destroy", &nixl_ep::Buffer::destroy)
         .def("get_dispatch_layout", &nixl_ep::Buffer::get_dispatch_layout)
         .def("dispatch", &nixl_ep::Buffer::dispatch)

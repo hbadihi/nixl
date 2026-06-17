@@ -46,6 +46,7 @@ struct gpu_nixl_ctx {
     uint64_t *last_ht_barrier_counter;
     uint64_t *local_ht_barrier_counter_ptr;
     void *rdma_buffer_ptr;
+    uint64_t *ll_all_rdma_fallback_counter;
     int max_num_ranks;
     int num_rdma_ranks;
     int rank;
