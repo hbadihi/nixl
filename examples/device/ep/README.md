@@ -39,7 +39,7 @@ buffer.disconnect_ranks(ranks)
 ## Key APIs
 
 - `Buffer(rank_id, ...)`: Initialize the NIXL communication buffer
-- `update_memory_buffers(num_ranks, num_experts_per_rank, num_rdma_bytes, num_nvl_bytes=0)`: Prepare buffers for up to `num_ranks` ranks and `num_experts_per_rank` experts
+- `update_memory_buffers(num_ranks, num_experts_per_rank, num_rdma_bytes, num_nvl_bytes=0, proxy_lane_ceiling=None)`: Prepare buffers for up to `num_ranks` ranks and `num_experts_per_rank` experts. Proxy builds require a positive `proxy_lane_ceiling`; optional `NIXL_EP_PROXY_CHANNELS` must be a positive integer at least that large.
 - `connect_ranks(remote_ranks, activate=True)`: Establish NIXL connections to new peers (can be called multiple times); in low-latency mode, use `activate=False` to keep new peers masked until explicitly unmasked.
 - `disconnect_ranks(remote_ranks)`: Clean up connections to departing peers
 

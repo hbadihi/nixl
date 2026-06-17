@@ -26,5 +26,6 @@ from .utils import EventOverlap
 
 topk_idx_t = getattr(_nixl_ep_cpp, "topk_idx_t", torch.int64)
 Config = _nixl_ep_cpp.Config
+get_gpu_device_api_backend = _nixl_ep_cpp.get_gpu_device_api_backend
 
-__all__ = ["Buffer", "EventOverlap", "Config"]
+__all__ = ["Buffer", "EventOverlap", "Config", "get_gpu_device_api_backend"]
