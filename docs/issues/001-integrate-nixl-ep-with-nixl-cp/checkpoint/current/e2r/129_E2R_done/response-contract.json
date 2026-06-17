@@ -1,0 +1,17 @@
+{
+  "accepted_response_kinds": [
+    "recovery_ack"
+  ],
+  "accepted_relay_statuses": [
+    "completed",
+    "cancelled"
+  ],
+  "required_control_fields_by_relay_status": {
+    "completed": [
+      "decision"
+    ],
+    "cancelled": [
+      "reason"
+    ]
+  }
+}

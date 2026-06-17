@@ -1,0 +1,7 @@
+pipeline_id: 001-integrate-nixl-ep-with-nixl-cp
+skill: wf-feature
+stage: done
+created_at: '2026-06-16T13:10:00Z'
+created_by: tdavidor
+host: adv-dev-420
+latest_e2r: 129_E2R_done/protocol.json

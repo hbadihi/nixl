@@ -1,0 +1,6 @@
+{
+  "error_code": "PIPELINE-TERMINAL-FAILED",
+  "message": "Pipeline failed before completion",
+  "notice_kind": "error",
+  "schema_version": 1
+}
