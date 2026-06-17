@@ -17,6 +17,7 @@
 #ifndef NIXL_SRC_CORE_DEVICE_PROXY_PROXY_RUNTIME_H
 #define NIXL_SRC_CORE_DEVICE_PROXY_PROXY_RUNTIME_H
 
+#include <atomic>
 #include <cstdint>
 #include <deque>
 #include <memory>
@@ -283,6 +284,12 @@ class nixlProxyRuntime {
         nixlProxyDeviceContextData *
         deviceContext() const { return device_context_; }
 
+        uint64_t
+        submittedWorkCount() const;
+
+        void
+        resetSubmittedWorkCount();
+
     private:
         void
         joinWorkerThreads() noexcept;
@@ -298,6 +305,7 @@ class nixlProxyRuntime {
         uint32_t *shutdown_word_dev_  = nullptr;
         uint32_t ring_depth_ = kDefaultProxyRingDepth;
         bool workers_started_ = false;
+        std::atomic<uint64_t> submitted_work_count_{0};
 };
 
 #endif // NIXL_SRC_CORE_DEVICE_PROXY_PROXY_RUNTIME_H

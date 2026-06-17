@@ -26,13 +26,15 @@ ProxyWorker::ProxyWorker(nixlDeviceProxyBackendAdapter *backend,
                          uint32_t *shutdown_word,
                          nixlProxyChannelState *assigned_channels,
                          uint32_t assigned_channel_count,
-                         uint64_t pthr_delay_us) noexcept
+                         uint64_t pthr_delay_us,
+                         std::atomic<uint64_t> *submitted_work_count) noexcept
     : backend_(backend),
       proxy_memview_registry_(proxy_memview_registry),
       shutdown_word_(shutdown_word),
       assigned_channels_(assigned_channels),
       assigned_channel_count_(assigned_channel_count),
-      pthr_delay_us_(pthr_delay_us) {}
+      pthr_delay_us_(pthr_delay_us),
+      submitted_work_count_(submitted_work_count) {}
 
 ProxyWorker::~ProxyWorker() {
     join();
@@ -129,6 +131,9 @@ ProxyWorker::submitToBackend(nixlProxyChannelState &channel, const nixlProxySubm
     uint64_t request_token = 0;
     nixlProxyRequestState inflight{};
     inflight.op_idx = submission.op_idx;
+    if (submitted_work_count_ != nullptr) {
+        submitted_work_count_->fetch_add(1, std::memory_order_relaxed);
+    }
     status = backend_->submit(prepared_submission, request_token);
     inflight.backend_req_token = request_token;
     if (status != NIXL_SUCCESS) {

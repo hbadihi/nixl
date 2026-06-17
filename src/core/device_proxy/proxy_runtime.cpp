@@ -564,6 +564,7 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
 
     backend_ = std::move(backend);
     memview_registry_.clear();
+    resetSubmittedWorkCount();
 
     if (cudaMallocHost(reinterpret_cast<void **>(&shutdown_word_host_),
                        sizeof(uint32_t)) != cudaSuccess) {
@@ -688,7 +689,8 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
             shutdown_word_host_,
             &channels_[first_ch],
             n_ch,
-            pthr_delay_us));
+            pthr_delay_us,
+            &submitted_work_count_));
     }
 
     NIXL_INFO << "ProxyRuntime::init: complete — "
@@ -696,6 +698,16 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
               << worker_count << " workers, "
               << "device_context(dev)=" << device_context_;
     return NIXL_SUCCESS;
+}
+
+uint64_t
+nixlProxyRuntime::submittedWorkCount() const {
+    return submitted_work_count_.load(std::memory_order_relaxed);
+}
+
+void
+nixlProxyRuntime::resetSubmittedWorkCount() {
+    submitted_work_count_.store(0, std::memory_order_relaxed);
 }
 
 nixl_status_t

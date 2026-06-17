@@ -17,6 +17,7 @@
 #ifndef NIXL_SRC_CORE_DEVICE_PROXY_PROXY_WORKER_H
 #define NIXL_SRC_CORE_DEVICE_PROXY_PROXY_WORKER_H
 
+#include <atomic>
 #include <cstdint>
 #include <thread>
 #include "proxy_protocol.h"
@@ -32,7 +33,8 @@ class ProxyWorker {
                     uint32_t *shutdown_word,
                     nixlProxyChannelState *assigned_channels,
                     uint32_t assigned_channel_count,
-                    uint64_t pthr_delay_us) noexcept;
+                    uint64_t pthr_delay_us,
+                    std::atomic<uint64_t> *submitted_work_count) noexcept;
         ~ProxyWorker();
 
         void start(uint32_t worker_idx);
@@ -60,6 +62,7 @@ class ProxyWorker {
         nixlProxyChannelState *assigned_channels_ = nullptr;
         uint32_t assigned_channel_count_ = 0;
         uint64_t pthr_delay_us_ = 0;
+        std::atomic<uint64_t> *submitted_work_count_ = nullptr;
         std::thread thread_;
 };
 

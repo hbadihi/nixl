@@ -348,6 +348,21 @@ nixlAgent::getProxyDeviceContext() const {
     return nullptr;
 }
 
+uint64_t
+nixlAgent::getProxySubmittedWorkCount() const {
+    if (data->proxyRuntime) {
+        return data->proxyRuntime->submittedWorkCount();
+    }
+    return 0;
+}
+
+void
+nixlAgent::resetProxySubmittedWorkCount() const {
+    if (data->proxyRuntime) {
+        data->proxyRuntime->resetSubmittedWorkCount();
+    }
+}
+
 nixl_status_t
 nixlAgent::createBackend(const nixl_backend_t &type,
                          const nixl_b_params_t &params,

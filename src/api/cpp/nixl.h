@@ -571,6 +571,19 @@ class nixlAgent {
         void *
         getProxyDeviceContext() const;
 
+        /**
+         * @brief  Return/reset the validation-only proxy backend submission count.
+         *
+         * The count increments when the device proxy worker submits a prepared
+         * work record to its backend adapter. It is zero when proxy mode is not
+         * active.
+         */
+        uint64_t
+        getProxySubmittedWorkCount() const;
+
+        void
+        resetProxySubmittedWorkCount() const;
+
 };
 
 #endif

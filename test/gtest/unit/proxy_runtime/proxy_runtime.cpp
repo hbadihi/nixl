@@ -152,6 +152,17 @@ TEST_F(ProxyRuntimeTest, InitSetsChannelCount) {
     EXPECT_EQ(runtime_.channelCount(), 4u);
 }
 
+TEST_F(ProxyRuntimeTest, RuntimeCreationDoesNotIncrementActivityCounter) {
+    ASSERT_EQ(initRuntime(2, 1), NIXL_SUCCESS);
+    EXPECT_EQ(runtime_.submittedWorkCount(), 0u);
+    ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+    EXPECT_EQ(runtime_.submittedWorkCount(), 0u);
+    ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
+}
+
 TEST_F(ProxyRuntimeTest, DeviceChannelViewsPopulated) {
     ASSERT_EQ(initRuntime(3, 1), NIXL_SUCCESS);
     const nixlProxyChannelView *views = runtime_.deviceChannelViews();
@@ -421,6 +432,10 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedTransportDescriptors) {
         submissions = backend_->submissions_;
     }
 
+    EXPECT_EQ(runtime_.submittedWorkCount(), 1u);
+    runtime_.resetSubmittedWorkCount();
+    EXPECT_EQ(runtime_.submittedWorkCount(), 0u);
+
     ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
 
     ASSERT_EQ(submissions.size(), 1u);
@@ -491,6 +506,8 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedAtomicAddDescriptor) {
         std::lock_guard<std::mutex> lock(backend_->submit_mutex_);
         submissions = backend_->submissions_;
     }
+
+    EXPECT_EQ(runtime_.submittedWorkCount(), 1u);
 
     ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
 
