@@ -27,6 +27,7 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "elastic"))
 # noinspection PyUnresolvedReferences
 import nixl_ep  # noqa: E402
+import proxy_evidence  # noqa: E402
 import store_group  # noqa: E402
 import torch  # noqa: E402
 import torch.distributed as dist  # noqa: E402
@@ -43,6 +44,40 @@ from utils import (  # noqa: E402
 )
 
 TCP_STORE_PORT = 9999
+
+
+def write_ht_evidence(
+    args: argparse.Namespace,
+    buffer: nixl_ep.Buffer,
+    rank: int,
+    num_nodes: int,
+    num_qps_per_rank: int,
+    correctness: str,
+) -> None:
+    if not args.evidence_output:
+        return
+
+    validation_path = "ht_proxy_smoke" if args.proxy_smoke else "ht_two_node_rdma"
+    activity_count = buffer.get_proxy_activity_count()
+    record = proxy_evidence.make_ep_proxy_evidence(
+        backend=nixl_ep.get_gpu_device_api_backend(),
+        rank=rank,
+        validation_path=validation_path,
+        correctness=correctness,
+        proxy_activity_submitted_work_count=activity_count,
+        proxy_context_published=buffer.is_proxy_context_published(),
+        proxy_context_owner_id=buffer.get_proxy_context_owner_id(),
+        proxy_worker_count=buffer.get_proxy_worker_count(),
+        proxy_channel_count=buffer.get_configured_proxy_channels(),
+        required_proxy_channels=num_qps_per_rank,
+        extra={
+            "num_nodes": num_nodes,
+            "unsupported_single_node_fallback": (
+                validation_path == "ht_two_node_rdma" and num_nodes == 1
+            ),
+        },
+    )
+    proxy_evidence.write_evidence_record(record, args.evidence_output, rank=rank)
 
 
 # noinspection PyShadowingNames
@@ -65,7 +100,11 @@ def test_main(
         args.num_experts,
     )
 
-    assert num_experts % num_ranks == 0 and num_local_ranks == 8
+    assert num_experts % num_ranks == 0
+    if args.proxy_smoke:
+        assert num_ranks > 8 and num_ranks % 8 == 0
+    else:
+        assert num_local_ranks == 8 and num_ranks > 8
     if local_rank == 0:
         print(
             f"[config] num_tokens={num_tokens}, hidden={hidden}, num_topk_groups={num_topk_groups}, num_topk={num_topk}",
@@ -487,26 +526,41 @@ def test_loop(local_rank: int, num_local_ranks: int, args: argparse.Namespace):
         num_experts_per_rank=num_qps_per_rank,
         num_nvl_bytes=int(2e9),
         num_rdma_bytes=int(1e9),
+        proxy_lane_ceiling=num_qps_per_rank,
     )
     buffer.connect_ranks([i for i in range(num_ranks) if i != rank])
 
-    assert num_local_ranks == 8 and num_ranks > 8
+    if args.proxy_smoke:
+        assert num_ranks > 8 and num_ranks % 8 == 0
+    else:
+        assert num_local_ranks == 8 and num_ranks > 8
     torch.manual_seed(rank)
 
-    for i in (num_sms,):
-        test_main(
-            args,
-            i,
-            local_rank,
-            num_local_ranks,
-            num_ranks,
-            num_nodes,
-            rank,
-            buffer,
-            group,
+    buffer.reset_proxy_activity_count()
+    try:
+        for i in (num_sms,):
+            test_main(
+                args,
+                i,
+                local_rank,
+                num_local_ranks,
+                num_ranks,
+                num_nodes,
+                rank,
+                buffer,
+                group,
+            )
+            if local_rank == 0:
+                print("", flush=True)
+    except BaseException:
+        write_ht_evidence(
+            args, buffer, rank, num_nodes, num_qps_per_rank, correctness="fail"
         )
-        if local_rank == 0:
-            print("", flush=True)
+        raise
+    else:
+        write_ht_evidence(
+            args, buffer, rank, num_nodes, num_qps_per_rank, correctness="pass"
+        )
 
     # Destroy the buffer runtime and communication group
     buffer.destroy()
@@ -521,19 +575,25 @@ def run_server():
         time.sleep(1)
 
 
-if __name__ == "__main__":
+def main(default_proxy_smoke: bool = False):
     parser = argparse.ArgumentParser(description="Test high-throughput EP kernels")
     parser.add_argument(
         "--num-processes",
         type=int,
-        default=8,
-        help="Number of processes to spawn (default: 8)",
+        default=16 if default_proxy_smoke else 8,
+        help="Number of processes to spawn (default: 16 for proxy smoke, otherwise 8)",
     )
     parser.add_argument(
-        "--num-tokens", type=int, default=4096, help="Number of tokens (default: 4096)"
+        "--num-tokens",
+        type=int,
+        default=512 if default_proxy_smoke else 4096,
+        help="Number of tokens",
     )
     parser.add_argument(
-        "--hidden", type=int, default=7168, help="Hidden dimension size (default: 7168)"
+        "--hidden",
+        type=int,
+        default=2048 if default_proxy_smoke else 7168,
+        help="Hidden dimension size",
     )
     parser.add_argument(
         "--num-topk-groups",
@@ -557,6 +617,17 @@ if __name__ == "__main__":
         type=str,
         help="TCP server address (for both TCPStore and rank server). If not set, both will be started locally.",
     )
+    parser.add_argument(
+        "--proxy-smoke",
+        action="store_true",
+        default=default_proxy_smoke,
+        help="classify the run as the dedicated HT proxy smoke evidence path",
+    )
+    parser.add_argument(
+        "--evidence-output",
+        type=str,
+        help="write ep_proxy_evidence_v1 JSON evidence records; per-rank suffixes are added",
+    )
     args = parser.parse_args()
 
     if not args.tcp_server:
@@ -576,3 +647,7 @@ if __name__ == "__main__":
     torch.multiprocessing.spawn(
         test_loop, args=(num_processes, args), nprocs=num_processes
     )
+
+
+if __name__ == "__main__":
+    main()
