@@ -1,0 +1,1898 @@
+{
+  "pipeline_id": "001-integrate-nixl-ep-with-nixl-cp",
+  "issue_title": "Integrate NIXL EP with NIXL CPU Proxy",
+  "issue_type": "feature",
+  "scope": ".",
+  "mode": "standard",
+  "current_state": "done",
+  "fsm_stack": [],
+  "topology": "topology_new_feature_detailed__interactive",
+  "history": [
+    {
+      "state": "ask_project_root",
+      "entered_at": "2026-06-09T11:24:54Z"
+    },
+    {
+      "state": "qa_branch_strategy",
+      "entered_at": "2026-06-09T11:27:59Z"
+    },
+    {
+      "state": "execute_branch_strategy",
+      "entered_at": "2026-06-09T11:28:00Z"
+    },
+    {
+      "state": "qa_init_calibration",
+      "entered_at": "2026-06-09T11:39:29Z"
+    },
+    {
+      "state": "qa_brainstorm",
+      "entered_at": "2026-06-09T11:48:10Z"
+    },
+    {
+      "state": "codebase_scan",
+      "entered_at": "2026-06-09T11:48:37Z"
+    },
+    {
+      "state": "run_topology",
+      "entered_at": "2026-06-09T11:48:37Z"
+    },
+    {
+      "state": "discuss_goal",
+      "entered_at": "2026-06-09T12:17:45Z"
+    },
+    {
+      "state": "goal",
+      "entered_at": "2026-06-09T12:17:45Z"
+    },
+    {
+      "state": "write_doc",
+      "entered_at": "2026-06-09T12:22:47Z"
+    },
+    {
+      "state": "r3_review",
+      "entered_at": "2026-06-09T12:22:47Z"
+    },
+    {
+      "state": "fan_out",
+      "entered_at": "2026-06-09T12:36:26Z"
+    },
+    {
+      "state": "check",
+      "entered_at": "2026-06-09T12:36:27Z"
+    },
+    {
+      "state": "fix",
+      "entered_at": "2026-06-09T12:41:31Z"
+    },
+    {
+      "state": "fan_out",
+      "entered_at": "2026-06-09T12:41:31Z"
+    },
+    {
+      "state": "approve_gate_goal",
+      "entered_at": "2026-06-09T12:45:14Z"
+    },
+    {
+      "state": "discuss_use_cases",
+      "entered_at": "2026-06-09T16:32:42Z"
+    },
+    {
+      "state": "use_cases",
+      "entered_at": "2026-06-09T16:32:42Z"
+    },
+    {
+      "state": "write_doc",
+      "entered_at": "2026-06-09T16:36:49Z"
+    },
+    {
+      "state": "r3_review",
+      "entered_at": "2026-06-09T16:36:49Z"
+    },
+    {
+      "state": "fan_out",
+      "entered_at": "2026-06-09T16:48:25Z"
+    },
+    {
+      "state": "check",
+      "entered_at": "2026-06-09T16:48:25Z"
+    },
+    {
+      "state": "fix",
+      "entered_at": "2026-06-09T16:54:37Z"
+    },
+    {
+      "state": "fan_out",
+      "entered_at": "2026-06-09T16:54:38Z"
+    },
+    {
+      "state": "approve_gate_use_cases",
+      "entered_at": "2026-06-10T07:41:15Z"
+    },
+    {
+      "state": "discuss_architecture_hld",
+      "entered_at": "2026-06-10T08:12:40Z"
+    },
+    {
+      "state": "architecture_hld",
+      "entered_at": "2026-06-10T08:12:41Z"
+    },
+    {
+      "state": "write_doc",
+      "entered_at": "2026-06-10T08:18:13Z"
+    },
+    {
+      "state": "r3_review",
+      "entered_at": "2026-06-10T08:18:13Z"
+    },
+    {
+      "state": "fan_out",
+      "entered_at": "2026-06-10T08:33:18Z"
+    },
+    {
+      "state": "check",
+      "entered_at": "2026-06-10T08:33:18Z"
+    },
+    {
+      "state": "fix",
+      "entered_at": "2026-06-10T08:39:57Z"
+    },
+    {
+      "state": "fan_out",
+      "entered_at": "2026-06-10T08:39:57Z"
+    },
+    {
+      "state": "approve_gate_architecture_hld",
+      "entered_at": "2026-06-10T08:43:03Z"
+    },
+    {
+      "state": "discuss_architecture_lld",
+      "entered_at": "2026-06-10T10:14:22Z"
+    },
+    {
+      "state": "architecture_lld",
+      "entered_at": "2026-06-10T10:14:22Z"
+    },
+    {
+      "state": "write_doc",
+      "entered_at": "2026-06-10T10:20:26Z"
+    },
+    {
+      "state": "r3_review",
+      "entered_at": "2026-06-10T10:20:26Z"
+    },
+    {
+      "state": "fan_out",
+      "entered_at": "2026-06-10T10:32:39Z"
+    },
+    {
+      "state": "check",
+      "entered_at": "2026-06-10T10:32:40Z"
+    },
+    {
+      "state": "fix",
+      "entered_at": "2026-06-10T10:39:31Z"
+    },
+    {
+      "state": "fan_out",
+      "entered_at": "2026-06-10T10:39:31Z"
+    },
+    {
+      "state": "approve_gate_architecture_lld",
+      "entered_at": "2026-06-10T10:59:16Z"
+    },
+    {
+      "state": "discuss_tasks",
+      "entered_at": "2026-06-10T11:16:50Z"
+    },
+    {
+      "state": "tasks",
+      "entered_at": "2026-06-10T11:17:11Z"
+    },
+    {
+      "state": "approve_gate_tasks",
+      "entered_at": "2026-06-10T11:27:56Z"
+    },
+    {
+      "state": "create_issue",
+      "entered_at": "2026-06-10T11:27:56Z"
+    },
+    {
+      "state": "implementation",
+      "entered_at": "2026-06-10T11:27:56Z"
+    },
+    {
+      "state": "next_wave",
+      "entered_at": "2026-06-10T11:35:43Z"
+    },
+    {
+      "state": "verify",
+      "entered_at": "2026-06-10T11:41:48Z"
+    },
+    {
+      "state": "verify_gate",
+      "entered_at": "2026-06-10T11:41:48Z"
+    },
+    {
+      "state": "implementation",
+      "entered_at": "2026-06-10T11:41:48Z"
+    },
+    {
+      "state": "next_wave",
+      "entered_at": "2026-06-10T11:54:00Z"
+    },
+    {
+      "state": "verify",
+      "entered_at": "2026-06-10T12:02:09Z"
+    },
+    {
+      "state": "verify_gate",
+      "entered_at": "2026-06-10T12:02:09Z"
+    },
+    {
+      "state": "pause_verify_fail",
+      "entered_at": "2026-06-10T12:07:09Z"
+    },
+    {
+      "state": "implementation",
+      "entered_at": "2026-06-10T12:07:10Z"
+    },
+    {
+      "state": "next_wave",
+      "entered_at": "2026-06-10T12:16:27Z"
+    },
+    {
+      "state": "verify",
+      "entered_at": "2026-06-10T12:24:51Z"
+    },
+    {
+      "state": "verify_gate",
+      "entered_at": "2026-06-10T12:24:51Z"
+    },
+    {
+      "state": "pause_verify_fail",
+      "entered_at": "2026-06-10T12:26:32Z"
+    },
+    {
+      "state": "implementation",
+      "entered_at": "2026-06-10T12:26:32Z"
+    },
+    {
+      "state": "next_wave",
+      "entered_at": "2026-06-10T12:38:56Z"
+    },
+    {
+      "state": "verify",
+      "entered_at": "2026-06-10T12:47:28Z"
+    },
+    {
+      "state": "verify_gate",
+      "entered_at": "2026-06-10T12:47:28Z"
+    },
+    {
+      "state": "pause_verify_fail",
+      "entered_at": "2026-06-10T12:47:43Z"
+    },
+    {
+      "state": "implementation",
+      "entered_at": "2026-06-10T12:47:43Z"
+    },
+    {
+      "state": "next_wave",
+      "entered_at": "2026-06-10T13:09:18Z"
+    },
+    {
+      "state": "verify",
+      "entered_at": "2026-06-10T13:21:06Z"
+    },
+    {
+      "state": "verify_gate",
+      "entered_at": "2026-06-10T13:21:07Z"
+    },
+    {
+      "state": "pause_verify_fail",
+      "entered_at": "2026-06-10T14:49:49Z"
+    },
+    {
+      "state": "implementation",
+      "entered_at": "2026-06-10T14:49:49Z"
+    },
+    {
+      "state": "next_wave",
+      "entered_at": "2026-06-10T14:56:07Z"
+    },
+    {
+      "state": "verify",
+      "entered_at": "2026-06-10T15:10:29Z"
+    },
+    {
+      "state": "verify_gate",
+      "entered_at": "2026-06-10T15:10:30Z"
+    },
+    {
+      "state": "pause_verify_fail",
+      "entered_at": "2026-06-10T15:44:58Z"
+    },
+    {
+      "state": "implementation",
+      "entered_at": "2026-06-10T15:44:58Z"
+    },
+    {
+      "state": "next_wave",
+      "entered_at": "2026-06-10T15:49:17Z"
+    },
+    {
+      "state": "verify",
+      "entered_at": "2026-06-10T16:24:08Z"
+    },
+    {
+      "state": "verify_gate",
+      "entered_at": "2026-06-10T16:24:09Z"
+    },
+    {
+      "state": "pause_verify_fail",
+      "entered_at": "2026-06-10T18:12:23Z"
+    },
+    {
+      "state": "implementation",
+      "entered_at": "2026-06-10T18:12:23Z"
+    },
+    {
+      "state": "next_wave",
+      "entered_at": "2026-06-10T18:31:12Z"
+    },
+    {
+      "state": "verify",
+      "entered_at": "2026-06-10T18:51:59Z"
+    },
+    {
+      "state": "verify_gate",
+      "entered_at": "2026-06-10T18:52:00Z"
+    },
+    {
+      "state": "pause_verify_fail",
+      "entered_at": "2026-06-10T19:01:28Z"
+    },
+    {
+      "state": "implementation",
+      "entered_at": "2026-06-10T19:01:28Z"
+    },
+    {
+      "state": "next_wave",
+      "entered_at": "2026-06-10T19:20:28Z"
+    },
+    {
+      "state": "verify",
+      "entered_at": "2026-06-10T19:42:04Z"
+    },
+    {
+      "state": "verify_gate",
+      "entered_at": "2026-06-10T19:42:04Z"
+    },
+    {
+      "state": "pause_verify_fail",
+      "entered_at": "2026-06-10T21:04:00Z"
+    },
+    {
+      "state": "implementation",
+      "entered_at": "2026-06-10T21:04:01Z"
+    },
+    {
+      "state": "next_wave",
+      "entered_at": "2026-06-10T21:23:36Z"
+    },
+    {
+      "state": "verify",
+      "entered_at": "2026-06-10T21:31:42Z"
+    },
+    {
+      "state": "verify_gate",
+      "entered_at": "2026-06-10T21:31:42Z"
+    },
+    {
+      "state": "pause_verify_fail",
+      "entered_at": "2026-06-11T06:59:38Z"
+    },
+    {
+      "state": "implementation",
+      "entered_at": "2026-06-11T06:59:38Z"
+    },
+    {
+      "state": "next_wave",
+      "entered_at": "2026-06-11T07:19:27Z"
+    },
+    {
+      "state": "verify",
+      "entered_at": "2026-06-11T07:39:06Z"
+    },
+    {
+      "state": "verify_gate",
+      "entered_at": "2026-06-11T07:39:07Z"
+    },
+    {
+      "state": "pause_verify_fail",
+      "entered_at": "2026-06-11T08:01:12Z"
+    },
+    {
+      "state": "implementation",
+      "entered_at": "2026-06-11T08:01:12Z"
+    },
+    {
+      "state": "next_wave",
+      "entered_at": "2026-06-11T08:47:27Z"
+    },
+    {
+      "state": "verify",
+      "entered_at": "2026-06-11T08:54:00Z"
+    },
+    {
+      "state": "verify_gate",
+      "entered_at": "2026-06-11T08:54:00Z"
+    },
+    {
+      "state": "pause_verify_fail",
+      "entered_at": "2026-06-16T13:08:01Z"
+    },
+    {
+      "state": "finalize",
+      "entered_at": "2026-06-16T13:08:01Z"
+    }
+  ],
+  "qa_answers": {
+    "ask_project_root": {
+      "I0": "/scrap/cpu-proxy/nixl"
+    },
+    "qa_branch_strategy": {},
+    "qa_init_calibration": {
+      "COST": "High \u2014 maximum quality; strongest model/review budget",
+      "DOCS_SET": "High-docs \u2014 full docs; architecture split into HLD + LLD",
+      "DOC_CONFIRM": "Looks good \u2014 use suggested set",
+      "GOV1": "Interactive [experimental] \u2014 we discuss each artifact together (mid-panel must_ask elicitation) before proceeding",
+      "REVIEWER_STRATEGY": "Max \u2014 full panel; most thorough",
+      "RUN_UI": "With UI \u2014 open/reuse the local Run UI for progress and debug visibility",
+      "SUBAGENT_APPROVAL": "Yes - allow relay-local sub-agents for pipeline jobs",
+      "VERBOSITY": "High-verb \u2014 full coverage; context included"
+    },
+    "qa_brainstorm": {
+      "F1": "Integrate the NIXL EP example with the NIXL CPU Proxy GPU device backend for a correctness-first Phase 1. The initial target is EP running through CPU proxy with 1 proxy worker and N proxy channels, where N covers EP's logical lanes; performance scaling is deferred.",
+      "F2": "Phase 1 should mainly impact examples/device/ep/meson.build, examples/device/ep/csrc/nixl_ep.cpp, and a new proxy context publish wrapper under examples/device/ep/csrc/kernels/. It should consume existing proxy APIs in src/api/gpu/proxy/, src/core/device_proxy/, and src/plugins/ucx/device_proxy/ without changing CPU proxy internals. Phase 1.5 can then address internal CPU proxy infrastructure for multiple workers/channels and channel-to-backend-worker mapping.",
+      "F3": "No new third-party dependency is expected for Phase 1. The integration depends on existing CUDA device linking, the NIXL GPU Device API proxy backend, the UCX backend/provider, and EP's CUDA/UCX test environment. Validation should use separate UCX-direct and proxy builds, with correctness as the Phase 1 gate.",
+      "F4": "Reference ep-integ-plan.md, but treat it as a staged plan: Phase 1 is correctness-only EP-on-proxy with proxyWorkerCount=1 and proxyChannelCount=N; Phase 1.5 is CPU proxy infrastructure improvement for multiple workers/channels; Phase 2 is optional nixlGetPtr/NVLink P2P restoration after correctness and baseline behavior are understood."
+    },
+    "discuss_goal": {
+      "issues_found": 4,
+      "issues": [
+        {
+          "title": "Phase 1 acceptance boundary",
+          "decision": "Phase 1 is accepted on EP-on-proxy correctness only; performance comparison is a separate follow-on step.",
+          "flagged": false
+        },
+        {
+          "title": "Validation topology",
+          "decision": "Single-node multi-process validation is the initial Phase 1 completion target; two-node proxy RDMA validation follows later.",
+          "flagged": false
+        },
+        {
+          "title": "Deferred proxy and LL work",
+          "decision": "Multi-worker proxy scaling is Phase 1.5, and proxy nixlGetPtr/NVLink P2P restoration is Phase 2.",
+          "flagged": false
+        },
+        {
+          "title": "Remaining validation evidence detail",
+          "decision": "Later stages must define concrete evidence that the proxy path and elastic LL all-RDMA fallback were exercised.",
+          "flagged": true
+        }
+      ],
+      "open_topics": [
+        "Define exact evidence for proxy all-RDMA fallback in elastic LL.",
+        "Define acceptable reduced-size EP validation configs if one-worker proxy mode times out at default sizes.",
+        "Verify the channel-count formula for HT and LL against current kernel channel-id usage."
+      ],
+      "requires_goal_reopen": false
+    },
+    "discuss_use_cases": {
+      "issues_found": 5,
+      "issues": [
+        {
+          "title": "HT Phase 1 evidence path",
+          "decision": "An explicitly added HT-compatible proxy smoke can satisfy initial Phase 1 HT acceptance; two-node RDMA validation is follow-on.",
+          "flagged": false
+        },
+        {
+          "title": "Elastic LL fallback evidence",
+          "decision": "LL fallback evidence should combine proxy backend selection, proxy worker activity during LL, and an explicit all-RDMA fallback branch log/counter.",
+          "flagged": false
+        },
+        {
+          "title": "Reduced-size timeout criteria",
+          "decision": "The user skipped this question; later architecture/tasks must define minimum reduced configurations before relying on reduced-size runs.",
+          "flagged": true
+        },
+        {
+          "title": "UCX-direct stability evidence",
+          "decision": "UCX-direct stability is proven by a small smoke/regression only, separate from any UCX-vs-proxy comparison.",
+          "flagged": false
+        },
+        {
+          "title": "Phase 1 actors",
+          "decision": "Phase 1 use cases are manual maintainer actions only; CI/scheduler is not a v1 actor.",
+          "flagged": false
+        }
+      ],
+      "open_topics": [
+        "Define minimum reduced-size EP configurations that still prove proxy correctness if one-worker default runs time out.",
+        "Define the exact LL fallback log/counter implementation surface.",
+        "Define the exact HT-compatible proxy smoke path."
+      ],
+      "requires_goal_reopen": false
+    },
+    "discuss_architecture_hld": {
+      "issues_found": 6,
+      "issues": [
+        {
+          "title": "Phase 1 HLD placement",
+          "decision": "Keep Phase 1 inside the existing EP rank process and NIXL agent-owned CPU proxy runtime; do not add a daemon, service, scheduler, runtime backend selector, or public Python workflow change.",
+          "flagged": false
+        },
+        {
+          "title": "Proxy worker and channel boundary",
+          "decision": "Use one proxy worker with N proxy channels, where N covers EP logical lanes; leave CPU proxy multi-worker/channel-to-worker scaling for Phase 1.5.",
+          "flagged": false
+        },
+        {
+          "title": "HT acceptance evidence",
+          "decision": "Phase 1 may accept a new explicit HT-compatible proxy smoke as the initial acceptance path; real two-node HT RDMA remains follow-on evidence.",
+          "flagged": false
+        },
+        {
+          "title": "Elastic LL fallback evidence",
+          "decision": "LL all-RDMA fallback evidence must be both EP-visible and proxy-runtime-visible; correctness without both evidence classes is inconclusive.",
+          "flagged": false
+        },
+        {
+          "title": "Invalid setup versus inconclusive evidence",
+          "decision": "Missing proxy setup/context, unsupported topology, and under-provisioned channels should hard-fail early; passing runs missing required evidence should be classified as inconclusive.",
+          "flagged": false
+        },
+        {
+          "title": "Remaining HLD detail for downstream docs",
+          "decision": "LLD/tasks must define the exact HT smoke shape, reduced-size correctness floor, instrumentation surfaces, and Phase 2 peer-pointer safety boundaries.",
+          "flagged": true
+        }
+      ],
+      "open_topics": [
+        "Define exact HT-compatible proxy smoke location and command shape.",
+        "Define minimum reduced-size HT/LL configurations before relying on reduced-size evidence.",
+        "Define concrete instrumentation surfaces for backend selection, proxy activity, channel coverage, and LL fallback signal.",
+        "Define Phase 2 peer-pointer safety boundaries before any proxy nixlGetPtr contract changes."
+      ],
+      "requires_goal_reopen": false
+    },
+    "discuss_architecture_lld": {
+      "issues_found": 6,
+      "issues": [
+        {
+          "title": "Proxy channel sizing contract",
+          "decision": "Derive cfg.proxyChannelCount from the allocation-time lane ceiling passed through update_memory_buffers(...); allow NIXL_EP_PROXY_CHANNELS as a proxy-only override that must be greater than or equal to required_proxy_channels.",
+          "flagged": false
+        },
+        {
+          "title": "Proxy publish and clear seam",
+          "decision": "Add proxy-mode CUDA wrappers for nixlProxyPublishContext and nixlProxyClearContext, called from the existing Buffer lifecycle after backend creation and before teardown.",
+          "flagged": false
+        },
+        {
+          "title": "Phase 1 runtime scope",
+          "decision": "Use one proxy worker with N proxy channels, keep UCX num_workers=1, and defer channel-to-worker routing, UCX worker/QP scaling, and multi-worker validation to Phase 1.5.",
+          "flagged": false
+        },
+        {
+          "title": "HT-compatible proxy smoke",
+          "decision": "Add a small dedicated HT proxy smoke under examples/device/ep/tests/, separate from the full two-node test_ht.py path.",
+          "flagged": false
+        },
+        {
+          "title": "Proxy evidence surface",
+          "decision": "Require structured ep_proxy_evidence_v1 output from EP validation, backed by lightweight runtime counters or deterministic logs for backend selection, proxy activity, and LL all-RDMA fallback.",
+          "flagged": false
+        },
+        {
+          "title": "Invalid or incomplete evidence classification",
+          "decision": "Fail early on invalid setup such as missing proxy context or under-provisioned channels; classify passing runs with missing proxy/fallback evidence as inconclusive.",
+          "flagged": false
+        }
+      ],
+      "open_topics": [
+        "Define the reduced-size validation floor before any downsized timeout-avoidance run can count as correctness evidence."
+      ],
+      "requires_goal_reopen": false
+    },
+    "discuss_tasks": {
+      "issues_found": 1,
+      "issues": [
+        {
+          "title": "Phase 1 HT validation path",
+          "decision": "Accept a dedicated single-node/multiprocess HT-compatible proxy smoke as the Phase 1 HT correctness artifact; defer real two-node RDMA validation to a later validation or performance artifact.",
+          "flagged": false
+        }
+      ],
+      "open_topics": [
+        "Exact HT smoke command/name to be pinned during implementation.",
+        "Exact placement of ep_proxy_evidence_v1 helper to follow local code constraints, defaulting to the EP validation/test surface.",
+        "Exact proxy activity reset/snapshot seam to be the smallest validation-visible surface that proves supported proxy submissions."
+      ],
+      "requires_goal_reopen": false
+    }
+  },
+  "knowledge_base": [
+    {
+      "id": "kb-001",
+      "path": "/scrap/cpu-proxy/nixl/.wf-dev/codebase/index.json",
+      "description": "Auto-generated codebase index (tree-sitter / AST scan)",
+      "tags": [
+        "codebase",
+        "auto-index",
+        "phase1"
+      ],
+      "added_by": "codebase_scan",
+      "added_at_state": "codebase_scan",
+      "added_at": "2026-06-09T11:48:37.764752+00:00",
+      "linked_qa": [
+        "KB1"
+      ],
+      "metadata": {}
+    }
+  ],
+  "loop_counts": {
+    "r3_review": 4
+  },
+  "project_path": "/scrap/cpu-proxy/nixl",
+  "pipeline_version": null,
+  "branch_name": null,
+  "worktree_path": null,
+  "git_strategy": "current_branch",
+  "gitlab_issue_iid": null,
+  "gitlab_issue_url": null,
+  "gitlab_mr_url": null,
+  "depends_on_pipelines": [],
+  "created": "2026-06-09T11:24:54Z",
+  "last_updated": "2026-06-16T13:10:00Z",
+  "wf_version": "0.3.0",
+  "capabilities": {
+    "host": {
+      "id": "codex"
+    },
+    "token_support": true
+  },
+  "token_metrics_available": true,
+  "relay_session_id": "/labhome/tdavidor/.codex/sessions/2026/06/09/rollout-2026-06-09T14-14-43-019eac17-8516-7641-a7ce-90db5f682a17.jsonl",
+  "run_ui_enabled": true,
+  "run_ui_open_browser": true,
+  "uc_type": "new_feature",
+  "is_terminal": true,
+  "terminal_states": [
+    "done",
+    "abandoned"
+  ],
+  "customization_binding": {
+    "schema_version": 1,
+    "status": "absent",
+    "skill_id": "wf-feature",
+    "applied": [],
+    "diagnostics": [],
+    "applied_count": 0,
+    "warning_count": 0,
+    "error_count": 0
+  },
+  "warnings": [],
+  "relay_usage_snapshots": {
+    "codex": {
+      "path": "/labhome/tdavidor/.codex/sessions/2026/06/09/rollout-2026-06-09T14-14-43-019eac17-8516-7641-a7ce-90db5f682a17.jsonl",
+      "total_token_usage": {
+        "input_tokens": 117376696,
+        "output_tokens": 359771,
+        "reasoning_output_tokens": 86748,
+        "cached_input_tokens": 111367680
+      }
+    }
+  },
+  "relay_codex_usage_snapshot": {
+    "path": "/labhome/tdavidor/.codex/sessions/2026/06/09/rollout-2026-06-09T14-14-43-019eac17-8516-7641-a7ce-90db5f682a17.jsonl",
+    "total_token_usage": {
+      "input_tokens": 117376696,
+      "output_tokens": 359771,
+      "reasoning_output_tokens": 86748,
+      "cached_input_tokens": 111367680
+    }
+  },
+  "integrity_status": {
+    "events": [
+      {
+        "category": "qa_answer",
+        "code": "QA-BRANCH-INVALID-STRATEGY",
+        "severity": "failure",
+        "terminal_significant": false,
+        "message": "[relay-protocol] Strategy 'new_branch' is not valid for git state 'feature_branch'",
+        "timestamp": "2026-06-09T11:26:17Z",
+        "source": "cli.next",
+        "state": "qa_branch_strategy",
+        "details": {
+          "recovery_hint": "Answer the latest branch-strategy E2R with one of the listed options that is valid for the current project git state.",
+          "resolved_by": "QA-BRANCH-INVALID-STRATEGY-RECOVERY-ACK",
+          "resolved_at": "2026-06-09T11:27:04Z"
+        }
+      },
+      {
+        "category": "qa_answer",
+        "code": "QA-BRANCH-INVALID-STRATEGY",
+        "severity": "failure",
+        "terminal_significant": false,
+        "message": "[relay-protocol] Strategy 'new_branch' is not valid for git state 'feature_branch'",
+        "timestamp": "2026-06-09T11:26:17Z",
+        "source": "cli.next",
+        "state": "qa_branch_strategy",
+        "details": {
+          "recovery_hint": "Answer the latest branch-strategy E2R with one of the listed options that is valid for the current project git state.",
+          "resolved_by": "QA-BRANCH-INVALID-STRATEGY-RECOVERY-ACK",
+          "resolved_at": "2026-06-09T11:27:04Z"
+        }
+      },
+      {
+        "category": "qa_answer",
+        "code": "QA-BRANCH-INVALID-STRATEGY-RECOVERED",
+        "severity": "clean",
+        "terminal_significant": false,
+        "message": "Recovery acknowledged for QA-BRANCH-INVALID-STRATEGY.",
+        "timestamp": "2026-06-09T11:27:04Z",
+        "source": "cli.next",
+        "state": "qa_branch_strategy",
+        "details": {
+          "resolved_by": "QA-BRANCH-INVALID-STRATEGY-RECOVERY-ACK",
+          "resolved_count": 2
+        }
+      },
+      {
+        "category": "verify_gate",
+        "code": "VERIFY-GATE-FIX_NEEDED",
+        "severity": "failure",
+        "terminal_significant": true,
+        "message": "verify_gate attempt 1 routed fix_needed with overall=FAIL",
+        "timestamp": "2026-06-10T11:41:48Z",
+        "source": "verify_gate",
+        "state": "verify_gate",
+        "details": {
+          "attempt": 1,
+          "overall": "FAIL",
+          "route_signal": "fix_needed",
+          "repair_strategy": "targeted",
+          "recovered_verify_evidence": 0,
+          "recovered_verify_gate": 0
+        }
+      },
+      {
+        "category": "verify_gate",
+        "code": "VERIFY-GATE-HUMAN_GATE",
+        "severity": "failure",
+        "terminal_significant": true,
+        "message": "verify_gate attempt 2 routed human_gate with overall=FAIL",
+        "timestamp": "2026-06-10T12:02:09Z",
+        "source": "verify_gate",
+        "state": "verify_gate",
+        "details": {
+          "attempt": 2,
+          "overall": "FAIL",
+          "route_signal": "human_gate",
+          "repair_strategy": "targeted",
+          "recovered_verify_evidence": 0,
+          "recovered_verify_gate": 0
+        }
+      },
+      {
+        "category": "verify_gate",
+        "code": "VERIFY-GATE-HUMAN_GATE",
+        "severity": "failure",
+        "terminal_significant": true,
+        "message": "verify_gate attempt 3 routed human_gate with overall=FAIL",
+        "timestamp": "2026-06-10T12:24:51Z",
+        "source": "verify_gate",
+        "state": "verify_gate",
+        "details": {
+          "attempt": 3,
+          "overall": "FAIL",
+          "route_signal": "human_gate",
+          "repair_strategy": "targeted",
+          "recovered_verify_evidence": 0,
+          "recovered_verify_gate": 0
+        }
+      },
+      {
+        "category": "verify_gate",
+        "code": "VERIFY-GATE-HUMAN_GATE",
+        "severity": "failure",
+        "terminal_significant": true,
+        "message": "verify_gate attempt 4 routed human_gate with overall=FAIL",
+        "timestamp": "2026-06-10T12:47:28Z",
+        "source": "verify_gate",
+        "state": "verify_gate",
+        "details": {
+          "attempt": 4,
+          "overall": "FAIL",
+          "route_signal": "human_gate",
+          "repair_strategy": "targeted",
+          "recovered_verify_evidence": 0,
+          "recovered_verify_gate": 0
+        }
+      },
+      {
+        "category": "verify_gate",
+        "code": "VERIFY-GATE-HUMAN_GATE",
+        "severity": "failure",
+        "terminal_significant": true,
+        "message": "verify_gate attempt 5 routed human_gate with overall=FAIL",
+        "timestamp": "2026-06-10T13:21:07Z",
+        "source": "verify_gate",
+        "state": "verify_gate",
+        "details": {
+          "attempt": 5,
+          "overall": "FAIL",
+          "route_signal": "human_gate",
+          "repair_strategy": "targeted",
+          "recovered_verify_evidence": 0,
+          "recovered_verify_gate": 0
+        }
+      },
+      {
+        "category": "verify_gate",
+        "code": "VERIFY-GATE-HUMAN_GATE",
+        "severity": "failure",
+        "terminal_significant": true,
+        "message": "verify_gate attempt 6 routed human_gate with overall=FAIL",
+        "timestamp": "2026-06-10T15:10:30Z",
+        "source": "verify_gate",
+        "state": "verify_gate",
+        "details": {
+          "attempt": 6,
+          "overall": "FAIL",
+          "route_signal": "human_gate",
+          "repair_strategy": "targeted",
+          "recovered_verify_evidence": 0,
+          "recovered_verify_gate": 0
+        }
+      },
+      {
+        "category": "verify_gate",
+        "code": "VERIFY-GATE-HUMAN_GATE",
+        "severity": "failure",
+        "terminal_significant": true,
+        "message": "verify_gate attempt 7 routed human_gate with overall=FAIL",
+        "timestamp": "2026-06-10T16:24:09Z",
+        "source": "verify_gate",
+        "state": "verify_gate",
+        "details": {
+          "attempt": 7,
+          "overall": "FAIL",
+          "route_signal": "human_gate",
+          "repair_strategy": "targeted",
+          "recovered_verify_evidence": 0,
+          "recovered_verify_gate": 0
+        }
+      },
+      {
+        "category": "verify_gate",
+        "code": "VERIFY-GATE-HUMAN_GATE",
+        "severity": "failure",
+        "terminal_significant": true,
+        "message": "verify_gate attempt 8 routed human_gate with overall=FAIL",
+        "timestamp": "2026-06-10T18:52:00Z",
+        "source": "verify_gate",
+        "state": "verify_gate",
+        "details": {
+          "attempt": 8,
+          "overall": "FAIL",
+          "route_signal": "human_gate",
+          "repair_strategy": "targeted",
+          "recovered_verify_evidence": 0,
+          "recovered_verify_gate": 0
+        }
+      },
+      {
+        "category": "verify_gate",
+        "code": "VERIFY-GATE-HUMAN_GATE",
+        "severity": "failure",
+        "terminal_significant": true,
+        "message": "verify_gate attempt 9 routed human_gate with overall=FAIL",
+        "timestamp": "2026-06-10T19:42:04Z",
+        "source": "verify_gate",
+        "state": "verify_gate",
+        "details": {
+          "attempt": 9,
+          "overall": "FAIL",
+          "route_signal": "human_gate",
+          "repair_strategy": "targeted",
+          "recovered_verify_evidence": 0,
+          "recovered_verify_gate": 0
+        }
+      },
+      {
+        "category": "verify_gate",
+        "code": "VERIFY-GATE-HUMAN_GATE",
+        "severity": "failure",
+        "terminal_significant": true,
+        "message": "verify_gate attempt 10 routed human_gate with overall=FAIL",
+        "timestamp": "2026-06-10T21:31:42Z",
+        "source": "verify_gate",
+        "state": "verify_gate",
+        "details": {
+          "attempt": 10,
+          "overall": "FAIL",
+          "route_signal": "human_gate",
+          "repair_strategy": "targeted",
+          "recovered_verify_evidence": 0,
+          "recovered_verify_gate": 0
+        }
+      },
+      {
+        "category": "verify_gate",
+        "code": "VERIFY-GATE-HUMAN_GATE",
+        "severity": "failure",
+        "terminal_significant": true,
+        "message": "verify_gate attempt 11 routed human_gate with overall=FAIL",
+        "timestamp": "2026-06-11T07:39:07Z",
+        "source": "verify_gate",
+        "state": "verify_gate",
+        "details": {
+          "attempt": 11,
+          "overall": "FAIL",
+          "route_signal": "human_gate",
+          "repair_strategy": "targeted",
+          "recovered_verify_evidence": 0,
+          "recovered_verify_gate": 0
+        }
+      },
+      {
+        "category": "verify_gate",
+        "code": "VERIFY-GATE-HUMAN_GATE",
+        "severity": "failure",
+        "terminal_significant": true,
+        "message": "verify_gate attempt 12 routed human_gate with overall=FAIL",
+        "timestamp": "2026-06-11T08:54:00Z",
+        "source": "verify_gate",
+        "state": "verify_gate",
+        "details": {
+          "attempt": 12,
+          "overall": "FAIL",
+          "route_signal": "human_gate",
+          "repair_strategy": "targeted",
+          "recovered_verify_evidence": 0,
+          "recovered_verify_gate": 0
+        }
+      },
+      {
+        "category": "relay_protocol",
+        "code": "R2E-V2-SHAPE-MISMATCH",
+        "severity": "failure",
+        "terminal_significant": false,
+        "message": "[relay-protocol] control contains unsupported fields",
+        "timestamp": "2026-06-16T13:04:03Z",
+        "source": "cli.next",
+        "state": "pause_verify_fail",
+        "details": {
+          "resolved_by": "R2E-V2-SHAPE-MISMATCH-RECOVERY-ACK",
+          "resolved_at": "2026-06-16T13:06:11Z"
+        }
+      },
+      {
+        "category": "relay_protocol",
+        "code": "R2E-V2-SHAPE-MISMATCH-RECOVERED",
+        "severity": "clean",
+        "terminal_significant": false,
+        "message": "Recovery acknowledged for R2E-V2-SHAPE-MISMATCH.",
+        "timestamp": "2026-06-16T13:06:11Z",
+        "source": "cli.next",
+        "state": "pause_verify_fail",
+        "details": {
+          "resolved_by": "R2E-V2-SHAPE-MISMATCH-RECOVERY-ACK",
+          "resolved_count": 1
+        }
+      },
+      {
+        "category": "recovery_stop",
+        "code": "PIPELINE-TERMINAL-FAILED",
+        "severity": "failure",
+        "terminal_significant": false,
+        "message": "Pipeline failed before completion",
+        "timestamp": "2026-06-16T13:08:16Z",
+        "source": "cli.next",
+        "state": "done",
+        "details": {
+          "resolved_by": "PIPELINE-TERMINAL-FAILED-RECOVERY-ACK",
+          "resolved_at": "2026-06-16T13:09:39Z"
+        }
+      },
+      {
+        "category": "recovery_stop",
+        "code": "PIPELINE-TERMINAL-FAILED-RECOVERED",
+        "severity": "clean",
+        "terminal_significant": false,
+        "message": "Recovery acknowledged for PIPELINE-TERMINAL-FAILED.",
+        "timestamp": "2026-06-16T13:09:39Z",
+        "source": "cli.next",
+        "state": "done",
+        "details": {
+          "resolved_by": "PIPELINE-TERMINAL-FAILED-RECOVERY-ACK",
+          "resolved_count": 1
+        }
+      },
+      {
+        "category": "recovery_stop",
+        "code": "PIPELINE-TERMINAL-FAILED",
+        "severity": "failure",
+        "terminal_significant": true,
+        "message": "Pipeline failed before completion",
+        "timestamp": "2026-06-16T13:09:55Z",
+        "source": "cli.next",
+        "state": "done"
+      }
+    ],
+    "last_event": {
+      "category": "recovery_stop",
+      "code": "PIPELINE-TERMINAL-FAILED",
+      "severity": "failure",
+      "terminal_significant": true,
+      "message": "Pipeline failed before completion",
+      "timestamp": "2026-06-16T13:09:55Z",
+      "source": "cli.next",
+      "state": "done"
+    },
+    "terminal_significant": true,
+    "status": "failed"
+  },
+  "branch_strategy": "current_branch",
+  "branch_strategy_source": "qa_answers.qa_branch_strategy.BS1",
+  "branch_strategy_answer": "",
+  "branch_strategy_execution": {
+    "requested_strategy": "current_branch",
+    "source": "qa_answers.qa_branch_strategy.BS1",
+    "git_state": "feature_branch",
+    "action": "noop",
+    "status": "executed",
+    "message": "Staying on current branch (no-op)"
+  },
+  "qa_decided_by": {
+    "qa_init_calibration": {
+      "GOV1": "human",
+      "RUN_UI": "human",
+      "SUBAGENT_APPROVAL": "human",
+      "DOCS_SET": "human",
+      "VERBOSITY": "human",
+      "COST": "human",
+      "REVIEWER_STRATEGY": "human",
+      "DOC_CONFIRM": "human"
+    }
+  },
+  "automation": "interactive",
+  "subagent_approval": "yes",
+  "relay_local_subagents_preapproved": true,
+  "docs_set": "high-docs",
+  "verbosity": "high-verb",
+  "cost_profile": "high",
+  "expert_usage_tier": "max",
+  "doc_set": [
+    "goal.md",
+    "use-cases.md",
+    "architecture-hld.md",
+    "architecture-lld.md",
+    "tasks.md"
+  ],
+  "doc_excluded": [],
+  "agenda": [],
+  "composed_topology": {
+    "id": "topology_new_feature_detailed__interactive",
+    "base_topology_id": "topology_new_feature_detailed",
+    "version": "1.0.0",
+    "initial": "discuss_goal",
+    "terminal": [
+      "done",
+      "abandoned"
+    ],
+    "nodes": [
+      "abandoned",
+      "approve_gate_architecture_hld",
+      "approve_gate_architecture_lld",
+      "approve_gate_decisions",
+      "approve_gate_goal",
+      "approve_gate_tasks",
+      "approve_gate_use_cases",
+      "architecture_hld",
+      "architecture_lld",
+      "create_issue",
+      "decisions",
+      "discuss_architecture_hld",
+      "discuss_architecture_lld",
+      "discuss_decisions",
+      "discuss_goal",
+      "discuss_tasks",
+      "discuss_use_cases",
+      "done",
+      "goal",
+      "implementation",
+      "pause_verify_fail",
+      "tasks",
+      "use_cases",
+      "verify",
+      "verify_gate"
+    ],
+    "edges": {
+      "discuss_goal": [
+        {
+          "target": "goal"
+        }
+      ],
+      "goal": [
+        {
+          "target": "approve_gate_goal"
+        }
+      ],
+      "approve_gate_goal": [
+        {
+          "target": "discuss_use_cases",
+          "label": "approved"
+        },
+        {
+          "target": "discuss_goal",
+          "label": "rejected"
+        },
+        {
+          "target": "abandoned",
+          "label": "abandon"
+        }
+      ],
+      "discuss_use_cases": [
+        {
+          "target": "use_cases"
+        }
+      ],
+      "use_cases": [
+        {
+          "target": "approve_gate_use_cases"
+        }
+      ],
+      "approve_gate_use_cases": [
+        {
+          "target": "discuss_decisions",
+          "condition": "'decisions.md' in context.doc_set",
+          "label": "approved"
+        },
+        {
+          "target": "discuss_architecture_hld",
+          "label": "approved"
+        },
+        {
+          "target": "discuss_use_cases",
+          "label": "rejected"
+        },
+        {
+          "target": "abandoned",
+          "label": "abandon"
+        }
+      ],
+      "discuss_decisions": [
+        {
+          "target": "decisions"
+        }
+      ],
+      "decisions": [
+        {
+          "target": "approve_gate_decisions"
+        }
+      ],
+      "approve_gate_decisions": [
+        {
+          "target": "discuss_architecture_hld",
+          "label": "approved"
+        },
+        {
+          "target": "discuss_decisions",
+          "label": "rejected"
+        },
+        {
+          "target": "abandoned",
+          "label": "abandon"
+        }
+      ],
+      "discuss_architecture_hld": [
+        {
+          "target": "architecture_hld"
+        }
+      ],
+      "architecture_hld": [
+        {
+          "target": "approve_gate_architecture_hld"
+        }
+      ],
+      "approve_gate_architecture_hld": [
+        {
+          "target": "discuss_architecture_lld",
+          "label": "approved"
+        },
+        {
+          "target": "discuss_architecture_hld",
+          "label": "rejected"
+        },
+        {
+          "target": "abandoned",
+          "label": "abandon"
+        }
+      ],
+      "discuss_architecture_lld": [
+        {
+          "target": "architecture_lld"
+        }
+      ],
+      "architecture_lld": [
+        {
+          "target": "approve_gate_architecture_lld"
+        }
+      ],
+      "approve_gate_architecture_lld": [
+        {
+          "target": "discuss_tasks",
+          "label": "approved"
+        },
+        {
+          "target": "discuss_architecture_lld",
+          "label": "rejected"
+        },
+        {
+          "target": "abandoned",
+          "label": "abandon"
+        }
+      ],
+      "discuss_tasks": [
+        {
+          "target": "tasks"
+        }
+      ],
+      "tasks": [
+        {
+          "target": "approve_gate_tasks"
+        }
+      ],
+      "approve_gate_tasks": [
+        {
+          "target": "create_issue",
+          "label": "approved"
+        },
+        {
+          "target": "discuss_tasks",
+          "label": "rejected"
+        },
+        {
+          "target": "abandoned",
+          "label": "abandon"
+        }
+      ],
+      "create_issue": [
+        {
+          "target": "implementation"
+        }
+      ],
+      "implementation": [
+        {
+          "target": "verify"
+        }
+      ],
+      "verify": [
+        {
+          "target": "verify_gate"
+        }
+      ],
+      "verify_gate": [
+        {
+          "target": "implementation",
+          "label": "fix_needed"
+        },
+        {
+          "target": "pause_verify_fail",
+          "label": "human_gate"
+        },
+        {
+          "target": "done",
+          "label": "clean"
+        }
+      ],
+      "done": [],
+      "pause_verify_fail": [
+        {
+          "target": "implementation",
+          "label": "fix"
+        },
+        {
+          "target": "done",
+          "label": "accept"
+        }
+      ],
+      "abandoned": []
+    },
+    "node_sequence": [
+      "discuss_goal",
+      "goal",
+      "approve_gate_goal",
+      "discuss_use_cases",
+      "use_cases",
+      "approve_gate_use_cases",
+      "discuss_decisions",
+      "decisions",
+      "approve_gate_decisions",
+      "discuss_architecture_hld",
+      "architecture_hld",
+      "approve_gate_architecture_hld",
+      "discuss_architecture_lld",
+      "architecture_lld",
+      "approve_gate_architecture_lld",
+      "discuss_tasks",
+      "tasks",
+      "approve_gate_tasks",
+      "create_issue",
+      "implementation",
+      "verify",
+      "verify_gate",
+      "done"
+    ],
+    "nodes_config": {
+      "discuss_goal": {
+        "type": "interactive",
+        "config": {
+          "qa_tree": "discuss_doc",
+          "doc_name": "goal.md",
+          "instructions_path": "per-doc/goal/discuss/instructions.md",
+          "output_path": "discuss_goal_summary.md"
+        }
+      },
+      "approve_gate_goal": {
+        "type": "gate",
+        "config": {
+          "gate_name": "Document Approval Gate",
+          "approver": "human",
+          "action": "approve_gate"
+        }
+      },
+      "discuss_use_cases": {
+        "type": "interactive",
+        "config": {
+          "qa_tree": "discuss_doc",
+          "doc_name": "use-cases.md",
+          "instructions_path": "per-doc/use-cases/discuss/instructions.md",
+          "output_path": "discuss_use-cases_summary.md"
+        }
+      },
+      "approve_gate_use_cases": {
+        "type": "gate",
+        "config": {
+          "gate_name": "Document Approval Gate",
+          "approver": "human",
+          "action": "approve_gate"
+        }
+      },
+      "discuss_decisions": {
+        "type": "interactive",
+        "config": {
+          "qa_tree": "discuss_doc",
+          "doc_name": "decisions.md",
+          "instructions_path": "per-doc/decisions/discuss/instructions.md",
+          "output_path": "discuss_decisions_summary.md"
+        }
+      },
+      "approve_gate_decisions": {
+        "type": "gate",
+        "config": {
+          "gate_name": "Document Approval Gate",
+          "approver": "human",
+          "action": "approve_gate"
+        }
+      },
+      "discuss_architecture_hld": {
+        "type": "interactive",
+        "config": {
+          "qa_tree": "discuss_doc",
+          "doc_name": "architecture-hld.md",
+          "instructions_path": "per-doc/architecture-hld/discuss/instructions.md",
+          "output_path": "discuss_architecture-hld_summary.md"
+        }
+      },
+      "approve_gate_architecture_hld": {
+        "type": "gate",
+        "config": {
+          "gate_name": "Document Approval Gate",
+          "approver": "human",
+          "action": "approve_gate"
+        }
+      },
+      "discuss_architecture_lld": {
+        "type": "interactive",
+        "config": {
+          "qa_tree": "discuss_doc",
+          "doc_name": "architecture-lld.md",
+          "instructions_path": "per-doc/architecture-lld/discuss/instructions.md",
+          "output_path": "discuss_architecture-lld_summary.md"
+        }
+      },
+      "approve_gate_architecture_lld": {
+        "type": "gate",
+        "config": {
+          "gate_name": "Document Approval Gate",
+          "approver": "human",
+          "action": "approve_gate"
+        }
+      },
+      "discuss_tasks": {
+        "type": "interactive",
+        "config": {
+          "qa_tree": "discuss_doc",
+          "doc_name": "tasks.md",
+          "instructions_path": "per-doc/tasks/discuss/instructions.md",
+          "output_path": "discuss_tasks_summary.md"
+        }
+      },
+      "approve_gate_tasks": {
+        "type": "gate",
+        "config": {
+          "gate_name": "Document Approval Gate",
+          "approver": "human",
+          "action": "approve_gate"
+        }
+      },
+      "verify_gate": {
+        "type": "auto",
+        "config": {
+          "action": "verify_gate",
+          "verify_fix_loops": 1
+        }
+      }
+    },
+    "composed_node_configs": {
+      "goal": {
+        "type": "compound",
+        "sub_fsm": "micro_docs_creation",
+        "config": {
+          "doc_name": "goal.md",
+          "template": "goal.md.template",
+          "persona": "{{ personas_arch[uc_type] }}",
+          "verbosity": "{{ context.verbosity }}",
+          "target_lines": "{{ verbosity_line_targets.goal[context.verbosity] }}",
+          "guide_section": "{{ context.verbosity }}",
+          "inputs": [
+            "discuss_goal_summary.md",
+            "goal.md.template"
+          ],
+          "review_scope": []
+        }
+      },
+      "use_cases": {
+        "type": "compound",
+        "sub_fsm": "micro_docs_creation",
+        "config": {
+          "doc_name": "use-cases.md",
+          "template": "use-cases.md.template",
+          "persona": "{{ personas_product[uc_type] }}",
+          "verbosity": "{{ context.verbosity }}",
+          "target_lines": "{{ verbosity_line_targets.use_cases[context.verbosity] }}",
+          "guide_section": "{{ context.verbosity }}",
+          "inputs": [
+            "discuss_use-cases_summary.md",
+            "use-cases.md.template",
+            "goal.md"
+          ],
+          "review_scope": [
+            "goal.md"
+          ],
+          "traceability_reviewer": {
+            "enabled": true,
+            "checks": [
+              "uc_to_arch_coverage",
+              "goal_to_arch_coverage"
+            ]
+          }
+        }
+      },
+      "decisions": {
+        "type": "compound",
+        "sub_fsm": "micro_docs_creation",
+        "config": {
+          "doc_name": "decisions.md",
+          "template": "decisions.md.template",
+          "persona": "{{ personas_arch[uc_type] }}",
+          "verbosity": "{{ context.verbosity }}",
+          "target_lines": "{{ verbosity_line_targets.decisions[context.verbosity] }}",
+          "guide_section": "{{ context.verbosity }}",
+          "inputs": [
+            "discuss_decisions_summary.md",
+            "decisions.md.template",
+            "goal.md",
+            "use-cases.md"
+          ],
+          "review_scope": [
+            "goal.md",
+            "use-cases.md"
+          ]
+        }
+      },
+      "architecture_hld": {
+        "type": "compound",
+        "sub_fsm": "micro_docs_creation",
+        "config": {
+          "doc_name": "architecture-hld.md",
+          "template": "architecture-hld.md.template",
+          "persona": "{{ personas_arch[uc_type] }}",
+          "verbosity": "max-verb",
+          "target_lines": "{{ verbosity_line_targets.architecture_hld['max-verb'] }}",
+          "guide_section": "detailed_hld",
+          "inputs": [
+            "discuss_architecture-hld_summary.md",
+            "architecture-hld.md.template",
+            "goal.md",
+            "use-cases.md"
+          ],
+          "review_scope": [
+            "goal.md",
+            "use-cases.md"
+          ],
+          "traceability_reviewer": {
+            "enabled": true,
+            "checks": [
+              "uc_to_arch_coverage",
+              "goal_to_arch_coverage"
+            ]
+          }
+        }
+      },
+      "architecture_lld": {
+        "type": "compound",
+        "sub_fsm": "micro_docs_creation",
+        "config": {
+          "doc_name": "architecture-lld.md",
+          "template": "architecture-lld.md.template",
+          "persona": "{{ personas_arch[uc_type] }}",
+          "verbosity": "max-verb",
+          "target_lines": "{{ verbosity_line_targets.architecture_lld['max-verb'] }}",
+          "guide_section": "detailed_lld",
+          "inputs": [
+            "discuss_architecture-lld_summary.md",
+            "architecture-lld.md.template",
+            "goal.md",
+            "use-cases.md",
+            "architecture-hld.md"
+          ],
+          "review_scope": [
+            "goal.md",
+            "use-cases.md",
+            "architecture-hld.md"
+          ],
+          "traceability_reviewer": {
+            "enabled": true,
+            "checks": [
+              "uc_to_arch_coverage",
+              "goal_to_arch_coverage"
+            ]
+          }
+        }
+      },
+      "tasks": {
+        "type": "compound",
+        "sub_fsm": "micro_docs_creation",
+        "config": {
+          "doc_name": "tasks.md",
+          "template": "tasks.md.template",
+          "persona": "{{ personas_arch[uc_type] }}",
+          "verbosity": "{{ context.verbosity }}",
+          "target_lines": "{{ verbosity_line_targets.tasks[context.verbosity] }}",
+          "guide_section": "tasks",
+          "inputs": [
+            "discuss_tasks_summary.md",
+            "tasks.md.template",
+            "goal.md",
+            "use-cases.md",
+            "architecture-hld.md",
+            "architecture-lld.md",
+            "decisions.md"
+          ],
+          "review_scope": [
+            "goal.md",
+            "use-cases.md",
+            "architecture-hld.md",
+            "architecture-lld.md",
+            "decisions.md"
+          ],
+          "traceability_reviewer": {
+            "enabled": true,
+            "checks": [
+              "uc_to_arch_coverage",
+              "goal_to_arch_coverage",
+              "arch_to_tasks_coverage"
+            ]
+          }
+        }
+      },
+      "implementation": {
+        "type": "delegated",
+        "config": {
+          "delegate_to": "implementer",
+          "sub_fsm": "micro_wave",
+          "orchestration": "parallel",
+          "inputs": [
+            "goal.md",
+            "use-cases.md",
+            "architecture-hld.md",
+            "architecture-lld.md",
+            "decisions.md",
+            "tasks.md"
+          ]
+        }
+      },
+      "verify": {
+        "type": "delegated",
+        "outputs": [
+          "docs/issues/{pipeline_id}/verify-report.md"
+        ],
+        "config": {
+          "delegate_to": "verifier",
+          "inputs": [
+            "goal.md",
+            "use-cases.md",
+            "architecture-hld.md",
+            "architecture-lld.md",
+            "decisions.md",
+            "tasks.md"
+          ],
+          "review_scope": [
+            "goal.md",
+            "use-cases.md",
+            "architecture-hld.md",
+            "architecture-lld.md",
+            "decisions.md",
+            "tasks.md"
+          ]
+        }
+      },
+      "verify_gate": {
+        "type": "auto",
+        "config": {
+          "action": "verify_gate",
+          "verify_fix_loops": 1
+        }
+      },
+      "pause_verify_fail": {
+        "type": "pause_verify_fail",
+        "config": {
+          "gate_name": "Verify Failure Review",
+          "approver": "human"
+        }
+      },
+      "create_issue": {
+        "type": "auto",
+        "config": {
+          "action": "create_issue"
+        }
+      },
+      "done": {
+        "type": "terminal"
+      },
+      "abandoned": {
+        "type": "terminal"
+      }
+    }
+  },
+  "pipeline_description": "Integrate the NIXL EP example with the NIXL CPU Proxy GPU device backend for a correctness-first Phase 1. The initial target is EP running through CPU proxy with 1 proxy worker and N proxy channels, where N covers EP's logical lanes; performance scaling is deferred.",
+  "node_kb_sources": [
+    {
+      "type": "project_doc",
+      "title": "ep-integ-plan.md",
+      "path": "ep-integ-plan.md",
+      "required": true,
+      "authority": "reference",
+      "reason": "user-provided workflow Q&A reference",
+      "scope": "project",
+      "inline_allowed": false,
+      "inline_policy": "pointer-only",
+      "roles": [
+        "interaction",
+        "reviewers",
+        "verifier",
+        "writer"
+      ]
+    }
+  ],
+  "node_kb_seeded_manifest_count": 20,
+  "micro_fsm_findings": [],
+  "issue": {
+    "title": "001-integrate-nixl-ep-with-nixl-cp",
+    "pipeline_id": "001-integrate-nixl-ep-with-nixl-cp",
+    "status": "open"
+  },
+  "verify_repair": {
+    "strategy": "targeted",
+    "reason": "verifier_failure_with_concrete_evidence",
+    "attempt": 12,
+    "evidence_files": [
+      "docs/issues/001-integrate-nixl-ep-with-nixl-cp/verify-report.md"
+    ],
+    "affected_upstream_docs": [
+      "docs/issues/001-integrate-nixl-ep-with-nixl-cp/goal.md"
+    ]
+  },
+  "verify_state": {
+    "goal_list": [
+      "feature_verified"
+    ],
+    "verify_fix_loops_remaining": 0,
+    "verify_attempts": [
+      {
+        "attempt": 1,
+        "goal_statuses": {
+          "feature_verified": "FAIL"
+        },
+        "overall": "FAIL",
+        "action": "fix_needed",
+        "timestamp": "2026-06-10T11:41:48Z",
+        "counter_state_before": 1,
+        "counter_state_after": 0,
+        "task_statuses": {},
+        "human_decision": null,
+        "human_identifier": null
+      },
+      {
+        "attempt": 2,
+        "goal_statuses": {
+          "feature_verified": "FAIL"
+        },
+        "overall": "FAIL",
+        "action": "human_gate",
+        "timestamp": "2026-06-10T12:02:09Z",
+        "counter_state_before": 0,
+        "counter_state_after": 0,
+        "task_statuses": {},
+        "human_decision": null,
+        "human_identifier": null
+      },
+      {
+        "attempt": 3,
+        "goal_statuses": {
+          "feature_verified": "FAIL"
+        },
+        "overall": "FAIL",
+        "action": "human_gate",
+        "timestamp": "2026-06-10T12:24:51Z",
+        "counter_state_before": 0,
+        "counter_state_after": 0,
+        "task_statuses": {},
+        "human_decision": null,
+        "human_identifier": null
+      },
+      {
+        "attempt": 4,
+        "goal_statuses": {
+          "feature_verified": "FAIL"
+        },
+        "overall": "FAIL",
+        "action": "human_gate",
+        "timestamp": "2026-06-10T12:47:28Z",
+        "counter_state_before": 0,
+        "counter_state_after": 0,
+        "task_statuses": {},
+        "human_decision": null,
+        "human_identifier": null
+      },
+      {
+        "attempt": 5,
+        "goal_statuses": {
+          "feature_verified": "FAIL"
+        },
+        "overall": "FAIL",
+        "action": "human_gate",
+        "timestamp": "2026-06-10T13:21:07Z",
+        "counter_state_before": 0,
+        "counter_state_after": 0,
+        "task_statuses": {},
+        "human_decision": null,
+        "human_identifier": null
+      },
+      {
+        "attempt": 6,
+        "goal_statuses": {
+          "feature_verified": "FAIL"
+        },
+        "overall": "FAIL",
+        "action": "human_gate",
+        "timestamp": "2026-06-10T15:10:30Z",
+        "counter_state_before": 0,
+        "counter_state_after": 0,
+        "task_statuses": {},
+        "human_decision": null,
+        "human_identifier": null
+      },
+      {
+        "attempt": 7,
+        "goal_statuses": {
+          "feature_verified": "FAIL"
+        },
+        "overall": "FAIL",
+        "action": "human_gate",
+        "timestamp": "2026-06-10T16:24:09Z",
+        "counter_state_before": 0,
+        "counter_state_after": 0,
+        "task_statuses": {},
+        "human_decision": null,
+        "human_identifier": null
+      },
+      {
+        "attempt": 8,
+        "goal_statuses": {
+          "feature_verified": "FAIL"
+        },
+        "overall": "FAIL",
+        "action": "human_gate",
+        "timestamp": "2026-06-10T18:52:00Z",
+        "counter_state_before": 0,
+        "counter_state_after": 0,
+        "task_statuses": {},
+        "human_decision": null,
+        "human_identifier": null
+      },
+      {
+        "attempt": 9,
+        "goal_statuses": {
+          "feature_verified": "FAIL"
+        },
+        "overall": "FAIL",
+        "action": "human_gate",
+        "timestamp": "2026-06-10T19:42:04Z",
+        "counter_state_before": 0,
+        "counter_state_after": 0,
+        "task_statuses": {},
+        "human_decision": null,
+        "human_identifier": null
+      },
+      {
+        "attempt": 10,
+        "goal_statuses": {
+          "feature_verified": "FAIL"
+        },
+        "overall": "FAIL",
+        "action": "human_gate",
+        "timestamp": "2026-06-10T21:31:42Z",
+        "counter_state_before": 0,
+        "counter_state_after": 0,
+        "task_statuses": {},
+        "human_decision": null,
+        "human_identifier": null
+      },
+      {
+        "attempt": 11,
+        "goal_statuses": {
+          "feature_verified": "FAIL"
+        },
+        "overall": "FAIL",
+        "action": "human_gate",
+        "timestamp": "2026-06-11T07:39:07Z",
+        "counter_state_before": 0,
+        "counter_state_after": 0,
+        "task_statuses": {},
+        "human_decision": null,
+        "human_identifier": null
+      },
+      {
+        "attempt": 12,
+        "goal_statuses": {
+          "feature_verified": "FAIL"
+        },
+        "overall": "FAIL",
+        "action": "human_gate",
+        "timestamp": "2026-06-11T08:54:00Z",
+        "counter_state_before": 0,
+        "counter_state_after": 0,
+        "task_statuses": {},
+        "human_decision": null,
+        "human_identifier": null
+      }
+    ]
+  }
+}

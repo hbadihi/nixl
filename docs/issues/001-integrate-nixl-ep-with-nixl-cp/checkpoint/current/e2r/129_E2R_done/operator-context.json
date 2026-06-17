@@ -1,0 +1,233 @@
+{
+  "accepted_response_kinds": [
+    "recovery_ack"
+  ],
+  "expected_response_file": "/scrap/cpu-proxy/nixl/.tmp/001-integrate-nixl-ep-with-nixl-cp/relay/130_R2E_recovery_ack/protocol.json",
+  "kind": "operator_context",
+  "node_type": "error",
+  "report": {
+    "artifacts": {
+      "gitlab_issue_missing_reason": "not_created",
+      "gitlab_issue_url": null,
+      "gitlab_mr_missing_reason": "not_created",
+      "gitlab_mr_url": null,
+      "issue_dir": "docs/issues/001-integrate-nixl-ep-with-nixl-cp",
+      "verify_report": "docs/issues/001-integrate-nixl-ep-with-nixl-cp/verify-report.md"
+    },
+    "customization": {
+      "applied": [],
+      "applied_count": 0,
+      "available": true,
+      "diagnostics": [],
+      "error_count": 0,
+      "next_action": "No action needed.",
+      "schema_version": 1,
+      "skill_id": "wf-feature",
+      "status": "absent",
+      "summary": "No local customizations were applied.",
+      "warning_count": 0
+    },
+    "diagnostics": {
+      "fallback_location": null,
+      "locations": [],
+      "next_action": "No diagnostics selected.",
+      "records_available": false,
+      "selected_capability_ids": [],
+      "selected_preset_ids": [],
+      "unavailable_reason": null
+    },
+    "integrity": {
+      "available": true,
+      "event_count": 19,
+      "events": [
+        {
+          "category": "qa_answer",
+          "code": "QA-BRANCH-INVALID-STRATEGY",
+          "details": {
+            "recovery_hint": "Answer the latest branch-strategy E2R with one of the listed options that is valid for the current project git state.",
+            "resolved_at": "2026-06-09T11:27:04Z",
+            "resolved_by": "QA-BRANCH-INVALID-STRATEGY-RECOVERY-ACK"
+          },
+          "message": "[relay-protocol] Strategy 'new_branch' is not valid for git state 'feature_branch'",
+          "severity": "failure",
+          "source": "cli.next",
+          "state": "qa_branch_strategy",
+          "terminal_significant": false,
+          "timestamp": "2026-06-09T11:26:17Z"
+        },
+        {
+          "category": "qa_answer",
+          "code": "QA-BRANCH-INVALID-STRATEGY",
+          "details": {
+            "recovery_hint": "Answer the latest branch-strategy E2R with one of the listed options that is valid for the current project git state.",
+            "resolved_at": "2026-06-09T11:27:04Z",
+            "resolved_by": "QA-BRANCH-INVALID-STRATEGY-RECOVERY-ACK"
+          },
+          "message": "[relay-protocol] Strategy 'new_branch' is not valid for git state 'feature_branch'",
+          "severity": "failure",
+          "source": "cli.next",
+          "state": "qa_branch_strategy",
+          "terminal_significant": false,
+          "timestamp": "2026-06-09T11:26:17Z"
+        },
+        {
+          "category": "qa_answer",
+          "code": "QA-BRANCH-INVALID-STRATEGY-RECOVERED",
+          "details": {
+            "resolved_by": "QA-BRANCH-INVALID-STRATEGY-RECOVERY-ACK",
+            "resolved_count": 2
+          },
+          "message": "Recovery acknowledged for QA-BRANCH-INVALID-STRATEGY.",
+          "severity": "clean",
+          "source": "cli.next",
+          "state": "qa_branch_strategy",
+          "terminal_significant": false,
+          "timestamp": "2026-06-09T11:27:04Z"
+        },
+        {
+          "category": "verify_gate",
+          "code": "VERIFY-GATE-FIX_NEEDED",
+          "details": {
+            "attempt": 1,
+            "overall": "FAIL",
+            "recovered_verify_evidence": 0,
+            "recovered_verify_gate": 0,
+            "repair_strategy": "targeted",
+            "route_signal": "fix_needed"
+          },
+          "message": "verify_gate attempt 1 routed fix_needed with overall=FAIL",
+          "severity": "failure",
+          "source": "verify_gate",
+          "state": "verify_gate",
+          "terminal_significant": true,
+          "timestamp": "2026-06-10T11:41:48Z"
+        },
+        {
+          "category": "verify_gate",
+          "code": "VERIFY-GATE-HUMAN_GATE",
+          "details": {
+            "attempt": 2,
+            "overall": "FAIL",
+            "recovered_verify_evidence": 0,
+            "recovered_verify_gate": 0,
+            "repair_strategy": "targeted",
+            "route_signal": "human_gate"
+          },
+          "message": "verify_gate attempt 2 routed human_gate with overall=FAIL",
+          "severity": "failure",
+          "source": "verify_gate",
+          "state": "verify_gate",
+          "terminal_significant": true,
+          "timestamp": "2026-06-10T12:02:09Z"
+        }
+      ],
+      "failure_codes": [
+        "VERIFY-GATE-FIX_NEEDED",
+        "VERIFY-GATE-HUMAN_GATE",
+        "VERIFY-GATE-HUMAN_GATE",
+        "VERIFY-GATE-HUMAN_GATE",
+        "VERIFY-GATE-HUMAN_GATE",
+        "VERIFY-GATE-HUMAN_GATE",
+        "VERIFY-GATE-HUMAN_GATE",
+        "VERIFY-GATE-HUMAN_GATE",
+        "VERIFY-GATE-HUMAN_GATE",
+        "VERIFY-GATE-HUMAN_GATE",
+        "VERIFY-GATE-HUMAN_GATE",
+        "VERIFY-GATE-HUMAN_GATE"
+      ],
+      "failure_count": 12,
+      "non_blocking_warning_count": 0,
+      "recovered_count": 4,
+      "status": "failed",
+      "terminal_significant": true,
+      "warning_action_required": false,
+      "warning_count": 0
+    },
+    "review": {
+      "loop_counts": {
+        "r3_review": 4
+      },
+      "max_loop_status": "not_triggered",
+      "max_loop_warnings": [],
+      "routing": {
+        "available": false
+      }
+    },
+    "terminal": {
+      "integrity_codes": [
+        "VERIFY-GATE-FIX_NEEDED",
+        "VERIFY-GATE-HUMAN_GATE",
+        "VERIFY-GATE-HUMAN_GATE",
+        "VERIFY-GATE-HUMAN_GATE",
+        "VERIFY-GATE-HUMAN_GATE",
+        "VERIFY-GATE-HUMAN_GATE",
+        "VERIFY-GATE-HUMAN_GATE",
+        "VERIFY-GATE-HUMAN_GATE",
+        "VERIFY-GATE-HUMAN_GATE",
+        "VERIFY-GATE-HUMAN_GATE",
+        "VERIFY-GATE-HUMAN_GATE",
+        "VERIFY-GATE-HUMAN_GATE"
+      ],
+      "integrity_status": "failed",
+      "integrity_terminal_significant": true,
+      "next_action": "Fix the reported integrity failure, then rerun or resume the workflow.",
+      "reason": "integrity_failed",
+      "status": "failed",
+      "verify_status": "failed",
+      "warning_action_required": false,
+      "warning_state": "non_blocking"
+    },
+    "verify": {
+      "action": "human_gate",
+      "attempts": 12,
+      "available": true,
+      "failed_goals": [
+        "feature_verified"
+      ],
+      "fix_loops_remaining": 0,
+      "last_attempt": 12,
+      "outcome": "failed",
+      "overall": "FAIL",
+      "status": "failed",
+      "verdict": "failed"
+    },
+    "warnings": {
+      "actionability": "non_blocking",
+      "count": 3,
+      "error_count": 0,
+      "integrity_count": 0,
+      "items": [
+        "ERROR [003] [structured-error] pipeline=001-integrate-nixl-ep-with-nixl-cp code=QA-BRANCH-INVALID-STRATEGY message=[relay-protocol] Strategy 'new_branch' is not valid for git state 'feature_branch'",
+        "ERROR [123] [structured-error] pipeline=001-integrate-nixl-ep-with-nixl-cp code=R2E-V2-SHAPE-MISMATCH message=[relay-protocol] control contains unsupported fields",
+        "ERROR [127] [structured-error] pipeline=001-integrate-nixl-ep-with-nixl-cp code=PIPELINE-TERMINAL-FAILED message=Pipeline failed before completion"
+      ],
+      "log_count": 3,
+      "log_items": [
+        {
+          "level": "ERROR",
+          "message": "[structured-error] pipeline=001-integrate-nixl-ep-with-nixl-cp code=QA-BRANCH-INVALID-STRATEGY message=[relay-protocol] Strategy 'new_branch' is not valid for git state 'feature_branch'",
+          "source": "engine.log",
+          "tag": "003"
+        },
+        {
+          "level": "ERROR",
+          "message": "[structured-error] pipeline=001-integrate-nixl-ep-with-nixl-cp code=R2E-V2-SHAPE-MISMATCH message=[relay-protocol] control contains unsupported fields",
+          "source": "engine.log",
+          "tag": "123"
+        },
+        {
+          "level": "ERROR",
+          "message": "[structured-error] pipeline=001-integrate-nixl-ep-with-nixl-cp code=PIPELINE-TERMINAL-FAILED message=Pipeline failed before completion",
+          "source": "engine.log",
+          "tag": "127"
+        }
+      ],
+      "state_count": 0
+    }
+  },
+  "responds_to_file": "/scrap/cpu-proxy/nixl/.tmp/001-integrate-nixl-ep-with-nixl-cp/relay/129_E2R_done/protocol.json",
+  "response_contract_file": "/scrap/cpu-proxy/nixl/.tmp/001-integrate-nixl-ep-with-nixl-cp/relay/129_E2R_done/response-contract.json",
+  "run_id": "001-integrate-nixl-ep-with-nixl-cp",
+  "schema_version": 1,
+  "state": "done"
+}

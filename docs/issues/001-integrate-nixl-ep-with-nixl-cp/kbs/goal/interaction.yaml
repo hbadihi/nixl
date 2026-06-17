@@ -1,0 +1,23 @@
+version: '1.0'
+artifact: goal
+role: interaction
+instructions: 'These KB sources were explicitly provided by the human during workflow
+  Q&A. Use them as required context for this node. Respect the artifact level: early
+  goal/use-case artifacts must translate solution detail into user/domain outcomes,
+  while architecture artifacts may use solution detail at the appropriate level.
+
+
+  Use this as background research. For goal documents, do not copy internal solution
+  details directly; translate them to user/domain outcomes.'
+sources:
+- type: project_doc
+  title: ep-integ-plan.md
+  path: ep-integ-plan.md
+  required: true
+  authority: reference
+  reason: user-provided workflow Q&A reference
+  scope: project
+  inline_allowed: false
+  inline_policy: pointer-only
+  roles:
+  - interaction
