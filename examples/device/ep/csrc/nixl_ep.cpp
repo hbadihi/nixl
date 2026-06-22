@@ -1570,20 +1570,6 @@ void Buffer::_nixl_agent_init() {
                                 ", status: " + std::to_string(status));
     }
 
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-    void *proxy_ctx = agent->getProxyDeviceContext();
-    if (proxy_ctx == nullptr) {
-        throw std::runtime_error("EP_PROXY_CONTEXT_UNAVAILABLE: proxy device context is not available after UCX backend creation");
-    }
-    cudaError_t proxy_publish_status =
-        ::nixl_ep_proxy_publish_context(proxy_ctx, proxy_context_owner_id);
-    if (proxy_publish_status != cudaSuccess) {
-        throw std::runtime_error(std::string("EP_PROXY_CONTEXT_PUBLISH_FAILED: ") +
-                                 cudaGetErrorString(proxy_publish_status));
-    }
-    proxy_context_published = true;
-#endif
-
     nixl_agent_info = std::make_unique<NixlAgentInfo>(agent, ucx_backend, max_num_ranks);
     nixl_agent_info->extra_params.backends.push_back(ucx_backend);
     nixl_agent_info->agent_name = agent_name;
