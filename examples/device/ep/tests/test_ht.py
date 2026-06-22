@@ -573,7 +573,13 @@ def test_loop(local_rank: int, num_local_ranks: int, args: argparse.Namespace):
                 print("", flush=True)
     except BaseException:
         write_ht_evidence(
-            args, buffer, rank, num_nodes, num_qps_per_rank, correctness="fail"
+            args,
+            buffer,
+            rank,
+            num_nodes,
+            num_local_ranks,
+            num_qps_per_rank,
+            correctness="fail",
         )
         raise
     else:
