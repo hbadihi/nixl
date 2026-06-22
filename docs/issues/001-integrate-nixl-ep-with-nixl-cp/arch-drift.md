@@ -24,7 +24,8 @@ activity evidence, and explicit LL all-RDMA fallback evidence.
 - EP proxy builds compile `examples/device/ep/csrc/kernels/proxy_publish.cu`
   and link the static proxy owner library through `gpu_device_api_link_with`.
 - EP host lifecycle code enables proxy mode, provisions channels, publishes the
-  proxy context after backend creation, and clears it before teardown.
+  proxy context after backend setup, clears it on teardown, and clears it if
+  initialization fails after publish.
 - The proxy verify build is configured as `gpu_device_api_backend=proxy` and
   `nixl_cuda_arch_list=90`, and `ninja` reports the tree is up to date.
 
