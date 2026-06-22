@@ -74,5 +74,10 @@ Source and build checks are aligned for this phase. Local L40S runtime evidence
 remains outside the acceptance boundary, but supported H100 validation passed
 the required Phase 1 correctness paths:
 
-Because no accepted supported-hardware EP proxy runtime evidence is available,
-the feature verification gate remains FAIL.
+- UCX-direct baseline.
+- Proxy backend import and proxy context publish.
+- Single-node 4-rank elastic LL proxy evidence.
+- Single-node 4->8 elastic LL expansion evidence.
+- Two-node 16-rank HT proxy smoke evidence.
+
+The feature verification gate is accepted for correctness-first Phase 1.
