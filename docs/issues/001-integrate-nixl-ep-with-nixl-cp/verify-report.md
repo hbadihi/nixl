@@ -81,8 +81,9 @@ optional. The implementation source used by EP is
 
 Full EP-on-proxy correctness verification requires an H100 or other sm_90
 Hopper GPU, or a separate proxy-only sm_89 microtest that does not compile or
-run the Hopper-only EP kernels. Until one of those is available, the feature
-gate cannot pass.
+run the Hopper-only EP kernels. The local L40S result remains a non-acceptance
+boundary, not product evidence. The supported H100 validation in
+`h100-verification.md` closes the Phase 1 correctness gate.
 
 <!-- VERIFY_GATE
 feature_verified: FAIL
