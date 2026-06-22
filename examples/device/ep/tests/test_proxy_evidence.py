@@ -152,6 +152,23 @@ class ProxyEvidenceClassifierTest(unittest.TestCase):
 
         self.assertEqual(record["classification"], "inconclusive")
 
+    def test_invalid_proxy_smoke_topology_is_inconclusive(self):
+        record = classify_ep_proxy_evidence(
+            {
+                "kind": "ep_proxy_evidence_v1",
+                "backend": "proxy",
+                "backend_source": BACKEND_SOURCE,
+                "rank": 0,
+                "validation_path": "ht_proxy_smoke",
+                "correctness": "pass",
+                "proxy_context_published": True,
+                "proxy_activity_observed": True,
+                "unsupported_single_node_fallback": True,
+            }
+        )
+
+        self.assertEqual(record["classification"], "inconclusive")
+
     def test_blocked_reason_is_blocked(self):
         record = classify_ep_proxy_evidence(
             {
