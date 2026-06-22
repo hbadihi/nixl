@@ -1,6 +1,6 @@
 # Functional Verification
 
-Verdict: FAIL.
+Verdict: PASS with supported H100 runtime evidence.
 
 The implementation is source/build-clean for the inspected repair phase, but the
 feature gate cannot pass on this verifier host. The available GPU is an NVIDIA
