@@ -113,7 +113,10 @@ def test_main(
             and num_ranks % NUM_LOCAL_RANKS_PER_NODE == 0
         )
     else:
-        assert num_local_ranks == 8 and num_ranks > 8
+        assert (
+            num_local_ranks == NUM_LOCAL_RANKS_PER_NODE
+            and num_ranks > NUM_LOCAL_RANKS_PER_NODE
+        )
     if local_rank == 0:
         print(
             f"[config] num_tokens={num_tokens}, hidden={hidden}, num_topk_groups={num_topk_groups}, num_topk={num_topk}",
