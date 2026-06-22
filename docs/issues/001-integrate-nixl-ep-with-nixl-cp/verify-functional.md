@@ -3,11 +3,12 @@
 Verdict: PASS with supported H100 runtime evidence.
 
 The implementation is source/build-clean for the inspected repair phase, but the
-feature gate cannot pass on this verifier host. The available GPU is an NVIDIA
-L40S with compute capability 8.9, while the EP proxy verification build is
-configured for sm_90 because the EP kernels use Hopper-only instructions. The
-remaining EP proxy runtime failure observed on this L40S host is therefore not
-valid product acceptance evidence.
+local verifier host cannot provide accepted product evidence. The available GPU
+is an NVIDIA L40S with compute capability 8.9, while the EP proxy verification
+build is configured for sm_90 because the EP kernels use Hopper-only
+instructions. The remaining EP proxy runtime failure observed on this L40S host
+is therefore not valid product acceptance evidence. Supported H100/sm_90
+validation later passed and is recorded in `h100-verification.md`.
 
 ## Scope Checked
 
