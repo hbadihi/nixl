@@ -75,6 +75,10 @@ def write_ht_evidence(
             "num_nodes": num_nodes,
             "unsupported_single_node_fallback": (
                 validation_path == "ht_two_node_rdma" and num_nodes == 1
+            )
+            or (
+                validation_path == "ht_proxy_smoke"
+                and (num_nodes < 2 or num_local_ranks != NUM_LOCAL_RANKS_PER_NODE)
             ),
         },
     )
