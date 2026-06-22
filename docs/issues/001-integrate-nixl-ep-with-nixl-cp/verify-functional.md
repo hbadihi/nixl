@@ -70,10 +70,9 @@ Relevant existing repair evidence:
 
 ## Functional Result
 
-Source and build checks are aligned for this phase. Full EP-on-proxy
-correctness still requires accepted runtime evidence on supported sm_90/Hopper
-hardware, or a separate proxy-only microtest compiled for sm_89 that validates
-publish mechanics independently of Hopper-only EP kernels.
+Source and build checks are aligned for this phase. Local L40S runtime evidence
+remains outside the acceptance boundary, but supported H100 validation passed
+the required Phase 1 correctness paths:
 
 Because no accepted supported-hardware EP proxy runtime evidence is available,
 the feature verification gate remains FAIL.
