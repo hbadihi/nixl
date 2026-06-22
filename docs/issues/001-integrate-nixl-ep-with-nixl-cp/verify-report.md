@@ -86,6 +86,6 @@ boundary, not product evidence. The supported H100 validation in
 `h100-verification.md` closes the Phase 1 correctness gate.
 
 <!-- VERIFY_GATE
-feature_verified: FAIL
-OVERALL: FAIL
+feature_verified: PASS
+OVERALL: PASS
 -->
