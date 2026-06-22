@@ -549,7 +549,10 @@ def test_loop(local_rank: int, num_local_ranks: int, args: argparse.Namespace):
             and num_ranks % NUM_LOCAL_RANKS_PER_NODE == 0
         )
     else:
-        assert num_local_ranks == 8 and num_ranks > 8
+        assert (
+            num_local_ranks == NUM_LOCAL_RANKS_PER_NODE
+            and num_ranks > NUM_LOCAL_RANKS_PER_NODE
+        )
     torch.manual_seed(rank)
 
     buffer.reset_proxy_activity_count()
