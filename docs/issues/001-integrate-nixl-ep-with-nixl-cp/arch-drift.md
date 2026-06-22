@@ -31,7 +31,7 @@ activity evidence, and explicit LL all-RDMA fallback evidence.
 
 ## Drift / Gaps
 
-- Blocking validation gap: the verifier host is NVIDIA L40S sm_89, but the EP
+- Local validation boundary: the verifier host is NVIDIA L40S sm_89, but the EP
   proxy build is sm_90 because the EP kernels require Hopper-only instructions.
   Therefore the local L40S runtime failure cannot be accepted as product
   evidence for or against the feature.
