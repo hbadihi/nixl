@@ -35,14 +35,9 @@ activity evidence, and explicit LL all-RDMA fallback evidence.
   proxy build is sm_90 because the EP kernels require Hopper-only instructions.
   Therefore the local L40S runtime failure cannot be accepted as product
   evidence for or against the feature.
-- Missing acceptance evidence: no supported sm_90/Hopper EP proxy runtime run is
-  available for this stop, and no separate sm_89 proxy-only microtest exists to
-  isolate publish mechanics from EP kernels.
-- Non-blocking source-comment drift: `src/api/gpu/meson.build:16-18` still says
-  `ProxyRuntime publishes via cudaMemcpyToSymbol`. Current code publishes with
-  the store kernel in `src/api/gpu/proxy/nixl_device_proxy.cu`. The comment
-  should be corrected in a source-editing stop, but it does not change the
-  current binary behavior.
+- Accepted supported-hardware evidence is recorded in `h100-verification.md`:
+  UCX-direct baseline, proxy backend import/publish, single-node elastic LL,
+  single-node elastic expansion, and two-node HT proxy smoke all passed on H100.
 
 ## Architecture Verdict
 
