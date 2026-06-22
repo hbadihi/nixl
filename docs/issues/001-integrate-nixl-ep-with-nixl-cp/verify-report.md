@@ -38,6 +38,12 @@ using supported H100/sm_90 runtime evidence recorded in `h100-verification.md`.
   - `python3 -c "import torch; ..."` reported CUDA available on `NVIDIA L40S`
     with capability `(8, 9)`.
   - `nvidia-smi` reported one NVIDIA L40S.
+- Supported H100 runtime verification:
+  - UCX-direct baseline passed.
+  - Proxy backend import and proxy context publish passed.
+  - Single-node 4-rank elastic LL proxy evidence was accepted.
+  - Single-node 4->8 elastic LL expansion evidence was accepted.
+  - Two-node 16-rank HT proxy smoke evidence was accepted.
 - Runtime evidence boundary:
   - The latest valid device-visible repro on this host fails at proxy publish
     with `EP_PROXY_CONTEXT_PUBLISH_FAILED: named symbol not found`, leaves CUDA
