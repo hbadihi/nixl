@@ -543,7 +543,11 @@ def test_loop(local_rank: int, num_local_ranks: int, args: argparse.Namespace):
     buffer.connect_ranks([i for i in range(num_ranks) if i != rank])
 
     if args.proxy_smoke:
-        assert num_ranks > 8 and num_ranks % 8 == 0
+        assert (
+            num_local_ranks == NUM_LOCAL_RANKS_PER_NODE
+            and num_ranks > NUM_LOCAL_RANKS_PER_NODE
+            and num_ranks % NUM_LOCAL_RANKS_PER_NODE == 0
+        )
     else:
         assert num_local_ranks == 8 and num_ranks > 8
     torch.manual_seed(rank)
