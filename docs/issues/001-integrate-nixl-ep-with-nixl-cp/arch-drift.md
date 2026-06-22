@@ -42,6 +42,5 @@ activity evidence, and explicit LL all-RDMA fallback evidence.
 ## Architecture Verdict
 
 The inspected implementation shape matches the intended proxy ownership and
-build architecture. The gate still fails because the required accepted runtime
-evidence is missing on supported hardware, not because this verifier found a
-current blocking source architecture defect.
+build architecture. The local L40S verifier remains outside the acceptance
+boundary, but supported H100 evidence closes the Phase 1 correctness gate.
