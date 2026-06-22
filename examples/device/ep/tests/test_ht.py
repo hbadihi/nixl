@@ -51,6 +51,7 @@ def write_ht_evidence(
     buffer: nixl_ep.Buffer,
     rank: int,
     num_nodes: int,
+    num_local_ranks: int,
     num_qps_per_rank: int,
     correctness: str,
 ) -> None:
