@@ -605,8 +605,8 @@ def main(default_proxy_smoke: bool = False):
     parser.add_argument(
         "--num-processes",
         type=int,
-        default=16 if default_proxy_smoke else 8,
-        help="Number of processes to spawn (default: 16 for proxy smoke, otherwise 8)",
+        default=NUM_LOCAL_RANKS_PER_NODE,
+        help="Number of local processes to spawn per node",
     )
     parser.add_argument(
         "--num-tokens",
