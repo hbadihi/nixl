@@ -77,7 +77,7 @@ This returned nonzero because the task sidecar marks the root-level file as
 optional. The implementation source used by EP is
 `examples/device/ep/csrc/nixl_ep.cpp`.
 
-## Unresolved Blocker
+## Local Hardware Boundary
 
 Full EP-on-proxy correctness verification requires an H100 or other sm_90
 Hopper GPU, or a separate proxy-only sm_89 microtest that does not compile or
