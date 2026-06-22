@@ -2,11 +2,11 @@
 
 Verdict: PASS with supported H100 runtime evidence.
 
-E2R 119 verification finds the current implementation source/build-clean for the
-targeted proxy context repair, but not feature-verified. The unresolved blocker
-is unsupported validation hardware / missing supported-hardware runtime
-evidence: this host has an NVIDIA L40S sm_89 GPU, while the EP proxy build is
-sm_90 for Hopper-only EP kernels.
+E2R 119 local verification found the implementation source/build-clean for the
+targeted proxy context repair, but the local verifier host could not provide
+accepted product evidence because it has an NVIDIA L40S sm_89 GPU while the EP
+proxy build is sm_90 for Hopper-only EP kernels. The gate was later accepted
+using supported H100/sm_90 runtime evidence recorded in `h100-verification.md`.
 
 ## Evidence Summary
 
