@@ -44,6 +44,7 @@ from utils import (  # noqa: E402
 )
 
 TCP_STORE_PORT = 9999
+NUM_LOCAL_RANKS_PER_NODE = 8
 
 
 def write_ht_evidence(
@@ -497,7 +498,7 @@ def test_loop(local_rank: int, num_local_ranks: int, args: argparse.Namespace):
     # so that UCX/DOCA can see all GPUs for GPU-initiated RDMA when needed.
     torch.set_default_dtype(torch.bfloat16)
     torch.set_default_device("cuda")
-    torch.cuda.set_device(local_rank % 8)
+    torch.cuda.set_device(local_rank % NUM_LOCAL_RANKS_PER_NODE)
 
     num_nodes = int(os.getenv("WORLD_SIZE", 1))
 
@@ -584,7 +585,13 @@ def test_loop(local_rank: int, num_local_ranks: int, args: argparse.Namespace):
         raise
     else:
         write_ht_evidence(
-            args, buffer, rank, num_nodes, num_qps_per_rank, correctness="pass"
+            args,
+            buffer,
+            rank,
+            num_nodes,
+            num_local_ranks,
+            num_qps_per_rank,
+            correctness="pass",
         )
 
     # Destroy the buffer runtime and communication group

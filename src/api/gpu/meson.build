@@ -14,9 +14,9 @@
 # limitations under the License.
 
 # proxy/nixl_device_proxy.cu defines g_nixl_proxy_ctx, the __device__ global
-# that ProxyRuntime publishes via cudaMemcpyToSymbol and device kernels read
-# through load_proxy_context(). It must be compiled as a separate CUDA TU so
-# that the symbol exists at device link time.
+# that host code publishes through the proxy store-kernel helpers and device
+# kernels read through load_proxy_context(). It must be compiled as a separate
+# CUDA TU so that the symbol exists at device link time.
 if cuda_dep.found()
     nixl_gpu_proxy_lib = static_library('nixl_gpu_proxy',
         'proxy/nixl_device_proxy.cu',
