@@ -289,9 +289,25 @@ void Buffer::init(int num_ranks, int num_experts_per_rank, int64_t num_nvl_bytes
     nixl_peer_info.resize(max_num_ranks);
     nixl_peer_info[rank] = my_peer_info;
 
-    _nixl_agent_init();
-
-    _nixl_ep_init();
+    try {
+        _nixl_agent_init();
+        _nixl_ep_init();
+    } catch (...) {
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+        if (proxy_context_published) {
+            cudaError_t proxy_clear_status =
+                ::nixl_ep_proxy_clear_context(proxy_context_owner_id);
+            if (proxy_clear_status == cudaSuccess) {
+                proxy_context_published = false;
+            } else {
+                fprintf(stderr,
+                        "WARNING: init() failed to clear proxy device context: %s\n",
+                        cudaGetErrorString(proxy_clear_status));
+            }
+        }
+#endif
+        throw;
+    }
 }
 
 Buffer::~Buffer() noexcept {
@@ -1604,6 +1620,20 @@ void Buffer::_nixl_agent_init() {
                                     nixl_agent_info->agent_name + ", status: " + std::to_string(status));
         }
     }
+
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    void *proxy_ctx = agent->getProxyDeviceContext();
+    if (proxy_ctx == nullptr) {
+        throw std::runtime_error("EP_PROXY_CONTEXT_UNAVAILABLE: proxy device context is not available after UCX backend creation");
+    }
+    cudaError_t proxy_publish_status =
+        ::nixl_ep_proxy_publish_context(proxy_ctx, proxy_context_owner_id);
+    if (proxy_publish_status != cudaSuccess) {
+        throw std::runtime_error(std::string("EP_PROXY_CONTEXT_PUBLISH_FAILED: ") +
+                                 cudaGetErrorString(proxy_publish_status));
+    }
+    proxy_context_published = true;
+#endif
 }
 
 void Buffer::_nixl_agents_disconnect(const std::vector<int>& ranks) {
