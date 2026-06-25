@@ -12,10 +12,10 @@
 # and is independent of both knobs, so any (ucx_workers, proxy_workers) combo is correctness-safe;
 # they only change which QP carries a channel and how many CPU threads drain.
 #
-# Usage (run from the EP example dir, with PYTHONPATH at your PROXY build tree):
+# Usage (PYTHONPATH must point at a BUILT proxy tree; cwd does not matter — all paths below
+# are resolved absolutely, and the import check runs from a neutral cwd):
 #   export PYTHONPATH=<repo>/build-proxy/examples/device/ep
-#   cd <repo>/examples/device/ep
-#   bash tests/elastic/proxy_worker_matrix.sh
+#   bash <repo>/examples/device/ep/tests/elastic/proxy_worker_matrix.sh
 #
 # Override anything via env:
 #   UCX_WORKERS="1 2 4 8" PROXY_WORKERS="1 2" \
@@ -51,12 +51,17 @@ else
 fi
 
 # Pre-flight: confirm the EP extension is importable (PYTHONPATH points at a built tree).
-if ! python3 -c "import nixl_ep; print('nixl_ep backend:', nixl_ep.get_gpu_device_api_backend())" 2>/tmp/_ep_import.txt; then
-    echo "ERROR: cannot import nixl_ep. Set PYTHONPATH to <build>/examples/device/ep and run from the EP example dir." >&2
+# Run python from a neutral cwd: if invoked from the EP example dir, the SOURCE ./nixl_ep
+# package (which has no compiled nixl_ep_cpp) would shadow the built one on PYTHONPATH for a
+# `python -c` import (cwd is sys.path[0]), so the check must not run with that dir as cwd.
+# elastic.py below is unaffected (a script invocation puts the script's dir on the path, not cwd).
+ep_py() { ( cd / && python3 "$@" ); }
+if ! ep_py -c "import nixl_ep; print('nixl_ep backend:', nixl_ep.get_gpu_device_api_backend())" 2>/tmp/_ep_import.txt; then
+    echo "ERROR: cannot import nixl_ep. Set PYTHONPATH to a BUILT tree (<build>/examples/device/ep)." >&2
     cat /tmp/_ep_import.txt >&2
     exit 1
 fi
-backend=$(python3 -c "import nixl_ep; print(nixl_ep.get_gpu_device_api_backend())" 2>/dev/null)
+backend=$(ep_py -c "import nixl_ep; print(nixl_ep.get_gpu_device_api_backend())" 2>/dev/null)
 if [ "$backend" != "proxy" ]; then
     echo "WARNING: nixl_ep backend is '$backend', not 'proxy'. The worker knobs only affect the proxy build." >&2
 fi
