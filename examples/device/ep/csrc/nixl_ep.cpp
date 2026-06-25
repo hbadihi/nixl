@@ -687,6 +687,10 @@ void Buffer::connect_ranks(const std::vector<int>& remote_ranks_list, const std:
 
     _nixl_ep_memory_views_destroy();
 
+    // Rebuilding the remote memviews here is also the proxy's channel-activation signal:
+    // prepMemView drives per-rank ring activation/quiesce inside the runtime (it diffs each
+    // element's remote agent and revives only the bands that changed), so no explicit
+    // per-rank reset call is needed — connect and disconnect both rebuild these memviews.
     _nixl_ep_memory_views_create();
 
     CUDA_CHECK(cudaDeviceSynchronize());
@@ -1560,7 +1564,16 @@ void Buffer::_nixl_agent_init() {
         proxy_channel_count_for_lane_ceiling(required_proxy_channels));
     proxy_worker_count = 1;
     cfg.proxyWorkerCount = static_cast<uint32_t>(proxy_worker_count);
-    cfg.proxyChannelCount = static_cast<uint32_t>(configured_proxy_channels);
+    // Per-(rank,lane) ring isolation: allocate `configured_proxy_channels` lanes per
+    // destination rank, so the device encodes ring = rank * channels_per_rank + lane and
+    // each (rank, lane) owns its own ring/completion slot/error latch. This is what keeps
+    // one rank's failure or disconnect from poisoning rings shared with other ranks
+    // (the elasticity guarantee). channels_per_rank must equal the UCX worker count below
+    // (both = configured_proxy_channels) so the host adapter recovers the lane via
+    // `ring % num_workers`.
+    cfg.proxyChannelsPerRank = static_cast<uint32_t>(configured_proxy_channels);
+    cfg.proxyChannelCount =
+        static_cast<uint32_t>(configured_proxy_channels) * static_cast<uint32_t>(max_num_ranks);
 #endif
     auto agent = std::make_shared<nixlAgent>(agent_name, cfg);
 
@@ -1578,6 +1591,28 @@ void Buffer::_nixl_agent_init() {
     init_params["ucx_num_device_channels"] = num_channels_env ? num_channels_env : "4";
     init_params["ucx_error_handling_mode"] = "none";
     init_params["num_workers"] = std::to_string(1);
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    // [M2] One proxy drain thread (proxyWorkerCount stays 1), but N UCX workers so each
+    // proxy channel maps 1:1 onto its own UCX worker/EP/QP per peer. The mapping
+    // (channel_id % num_workers) is applied at submit time in nixlUcxProxyBackendAdapter.
+    //
+    // QP-model note: in UCX-direct (GDA), a single worker/EP exposes multiple device QPs
+    // and the kernel's channel_id selects the QP *inside* the EP (RC_GDA_NUM_CHANNELS,
+    // one rkey covering all). The CPU proxy submits from the host (ucp_put_nbx), which has
+    // no device-channel index, so the only way to get one QP per channel is N workers/EPs
+    // (one rkey per EP). The two models cannot converge because GDA channels are device-only.
+    //
+    // ucx_num_device_channels is therefore inert for proxy submits but still provisions
+    // RC_GDA_NUM_CHANNELS QPs on every one of the N worker EPs; force it to 1 to avoid
+    // multiplying unused GDA QPs (num_workers x device_channels) and risking QP exhaustion.
+    //
+    // num_workers is derived from proxyChannelsPerRank (not just both happening to equal
+    // configured_proxy_channels): the host adapter recovers the lane via
+    // `ring % num_workers`, which only holds when num_workers == channels_per_rank, so the
+    // two are single-sourced here to keep that invariant from drifting.
+    init_params["num_workers"] = std::to_string(cfg.proxyChannelsPerRank);
+    init_params["ucx_num_device_channels"] = "1";
+#endif
 
     nixlBackendH* ucx_backend = nullptr;
     status = agent->createBackend("UCX", init_params, ucx_backend);

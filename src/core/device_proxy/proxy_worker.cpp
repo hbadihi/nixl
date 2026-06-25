@@ -27,14 +27,17 @@ ProxyWorker::ProxyWorker(nixlDeviceProxyBackendAdapter *backend,
                          nixlProxyChannelState *assigned_channels,
                          uint32_t assigned_channel_count,
                          uint64_t pthr_delay_us,
-                         std::atomic<uint64_t> *submitted_work_count) noexcept
+                         std::atomic<uint64_t> *submitted_work_count,
+                         std::atomic<uint64_t> *assigned_generations) noexcept
     : backend_(backend),
       proxy_memview_registry_(proxy_memview_registry),
       shutdown_word_(shutdown_word),
       assigned_channels_(assigned_channels),
       assigned_channel_count_(assigned_channel_count),
       pthr_delay_us_(pthr_delay_us),
-      submitted_work_count_(submitted_work_count) {}
+      submitted_work_count_(submitted_work_count),
+      assigned_generations_(assigned_generations),
+      last_seen_gen_(assigned_channel_count, 0) {}
 
 ProxyWorker::~ProxyWorker() {
     join();
@@ -66,6 +69,19 @@ void
 ProxyWorker::runOnce() {
     for (uint32_t i = 0; i < assigned_channel_count_; i++) {
         nixlProxyChannelState &channel = assigned_channels_[i];
+        // Revive: the connection layer bumped this band's generation because its remote
+        // agent changed ((re)connect/disconnect). Reconcile lazily here on the worker
+        // thread (the sole mutator of channel state). The band is quiescent at the bump
+        // (disconnect masks+syncs first; a (re)connecting rank isn't sent to until connect
+        // completes) and resetChannel is acquire/release-safe vs a concurrent enqueue
+        // regardless, so discarding stale entries cannot corrupt the new incarnation.
+        if (assigned_generations_ != nullptr) {
+            const uint64_t gen = assigned_generations_[i].load(std::memory_order_acquire);
+            if (gen != last_seen_gen_[i]) {
+                resetChannel(channel);
+                last_seen_gen_[i] = gen;
+            }
+        }
         nixlProxySubmission submission;
         while (tryDequeue(channel, submission)) {
             submitToBackend(channel, submission);
@@ -185,4 +201,44 @@ ProxyWorker::publishCompletions(nixlProxyChannelState &channel) {
             break;
         }
     }
+}
+
+void
+ProxyWorker::resetChannel(nixlProxyChannelState &channel) {
+    // Discard any stale ring entries left by the previous incarnation of this rank.
+    // Draining them normally would hit a retired memview (prepareSubmission ->
+    // NIXL_ERR_NOT_FOUND) and immediately re-latch the channel, so we drop them
+    // instead of submitting. Safe because the ring is quiescent during reset.
+    uint64_t consumer = __atomic_load_n(channel.consumer_idx_host_, __ATOMIC_RELAXED);
+    uint32_t discarded = 0;
+    for (;;) {
+        const uint32_t slot = static_cast<uint32_t>(consumer % channel.ring_depth_);
+        if (__atomic_load_n(&channel.records_host_[slot].op_idx, __ATOMIC_ACQUIRE) == 0) {
+            break;
+        }
+        __atomic_store_n(&channel.records_host_[slot].op_idx, 0, __ATOMIC_RELAXED);
+        consumer += 1;
+        discarded += 1;
+    }
+    __atomic_store_n(channel.consumer_idx_host_, consumer, __ATOMIC_RELEASE);
+
+    // Best-effort release of any backend handles still tracked for this channel, then
+    // drop the inflight queue. A handle that never reaches a terminal status (rare,
+    // transport-failure case) is dropped; the backend adapter cleans up on shutdown.
+    for (auto &inflight : channel.inflight_requests) {
+        if (inflight.status == NIXL_IN_PROG) {
+            backend_->checkCompletion(inflight.backend_req_token);
+        }
+    }
+    channel.inflight_requests.clear();
+
+    // Clear the latch and the terminal status so the rank can use the lane again.
+    // Monotonic indices (producer/consumer/completed_idx) are intentionally left as-is.
+    channel.error_latched = false;
+    if (channel.completion_slot_host_ != nullptr) {
+        channel.completion_slot_host_->next_status = NIXL_IN_PROG;
+    }
+
+    NIXL_DEBUG << "ProxyWorker::resetChannel: channel=" << channel.device_view.channel_id
+               << " discarded=" << discarded;
 }

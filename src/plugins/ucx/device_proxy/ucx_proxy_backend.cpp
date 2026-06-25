@@ -41,13 +41,22 @@ nixlUcxProxyBackendAdapter::submit(const nixlBackendProxySubmission &submission,
     }
 }
 
+size_t
+nixlUcxProxyBackendAdapter::workerIdForChannel(uint32_t channel_id) const {
+    const size_t num_workers = engine_->getSharedWorkersSize();
+    return num_workers ? (channel_id % num_workers) : 0;
+}
+
 nixl_status_t
 nixlUcxProxyBackendAdapter::submitPut(const nixlBackendProxySubmission &submission,
                                       uint64_t &request_token) {
+    const size_t worker_id = workerIdForChannel(submission.channel_id);
+
     nixlBackendReqH *handle = nullptr;
     nixl_status_t status = engine_->submitProxyRmaWrite(submission.local.desc,
                                                         submission.remote.desc,
                                                         submission.size,
+                                                        worker_id,
                                                         handle);
     if (status != NIXL_SUCCESS && status != NIXL_IN_PROG) {
         NIXL_DEBUG << "nixlUcxProxyBackendAdapter::submitPut: submitProxyRmaWrite failed "
@@ -71,9 +80,14 @@ nixlUcxProxyBackendAdapter::submitPut(const nixlBackendProxySubmission &submissi
 nixl_status_t
 nixlUcxProxyBackendAdapter::submitAtomicAdd(const nixlBackendProxySubmission &submission,
                                             uint64_t &request_token) {
+    // Same channel -> worker mapping as submitPut so a channel's put and its follow-up
+    // atomic flag travel the same worker/EP/QP, preserving IB write-before-atomic order.
+    const size_t worker_id = workerIdForChannel(submission.channel_id);
+
     nixlBackendReqH *handle = nullptr;
     nixl_status_t status = engine_->submitProxyAtomicAdd(submission.remote.desc,
                                                          submission.value,
+                                                         worker_id,
                                                          handle);
     if (status != NIXL_SUCCESS && status != NIXL_IN_PROG) {
         NIXL_DEBUG << "nixlUcxProxyBackendAdapter::submitAtomicAdd: submitProxyAtomicAdd "

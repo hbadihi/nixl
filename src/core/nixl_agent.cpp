@@ -312,7 +312,8 @@ nixlAgentData::createProxyRuntime(nixlBackendEngine *engine,
     proxyRuntime = std::make_unique<nixlProxyRuntime>();
 
     status = proxyRuntime->init(
-        std::move(proxy_adapter), config_.proxyChannelCount, config_.proxyWorkerCount, config_.pthrDelay);
+        std::move(proxy_adapter), config_.proxyChannelCount, config_.proxyWorkerCount,
+        config_.proxyChannelsPerRank, config_.pthrDelay);
     if (status != NIXL_SUCCESS) {
         proxyRuntime.reset();
         return status;
@@ -362,6 +363,7 @@ nixlAgent::resetProxySubmittedWorkCount() const {
         data->proxyRuntime->resetSubmittedWorkCount();
     }
 }
+
 
 nixl_status_t
 nixlAgent::createBackend(const nixl_backend_t &type,
