@@ -364,13 +364,6 @@ nixlAgent::resetProxySubmittedWorkCount() const {
     }
 }
 
-nixl_status_t
-nixlAgent::resetProxyRankChannels(uint32_t rank) const {
-    if (data->proxyRuntime) {
-        return data->proxyRuntime->resetRankChannels(rank);
-    }
-    return NIXL_SUCCESS;
-}
 
 nixl_status_t
 nixlAgent::createBackend(const nixl_backend_t &type,

@@ -540,25 +540,44 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedAtomicAddDescriptor) {
     EXPECT_EQ(prepared.value, 42u);
 }
 
-TEST_F(ProxyRuntimeTest, ResetRankChannelsNoopWhenEncodingDisabled) {
-    // 3-arg init leaves channels_per_rank == 0 (rank encoding disabled).
-    ASSERT_EQ(initRuntime(4, 1), NIXL_SUCCESS);
-    ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
-    EXPECT_EQ(runtime_.resetRankChannels(0), NIXL_SUCCESS);
-    EXPECT_EQ(runtime_.resetRankChannels(123), NIXL_SUCCESS);
-    ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
+// Build a remote dlist whose element positions carry the given agents (empty string ->
+// the null-agent "absent" slot). Element position i is rank i, i.e. proxy band i.
+static nixl_remote_meta_dlist_t
+makeRemoteBandDlist(const std::vector<std::string> &agents, nixlBackendMD *md) {
+    nixl_remote_meta_dlist_t dlist(DRAM_SEG);
+    for (const auto &agent : agents) {
+        if (agent.empty()) {
+            dlist.addDesc(nixlRemoteMetaDesc(nixl_null_agent));
+        } else {
+            nixlRemoteMetaDesc desc(agent);
+            desc.addr = 0x4000;
+            desc.len = 64;
+            desc.devId = 0;
+            desc.metadataP = md;
+            dlist.addDesc(desc);
+        }
+    }
+    return dlist;
 }
 
-TEST_F(ProxyRuntimeTest, ResetRankChannelsRejectsOutOfRange) {
-    // 4 channels, 2 per rank => ranks {0, 1}. Rank 5 maps to [10, 12), out of range.
-    auto backend = std::make_unique<StubBackend>();
-    backend_ = backend.get();
-    ASSERT_EQ(runtime_.init(std::move(backend), /*channel_count=*/4, /*worker_count=*/1,
-                            /*channels_per_rank=*/2),
-              NIXL_SUCCESS);
-    ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
-    EXPECT_EQ(runtime_.resetRankChannels(5), NIXL_ERR_INVALID_PARAM);
-    ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
+// Inject a record into ring slot `slot_idx`: zero op_idx, copy, then release-store the
+// real op_idx (the GPU->CPU signal the worker acquire-polls).
+static void
+publishRecord(nixlProxySubmission *records, uint32_t slot_idx, nixlProxySubmission rec,
+              uint64_t op_idx) {
+    rec.op_idx = 0;
+    records[slot_idx] = rec;
+    __atomic_store_n(&records[slot_idx].op_idx, op_idx, __ATOMIC_RELEASE);
+}
+
+static nixlProxySubmission
+badPut(uint32_t channel) {  // unregistered dst memview -> prepareSubmission fails -> latch
+    nixlProxySubmission s{};
+    s.opcode = nixl_proxy_opcode_t::PUT;
+    s.channel_id = channel;
+    s.dst_proxy_memview_id = 9999;
+    s.size = 32;
+    return s;
 }
 
 TEST_F(ProxyRuntimeTest, InitRejectsChannelCountNotMultipleOfChannelsPerRank) {
@@ -570,19 +589,44 @@ TEST_F(ProxyRuntimeTest, InitRejectsChannelCountNotMultipleOfChannelsPerRank) {
               NIXL_ERR_INVALID_PARAM);
 }
 
-// Latch a channel with a failed submission, then prove resetRankChannels revives it:
-// the terminal error status is cleared and a subsequent valid submission completes.
-TEST_F(ProxyRuntimeTest, ResetRankChannelsRevivesLatchedChannel) {
+// With rank encoding disabled (channels_per_rank == 0) a remote memview registration must
+// NOT revive channels: a latched channel stays latched.
+TEST_F(ProxyRuntimeTest, MemviewRegisterNoopWhenEncodingDisabled) {
+    DummyBackendMD remote_md;
+    ASSERT_EQ(initRuntime(4, 1), NIXL_SUCCESS);  // 3-arg init => channels_per_rank == 0
+    ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
+
+    auto *records = hostAliasOf(copyDeviceWorkRing(runtime_.deviceChannelViews()[2]).records);
+    auto *slot = hostAliasOf(runtime_.deviceChannelViews()[2].completion_slot);
+    publishRecord(records, 0, badPut(2), 11);
+    ASSERT_TRUE(waitForCompletedIdx(slot, 11));
+    ASSERT_LT(slot->next_status, 0);  // latched
+
+    // A remote memview registration that WOULD activate band 1 if encoding were on.
+    nixlMemViewH mvh = nullptr;
+    ASSERT_EQ(runtime_.prepMemView(makeRemoteBandDlist({"", "peer1"}, &remote_md), &mvh),
+              NIXL_SUCCESS);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    EXPECT_LT(slot->next_status, 0);  // still latched: activation is disabled
+    ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
+}
+
+// Latch a channel, then prove that RE-REGISTERING the remote memview with that band's
+// agent changed revives it (the connection-driven path) — while an UNCHANGED band's latch
+// is left intact (targeted, no busy-wait, no manual reset call).
+TEST_F(ProxyRuntimeTest, MemviewReregisterRevivesLatchedChannel) {
     DummyBackendMD local_md;
     DummyBackendMD remote_md;
 
     auto backend = std::make_unique<StubBackend>();
     backend_ = backend.get();
-    // 4 channels, 2 per rank => rank 1 owns channels {2, 3}. Single drain worker.
+    // 4 channels, 2 per rank => rank 0 owns {0,1}, rank 1 owns {2,3}. Single drain worker.
     ASSERT_EQ(runtime_.init(std::move(backend), /*channel_count=*/4, /*worker_count=*/1,
                             /*channels_per_rank=*/2),
               NIXL_SUCCESS);
 
+    // Valid src/dst memviews for the post-revive submission on rank 1.
     nixlMemViewH src_proxy = nullptr;
     nixlMemViewH dst_proxy = nullptr;
     ASSERT_EQ(runtime_.registerProxyMemView(reinterpret_cast<nixlMemViewH>(uintptr_t{0x10}),
@@ -594,65 +638,55 @@ TEST_F(ProxyRuntimeTest, ResetRankChannelsRevivesLatchedChannel) {
     nixl_meta_dlist_t local_dlist(DRAM_SEG);
     local_dlist.addDesc(nixlMetaDesc(0x1000, 64, 0, &local_md));
     ASSERT_EQ(runtime_.storeMetadata(src_proxy, local_dlist), NIXL_SUCCESS);
-    nixl_remote_meta_dlist_t remote_dlist(DRAM_SEG);
-    nixlRemoteMetaDesc remote_desc("peer");
-    remote_desc.addr = 0x2000;
-    remote_desc.len = 64;
-    remote_desc.devId = 0;
-    remote_desc.metadataP = &remote_md;
-    remote_dlist.addDesc(remote_desc);
-    ASSERT_EQ(runtime_.storeMetadata(dst_proxy, remote_dlist), NIXL_SUCCESS);
+    nixl_remote_meta_dlist_t dst_dlist(DRAM_SEG);
+    nixlRemoteMetaDesc dst_desc("peer1");
+    dst_desc.addr = 0x2000;
+    dst_desc.len = 64;
+    dst_desc.devId = 0;
+    dst_desc.metadataP = &remote_md;
+    dst_dlist.addDesc(dst_desc);
+    ASSERT_EQ(runtime_.storeMetadata(dst_proxy, dst_dlist), NIXL_SUCCESS);
 
     ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
 
-    constexpr uint32_t kChannel = 2;  // belongs to rank 1
-    const nixlProxyWorkRing ring = copyDeviceWorkRing(runtime_.deviceChannelViews()[kChannel]);
-    auto *records = hostAliasOf(ring.records);
-    auto *slot = hostAliasOf(
-        runtime_.deviceChannelViews()[kChannel].completion_slot);
-    ASSERT_NE(records, nullptr);
-    ASSERT_NE(slot, nullptr);
+    auto *records2 = hostAliasOf(copyDeviceWorkRing(runtime_.deviceChannelViews()[2]).records);
+    auto *slot2 = hostAliasOf(runtime_.deviceChannelViews()[2].completion_slot);
+    auto *records0 = hostAliasOf(copyDeviceWorkRing(runtime_.deviceChannelViews()[0]).records);
+    auto *slot0 = hostAliasOf(runtime_.deviceChannelViews()[0].completion_slot);
 
-    // Publish a record into ring slot `slot_idx`: zero op_idx, copy, then release-store
-    // the real op_idx (the GPU->CPU signal the worker acquire-polls).
-    auto publishRecord = [&](uint32_t slot_idx, nixlProxySubmission rec, uint64_t op_idx) {
-        rec.op_idx = 0;
-        records[slot_idx] = rec;
-        __atomic_store_n(&records[slot_idx].op_idx, op_idx, __ATOMIC_RELEASE);
-    };
+    // Latch channel 2 (band 1) and channel 0 (band 0).
+    publishRecord(records2, 0, badPut(2), 11);
+    publishRecord(records0, 0, badPut(0), 21);
+    ASSERT_TRUE(waitForCompletedIdx(slot2, 11));
+    ASSERT_TRUE(waitForCompletedIdx(slot0, 21));
+    ASSERT_LT(slot2->next_status, 0);
+    ASSERT_LT(slot0->next_status, 0);
 
-    // (1) Inject a record whose destination memview is invalid -> prepareSubmission
-    // fails with NIXL_ERR_NOT_FOUND, the worker publishes a terminal error and latches
-    // the channel (exactly the failure a disconnecting rank produces).
-    nixlProxySubmission bad{};
-    bad.opcode = nixl_proxy_opcode_t::PUT;
-    bad.channel_id = kChannel;
-    bad.dst_proxy_memview_id = 9999;  // not registered
-    bad.dst_offset = 0;
-    bad.size = 32;
-    publishRecord(0, bad, 11);
+    // Re-register a remote memview that activates ONLY band 1 (band 0 stays absent).
+    nixlMemViewH mvh = nullptr;
+    ASSERT_EQ(runtime_.prepMemView(makeRemoteBandDlist({"", "peer1"}, &remote_md), &mvh),
+              NIXL_SUCCESS);
 
-    ASSERT_TRUE(waitForCompletedIdx(slot, 11));
-    EXPECT_LT(slot->next_status, 0);  // terminal error published, channel now latched
+    // Band 1 is revived lazily by the worker; poll until the latch on channel 2 clears.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+    while (slot2->next_status < 0 && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    EXPECT_EQ(slot2->next_status, NIXL_IN_PROG);  // band 1 revived
+    EXPECT_LT(slot0->next_status, 0);             // band 0 unchanged => NOT revived
 
-    // (2) Revive rank 1's channels. Blocks until the worker applies the reset.
-    ASSERT_EQ(runtime_.resetRankChannels(1), NIXL_SUCCESS);
-    EXPECT_EQ(slot->next_status, NIXL_IN_PROG);  // latch cleared
-
-    // (3) A valid submission on the revived channel must now complete. Without the
-    // reset the channel would stay latched and completed_idx would never reach 12.
+    // A valid submission on the revived channel 2 now completes.
     nixlProxySubmission good{};
     good.opcode = nixl_proxy_opcode_t::PUT;
-    good.channel_id = kChannel;
+    good.channel_id = 2;
     good.src_proxy_memview_id = reinterpret_cast<uint64_t>(src_proxy);
     good.src_offset = 4;
     good.dst_proxy_memview_id = reinterpret_cast<uint64_t>(dst_proxy);
     good.dst_offset = 8;
     good.size = 32;
-    publishRecord(1, good, 12);
-
-    ASSERT_TRUE(waitForCompletedIdx(slot, 12));
-    EXPECT_EQ(slot->next_status, NIXL_SUCCESS);
+    publishRecord(records2, 1, good, 12);
+    ASSERT_TRUE(waitForCompletedIdx(slot2, 12));
+    EXPECT_EQ(slot2->next_status, NIXL_SUCCESS);
 
     ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
 }

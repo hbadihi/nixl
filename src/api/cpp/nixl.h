@@ -584,21 +584,6 @@ class nixlAgent {
         void
         resetProxySubmittedWorkCount() const;
 
-        /**
-         * @brief  Revive the device-proxy rings owned by a (re)connecting rank.
-         *
-         * Clears any error latch and discards stale ring/in-flight state for the
-         * channels of @p rank, so a lane a previous incarnation of that rank left
-         * latched can be reused after reconnect. No-op when proxy mode is inactive
-         * or per-rank ring encoding is disabled. The caller must have masked the rank
-         * and synchronized the device first so the rings are quiescent.
-         *
-         * @param rank  Global rank whose proxy channels should be reset.
-         * @return NIXL_SUCCESS on success (including no-op), error status otherwise.
-         */
-        nixl_status_t
-        resetProxyRankChannels(uint32_t rank) const;
-
 };
 
 #endif

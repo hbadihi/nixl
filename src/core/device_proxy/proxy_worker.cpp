@@ -28,7 +28,7 @@ ProxyWorker::ProxyWorker(nixlDeviceProxyBackendAdapter *backend,
                          uint32_t assigned_channel_count,
                          uint64_t pthr_delay_us,
                          std::atomic<uint64_t> *submitted_work_count,
-                         std::atomic<uint32_t> *assigned_reset_flags) noexcept
+                         std::atomic<uint64_t> *assigned_generations) noexcept
     : backend_(backend),
       proxy_memview_registry_(proxy_memview_registry),
       shutdown_word_(shutdown_word),
@@ -36,7 +36,8 @@ ProxyWorker::ProxyWorker(nixlDeviceProxyBackendAdapter *backend,
       assigned_channel_count_(assigned_channel_count),
       pthr_delay_us_(pthr_delay_us),
       submitted_work_count_(submitted_work_count),
-      assigned_reset_flags_(assigned_reset_flags) {}
+      assigned_generations_(assigned_generations),
+      last_seen_gen_(assigned_channel_count, 0) {}
 
 ProxyWorker::~ProxyWorker() {
     join();
@@ -68,14 +69,18 @@ void
 ProxyWorker::runOnce() {
     for (uint32_t i = 0; i < assigned_channel_count_; i++) {
         nixlProxyChannelState &channel = assigned_channels_[i];
-        // Revive: a (re)connecting rank requested this channel be cleared. The
-        // requester (resetRankChannels) blocks until we clear the flag and the ring
-        // is quiescent during that window, so discarding stale entries here cannot
-        // drop a live submission from the new incarnation.
-        if (assigned_reset_flags_ != nullptr &&
-            assigned_reset_flags_[i].load(std::memory_order_acquire) != 0) {
-            resetChannel(channel);
-            assigned_reset_flags_[i].store(0, std::memory_order_release);
+        // Revive: the connection layer bumped this band's generation because its remote
+        // agent changed ((re)connect/disconnect). Reconcile lazily here on the worker
+        // thread (the sole mutator of channel state). The band is quiescent at the bump
+        // (disconnect masks+syncs first; a (re)connecting rank isn't sent to until connect
+        // completes) and resetChannel is acquire/release-safe vs a concurrent enqueue
+        // regardless, so discarding stale entries cannot corrupt the new incarnation.
+        if (assigned_generations_ != nullptr) {
+            const uint64_t gen = assigned_generations_[i].load(std::memory_order_acquire);
+            if (gen != last_seen_gen_[i]) {
+                resetChannel(channel);
+                last_seen_gen_[i] = gen;
+            }
         }
         nixlProxySubmission submission;
         while (tryDequeue(channel, submission)) {

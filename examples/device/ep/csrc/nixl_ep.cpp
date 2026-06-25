@@ -687,24 +687,13 @@ void Buffer::connect_ranks(const std::vector<int>& remote_ranks_list, const std:
 
     _nixl_ep_memory_views_destroy();
 
+    // Rebuilding the remote memviews here is also the proxy's channel-activation signal:
+    // prepMemView drives per-rank ring activation/quiesce inside the runtime (it diffs each
+    // element's remote agent and revives only the bands that changed), so no explicit
+    // per-rank reset call is needed — connect and disconnect both rebuild these memviews.
     _nixl_ep_memory_views_create();
 
     CUDA_CHECK(cudaDeviceSynchronize());
-
-    // Revive the proxy rings for each (re)connecting rank: if a previous incarnation of
-    // this rank left a lane error-latched (e.g. a transport failure or a teardown race),
-    // clear it now that the device is synchronized and the rings are quiescent, so the
-    // rejoined rank can use its lanes again. No-op under the UCX-direct backend and when
-    // per-rank ring encoding is disabled.
-    for (int new_rank : new_ranks) {
-        nixl_status_t reset_status =
-            nixl_agent_info->agent->resetProxyRankChannels(static_cast<uint32_t>(new_rank));
-        if (reset_status != NIXL_SUCCESS) {
-            throw std::runtime_error("Failed to reset proxy rank channels for rank " +
-                                     std::to_string(new_rank) +
-                                     ", status: " + std::to_string(reset_status));
-        }
-    }
 
     // Ready to use
     available = true;

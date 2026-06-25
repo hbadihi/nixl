@@ -20,6 +20,7 @@
 #include <atomic>
 #include <cstdint>
 #include <thread>
+#include <vector>
 #include "proxy_protocol.h"
 
 class nixlDeviceProxyBackendAdapter;
@@ -35,7 +36,7 @@ class ProxyWorker {
                     uint32_t assigned_channel_count,
                     uint64_t pthr_delay_us,
                     std::atomic<uint64_t> *submitted_work_count,
-                    std::atomic<uint32_t> *assigned_reset_flags = nullptr) noexcept;
+                    std::atomic<uint64_t> *assigned_generations = nullptr) noexcept;
         ~ProxyWorker();
 
         void start(uint32_t worker_idx);
@@ -59,7 +60,7 @@ class ProxyWorker {
 
         // Drain-and-discard any stale ring entries + clear inflight/error/completion
         // state for a channel whose owning rank is (re)connecting. Runs only on the
-        // worker thread (sole accessor of channel state), triggered by an atomic flag.
+        // worker thread (sole accessor of channel state), triggered by a generation bump.
         void
         resetChannel(nixlProxyChannelState &channel);
 
@@ -70,9 +71,11 @@ class ProxyWorker {
         uint32_t assigned_channel_count_ = 0;
         uint64_t pthr_delay_us_ = 0;
         std::atomic<uint64_t> *submitted_work_count_ = nullptr;
-        // Per-assigned-channel revive flags (runtime-owned slice; nullptr if disabled).
-        // Set by nixlProxyRuntime::resetRankChannels, consumed by this worker.
-        std::atomic<uint32_t> *assigned_reset_flags_ = nullptr;
+        // Per-assigned-channel generation slice (runtime-owned; nullptr if disabled). The
+        // runtime bumps a band's generation on a remote-agent change; this worker compares
+        // against last_seen_gen_ in runOnce and reconciles (resetChannel) when they differ.
+        std::atomic<uint64_t> *assigned_generations_ = nullptr;
+        std::vector<uint64_t> last_seen_gen_;
         std::thread thread_;
 };
 
