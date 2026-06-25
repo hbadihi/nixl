@@ -20,7 +20,9 @@
 #include "proxy_worker.h"
 #include "nixl_log.h"
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
+#include <thread>
 #include <utility>
 #include <cuda_runtime.h>
 
@@ -215,7 +217,11 @@ nixlProxyMemViewRegistry::prepareSubmission(const nixlProxySubmission &submissio
     prepared.flags = submission.flags;
     prepared.size = transfer_size;
     prepared.value = submission.value;
-    prepared.remote_agent = remote_metadata->remote_agent;
+    // Use the element's own agent (the aggregate memview spans many peers; the
+    // view-level remote_agent is only the first one).
+    prepared.remote_agent = dst_metadata->remote_agent.empty()
+        ? remote_metadata->remote_agent
+        : dst_metadata->remote_agent;
     prepared.remote.mem_type = remote_metadata->mem_type;
     prepared.remote.desc = nixlMetaDesc(
         dst_metadata->base_addr + submission.dst_offset,
@@ -386,7 +392,8 @@ nixlProxyMemViewRegistry::fillRemoteMetadata(const nixl_remote_meta_dlist_t &dli
         if (out.remote_agent.empty() && desc.remoteAgent != nixl_null_agent) {
             out.remote_agent = desc.remoteAgent;
         }
-        out.entries.push_back(ProxyMemViewRegStoredEntry{desc.addr, desc.len, desc.devId, desc.metadataP});
+        out.entries.push_back(ProxyMemViewRegStoredEntry{
+            desc.addr, desc.len, desc.devId, desc.metadataP, desc.remoteAgent});
     }
 }
 
@@ -552,17 +559,31 @@ nixl_status_t
 nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
                    uint32_t channel_count,
                    uint32_t worker_count,
+                   uint32_t channels_per_rank,
                    uint64_t pthr_delay_us) {
     NIXL_INFO << "ProxyRuntime::init: channel_count=" << channel_count
               << " worker_count=" << worker_count
+              << " channels_per_rank=" << channels_per_rank
               << " pthr_delay_us=" << pthr_delay_us
               << " backend=" << backend.get();
     if (backend == nullptr || channel_count == 0 || worker_count == 0) {
         NIXL_ERROR << "ProxyRuntime::init: invalid params";
         return NIXL_ERR_INVALID_PARAM;
     }
+    // channels_per_rank == 0 disables device-side rank encoding (ring == channel_id).
+    // When enabled, the device computes ring = rank * channels_per_rank + lane, so the
+    // total channel count must be a whole number of per-rank strides. (The further
+    // requirement channels_per_rank == UCX num_workers — needed so the host adapter's
+    // `ring % num_workers` recovers the lane — is enforced by the caller, e.g. the EP
+    // host wiring, since the proxy runtime does not know the UCX worker count.)
+    if (channels_per_rank != 0 && (channel_count % channels_per_rank) != 0) {
+        NIXL_ERROR << "ProxyRuntime::init: channel_count (" << channel_count
+                   << ") must be a multiple of channels_per_rank (" << channels_per_rank << ")";
+        return NIXL_ERR_INVALID_PARAM;
+    }
 
     backend_ = std::move(backend);
+    channels_per_rank_ = channels_per_rank;
     memview_registry_.clear();
     resetSubmittedWorkCount();
 
@@ -648,6 +669,7 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
     nixlProxyDeviceContextData device_context{
         device_channel_views_dev_,
         channel_count,
+        channels_per_rank,
         shutdown_word_dev_
     };
     if (cudaMalloc(reinterpret_cast<void **>(&device_context_),
@@ -672,6 +694,18 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
         return NIXL_ERR_BACKEND;
     }
 
+    // One generation per channel, zero-initialized. Allocated before workers so each worker
+    // can be handed the slice covering its assigned channels. The connection thread bumps a
+    // band's generations on an agent change; the owning worker reconciles lazily.
+    channel_generations_ = std::make_unique<std::atomic<uint64_t>[]>(channel_count);
+    // Per-band agent record for the activateRemoteBands diff (one entry per rank band).
+    // channel_count is a whole multiple of channels_per_rank_ (validated above). Seed with
+    // the null-agent sentinel so an absent rank's slot matches and only present (connecting)
+    // ranks bump on the first memview registration.
+    if (channels_per_rank_ > 0) {
+        active_agent_.assign(channel_count / channels_per_rank_, nixl_null_agent);
+    }
+
     workers_.clear();
     workers_.reserve(worker_count);
     workers_started_ = false;
@@ -690,7 +724,8 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
             &channels_[first_ch],
             n_ch,
             pthr_delay_us,
-            &submitted_work_count_));
+            &submitted_work_count_,
+            &channel_generations_[first_ch]));
     }
 
     NIXL_INFO << "ProxyRuntime::init: complete — "
@@ -708,6 +743,37 @@ nixlProxyRuntime::submittedWorkCount() const {
 void
 nixlProxyRuntime::resetSubmittedWorkCount() {
     submitted_work_count_.store(0, std::memory_order_relaxed);
+}
+
+void
+nixlProxyRuntime::activateRemoteBands(const nixl_remote_meta_dlist_t &dlist) {
+    // Rank encoding disabled => channels are not partitioned per rank; nothing to drive.
+    if (channels_per_rank_ == 0 || channel_generations_ == nullptr) {
+        return;
+    }
+
+    // Each element position is a destination rank (the device's ringFor uses
+    // dst_index*cpr + lane), so element i owns the band [i*cpr, i*cpr + cpr). Diff the
+    // element's remote agent against the per-band record; on a change (connect, disconnect
+    // -> null agent, or reconnect under a new agent) bump that band's generations so the
+    // owning worker lazily reconciles (resetChannel). Unchanged bands are left untouched,
+    // so healthy ranks are not disturbed even though remote_mvh is an aggregate over all
+    // ranks. Non-blocking: a release fetch_add the worker observes with acquire in runOnce.
+    uint64_t band = 0;
+    for (const auto &desc : dlist) {
+        const uint64_t first = band * channels_per_rank_;
+        const uint64_t end = first + channels_per_rank_;
+        if (band >= active_agent_.size() || end > channels_.size()) {
+            break;
+        }
+        if (desc.remoteAgent != active_agent_[band]) {
+            active_agent_[band] = desc.remoteAgent;
+            for (uint64_t ch = first; ch < end; ++ch) {
+                channel_generations_[ch].fetch_add(1, std::memory_order_release);
+            }
+        }
+        ++band;
+    }
 }
 
 nixl_status_t
@@ -739,7 +805,14 @@ nixlProxyRuntime::prepMemView(const nixl_meta_dlist_t &dlist,
 nixl_status_t
 nixlProxyRuntime::prepMemView(const nixl_remote_meta_dlist_t &dlist,
                               nixlMemViewH *proxy_memview) {
-    return memview_registry_.prepMemView(dlist, proxy_memview);
+    const nixl_status_t status = memview_registry_.prepMemView(dlist, proxy_memview);
+    if (status == NIXL_SUCCESS) {
+        // A remote memview (re)registration is the proxy-visible topology signal (EP
+        // rebuilds remote_mvh/barrier_mvh on every connect and disconnect). Drive per-rank
+        // channel activation/quiesce off it instead of a manual, blocking reset call.
+        activateRemoteBands(dlist);
+    }
+    return status;
 }
 
 nixl_status_t

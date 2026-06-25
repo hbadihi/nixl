@@ -128,6 +128,10 @@ class nixlProxyMemViewRegistry {
             size_t len = 0;
             uint64_t dev_id = 0;
             nixlBackendMD *metadata = nullptr;
+            // Per-element remote agent (empty for local elements and null-agent slots).
+            // Needed because a memview may span many peers (EP's aggregate remote_mvh),
+            // so the per-submission remote_agent must come from the element, not the view.
+            std::string remote_agent;
         };
 
         struct LocalMetadata {
@@ -217,6 +221,7 @@ class nixlProxyRuntime {
         init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
              uint32_t channel_count,
              uint32_t worker_count,
+             uint32_t channels_per_rank = 0,
              uint64_t pthr_delay_us = 0);
 
         nixl_status_t
@@ -294,6 +299,13 @@ class nixlProxyRuntime {
         void
         joinWorkerThreads() noexcept;
 
+        // Connection-driven channel activation (called from the remote prepMemView path):
+        // diff each element's remote agent against the per-band record and bump the
+        // generation of any band whose agent changed (connect/disconnect/reconnect), so
+        // the owning worker lazily quiesces+revives just that rank's lanes. Non-blocking.
+        void
+        activateRemoteBands(const nixl_remote_meta_dlist_t &dlist);
+
         std::vector<nixlProxyChannelState> channels_;
         std::vector<nixlProxyChannelView> device_channel_views_;
         nixlProxyChannelView *device_channel_views_dev_ = nullptr;
@@ -306,6 +318,19 @@ class nixlProxyRuntime {
         uint32_t ring_depth_ = kDefaultProxyRingDepth;
         bool workers_started_ = false;
         std::atomic<uint64_t> submitted_work_count_{0};
+        // Per-rank ring stride (0 = rank encoding disabled). Maps a rank to its channel
+        // band [rank*cpr, rank*cpr + cpr).
+        uint32_t channels_per_rank_ = 0;
+        // One monotonic generation per channel: the connection thread bumps a band's
+        // generations (release) when its remote agent changes; the owning worker observes
+        // the bump (acquire) in runOnce and lazily reconciles (resetChannel). std::atomic
+        // isn't movable, so it lives here rather than in the moved nixlProxyChannelState;
+        // workers receive a slice pointer.
+        std::unique_ptr<std::atomic<uint64_t>[]> channel_generations_;
+        // Per-band (per-rank) record of the currently-bound remote agent, used by
+        // activateRemoteBands to detect (re)connect/disconnect. Connection-thread-only
+        // (memview prep is serialized), so no atomic needed. Sized channel_count/cpr.
+        std::vector<std::string> active_agent_;
 };
 
 #endif // NIXL_SRC_CORE_DEVICE_PROXY_PROXY_RUNTIME_H
