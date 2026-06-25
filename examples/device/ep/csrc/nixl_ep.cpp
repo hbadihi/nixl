@@ -1597,6 +1597,8 @@ void Buffer::_nixl_agent_init() {
 
     const char* num_channels_env = std::getenv("NIXL_EP_NUM_CHANNELS");
     init_params["ucx_num_device_channels"] = num_channels_env ? num_channels_env : "4";
+    // NONE is REQUIRED: UCP RMA atomics (ucp_atomic_op_nbx, used for the LL count-signal
+    // nixlAtomicAdd) are unsupported under PEER error-handling mode. Do not change to PEER.
     init_params["ucx_error_handling_mode"] = "none";
     init_params["num_workers"] = std::to_string(1);
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY

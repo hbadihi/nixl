@@ -19,6 +19,7 @@
 #include "backend_adapter.h"
 #include "nixl_log.h"
 #include <chrono>
+#include <cstdlib>
 #include <cuda_runtime.h>
 
 ProxyWorker::ProxyWorker(nixlDeviceProxyBackendAdapter *backend,
@@ -37,7 +38,10 @@ ProxyWorker::ProxyWorker(nixlDeviceProxyBackendAdapter *backend,
       pthr_delay_us_(pthr_delay_us),
       submitted_work_count_(submitted_work_count),
       assigned_generations_(assigned_generations),
-      last_seen_gen_(assigned_channel_count, 0) {}
+      last_seen_gen_(assigned_channel_count, 0) {
+    stall_log_enabled_ = std::getenv("NIXL_EP_PROXY_STALL_LOG") != nullptr;
+    last_stall_log_ = std::chrono::steady_clock::now();
+}
 
 ProxyWorker::~ProxyWorker() {
     join();
@@ -91,6 +95,39 @@ ProxyWorker::runOnce() {
     for (uint32_t i = 0; i < assigned_channel_count_; i++) {
         nixlProxyChannelState &channel = assigned_channels_[i];
         publishCompletions(channel);
+    }
+    maybeLogStalls();
+}
+
+void
+ProxyWorker::maybeLogStalls() {
+    if (!stall_log_enabled_) {
+        return;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (now - last_stall_log_ < std::chrono::seconds(1)) {
+        return;
+    }
+    last_stall_log_ = now;
+    // Surface any assigned channel that still has outstanding (unpublished) work. A survivor
+    // channel showing a growing inflight count with an IN_PROG head => transport stall on the
+    // shared worker; an idle survivor channel => the stall is upstream (GPU enqueue / receiver).
+    for (uint32_t i = 0; i < assigned_channel_count_; i++) {
+        const nixlProxyChannelState &channel = assigned_channels_[i];
+        if (channel.inflight_requests.empty() && !channel.error_latched) {
+            continue;
+        }
+        NIXL_INFO << "ProxyWorker STALLDBG: channel=" << channel.device_view.channel_id
+                  << " inflight=" << channel.inflight_requests.size()
+                  << " error_latched=" << channel.error_latched
+                  << " head_op="
+                  << (channel.inflight_requests.empty()
+                          ? 0
+                          : channel.inflight_requests.front().op_idx)
+                  << " head_status="
+                  << (channel.inflight_requests.empty()
+                          ? 0
+                          : static_cast<int>(channel.inflight_requests.front().status));
     }
 }
 

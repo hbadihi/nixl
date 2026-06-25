@@ -18,6 +18,7 @@
 #define NIXL_SRC_CORE_DEVICE_PROXY_PROXY_WORKER_H
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <thread>
 #include <vector>
@@ -64,6 +65,10 @@ class ProxyWorker {
         void
         resetChannel(nixlProxyChannelState &channel);
 
+        // Diagnostics: rate-limited per-channel inflight dump when NIXL_EP_PROXY_STALL_LOG is set.
+        void
+        maybeLogStalls();
+
         nixlDeviceProxyBackendAdapter *backend_ = nullptr;
         const nixlProxyMemViewRegistry *proxy_memview_registry_ = nullptr;
         uint32_t *shutdown_word_ = nullptr;
@@ -76,6 +81,14 @@ class ProxyWorker {
         // against last_seen_gen_ in runOnce and reconciles (resetChannel) when they differ.
         std::atomic<uint64_t> *assigned_generations_ = nullptr;
         std::vector<uint64_t> last_seen_gen_;
+
+        // Diagnostics (NIXL_EP_PROXY_STALL_LOG): periodically log any assigned channel with
+        // outstanding inflight requests so a stuck (rank,lane) is localized. Read-only; no
+        // behavior change. Distinguishes a transport stall (survivor channel: inflight grows,
+        // head stays IN_PROG) from a GPU-side stall (survivor channel idle / never enqueued).
+        bool stall_log_enabled_ = false;
+        std::chrono::steady_clock::time_point last_stall_log_{};
+
         std::thread thread_;
 };
 
