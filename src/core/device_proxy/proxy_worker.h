@@ -34,7 +34,8 @@ class ProxyWorker {
                     nixlProxyChannelState *assigned_channels,
                     uint32_t assigned_channel_count,
                     uint64_t pthr_delay_us,
-                    std::atomic<uint64_t> *submitted_work_count) noexcept;
+                    std::atomic<uint64_t> *submitted_work_count,
+                    std::atomic<uint32_t> *assigned_reset_flags = nullptr) noexcept;
         ~ProxyWorker();
 
         void start(uint32_t worker_idx);
@@ -56,6 +57,12 @@ class ProxyWorker {
         void
         publishCompletions(nixlProxyChannelState &channel);
 
+        // Drain-and-discard any stale ring entries + clear inflight/error/completion
+        // state for a channel whose owning rank is (re)connecting. Runs only on the
+        // worker thread (sole accessor of channel state), triggered by an atomic flag.
+        void
+        resetChannel(nixlProxyChannelState &channel);
+
         nixlDeviceProxyBackendAdapter *backend_ = nullptr;
         const nixlProxyMemViewRegistry *proxy_memview_registry_ = nullptr;
         uint32_t *shutdown_word_ = nullptr;
@@ -63,6 +70,9 @@ class ProxyWorker {
         uint32_t assigned_channel_count_ = 0;
         uint64_t pthr_delay_us_ = 0;
         std::atomic<uint64_t> *submitted_work_count_ = nullptr;
+        // Per-assigned-channel revive flags (runtime-owned slice; nullptr if disabled).
+        // Set by nixlProxyRuntime::resetRankChannels, consumed by this worker.
+        std::atomic<uint32_t> *assigned_reset_flags_ = nullptr;
         std::thread thread_;
 };
 

@@ -116,12 +116,28 @@ copyDeviceWorkRing(const nixlProxyChannelView &view) {
     return ring;
 }
 
-static nixlProxySubmission *
-hostRecordsFromDeviceAlias(nixlProxySubmission *records_host_dev) {
+// Resolve the pinned-host alias of a device-mapped pointer (ring records, completion
+// slot, ...). The device side hands out a device alias; tests poke the host alias.
+template <class T>
+static T *
+hostAliasOf(T *device_alias) {
     cudaPointerAttributes attrs{};
-    EXPECT_EQ(cudaPointerGetAttributes(&attrs, records_host_dev), cudaSuccess);
+    EXPECT_EQ(cudaPointerGetAttributes(&attrs, device_alias), cudaSuccess);
     EXPECT_NE(attrs.hostPointer, nullptr);
-    return static_cast<nixlProxySubmission *>(attrs.hostPointer);
+    return static_cast<T *>(attrs.hostPointer);
+}
+
+// Spin (bounded) until the channel's completion slot reports `op_idx` completed.
+static bool
+waitForCompletedIdx(nixlProxyCompletionSlot *slot_host, uint64_t op_idx) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (__atomic_load_n(&slot_host->completed_idx, __ATOMIC_ACQUIRE) >= op_idx) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    return false;
 }
 
 TEST_F(ProxyRuntimeTest, InitCallsBackendInit) {
@@ -409,7 +425,7 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedTransportDescriptors) {
     submission.size = 32;
 
     const nixlProxyWorkRing ring = copyDeviceWorkRing(runtime_.deviceChannelViews()[0]);
-    auto *records = hostRecordsFromDeviceAlias(ring.records);
+    auto *records = hostAliasOf(ring.records);
     ASSERT_NE(records, nullptr);
     submission.op_idx = 0;
     records[0] = submission;
@@ -484,7 +500,7 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedAtomicAddDescriptor) {
     submission.value = 42;
 
     const nixlProxyWorkRing ring = copyDeviceWorkRing(runtime_.deviceChannelViews()[0]);
-    auto *records = hostRecordsFromDeviceAlias(ring.records);
+    auto *records = hostAliasOf(ring.records);
     ASSERT_NE(records, nullptr);
     submission.op_idx = 0;
     records[0] = submission;
@@ -522,6 +538,123 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedAtomicAddDescriptor) {
     EXPECT_EQ(prepared.remote.desc.metadataP, &remote_md);
     EXPECT_EQ(prepared.remote_agent, "peer");
     EXPECT_EQ(prepared.value, 42u);
+}
+
+TEST_F(ProxyRuntimeTest, ResetRankChannelsNoopWhenEncodingDisabled) {
+    // 3-arg init leaves channels_per_rank == 0 (rank encoding disabled).
+    ASSERT_EQ(initRuntime(4, 1), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
+    EXPECT_EQ(runtime_.resetRankChannels(0), NIXL_SUCCESS);
+    EXPECT_EQ(runtime_.resetRankChannels(123), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
+}
+
+TEST_F(ProxyRuntimeTest, ResetRankChannelsRejectsOutOfRange) {
+    // 4 channels, 2 per rank => ranks {0, 1}. Rank 5 maps to [10, 12), out of range.
+    auto backend = std::make_unique<StubBackend>();
+    backend_ = backend.get();
+    ASSERT_EQ(runtime_.init(std::move(backend), /*channel_count=*/4, /*worker_count=*/1,
+                            /*channels_per_rank=*/2),
+              NIXL_SUCCESS);
+    ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
+    EXPECT_EQ(runtime_.resetRankChannels(5), NIXL_ERR_INVALID_PARAM);
+    ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
+}
+
+TEST_F(ProxyRuntimeTest, InitRejectsChannelCountNotMultipleOfChannelsPerRank) {
+    auto backend = std::make_unique<StubBackend>();
+    backend_ = backend.get();
+    // 5 channels is not a whole number of 2-channel strides.
+    EXPECT_EQ(runtime_.init(std::move(backend), /*channel_count=*/5, /*worker_count=*/1,
+                            /*channels_per_rank=*/2),
+              NIXL_ERR_INVALID_PARAM);
+}
+
+// Latch a channel with a failed submission, then prove resetRankChannels revives it:
+// the terminal error status is cleared and a subsequent valid submission completes.
+TEST_F(ProxyRuntimeTest, ResetRankChannelsRevivesLatchedChannel) {
+    DummyBackendMD local_md;
+    DummyBackendMD remote_md;
+
+    auto backend = std::make_unique<StubBackend>();
+    backend_ = backend.get();
+    // 4 channels, 2 per rank => rank 1 owns channels {2, 3}. Single drain worker.
+    ASSERT_EQ(runtime_.init(std::move(backend), /*channel_count=*/4, /*worker_count=*/1,
+                            /*channels_per_rank=*/2),
+              NIXL_SUCCESS);
+
+    nixlMemViewH src_proxy = nullptr;
+    nixlMemViewH dst_proxy = nullptr;
+    ASSERT_EQ(runtime_.registerProxyMemView(reinterpret_cast<nixlMemViewH>(uintptr_t{0x10}),
+                                           &src_proxy),
+              NIXL_SUCCESS);
+    ASSERT_EQ(runtime_.registerProxyMemView(reinterpret_cast<nixlMemViewH>(uintptr_t{0x20}),
+                                           &dst_proxy),
+              NIXL_SUCCESS);
+    nixl_meta_dlist_t local_dlist(DRAM_SEG);
+    local_dlist.addDesc(nixlMetaDesc(0x1000, 64, 0, &local_md));
+    ASSERT_EQ(runtime_.storeMetadata(src_proxy, local_dlist), NIXL_SUCCESS);
+    nixl_remote_meta_dlist_t remote_dlist(DRAM_SEG);
+    nixlRemoteMetaDesc remote_desc("peer");
+    remote_desc.addr = 0x2000;
+    remote_desc.len = 64;
+    remote_desc.devId = 0;
+    remote_desc.metadataP = &remote_md;
+    remote_dlist.addDesc(remote_desc);
+    ASSERT_EQ(runtime_.storeMetadata(dst_proxy, remote_dlist), NIXL_SUCCESS);
+
+    ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
+
+    constexpr uint32_t kChannel = 2;  // belongs to rank 1
+    const nixlProxyWorkRing ring = copyDeviceWorkRing(runtime_.deviceChannelViews()[kChannel]);
+    auto *records = hostAliasOf(ring.records);
+    auto *slot = hostAliasOf(
+        runtime_.deviceChannelViews()[kChannel].completion_slot);
+    ASSERT_NE(records, nullptr);
+    ASSERT_NE(slot, nullptr);
+
+    // Publish a record into ring slot `slot_idx`: zero op_idx, copy, then release-store
+    // the real op_idx (the GPU->CPU signal the worker acquire-polls).
+    auto publishRecord = [&](uint32_t slot_idx, nixlProxySubmission rec, uint64_t op_idx) {
+        rec.op_idx = 0;
+        records[slot_idx] = rec;
+        __atomic_store_n(&records[slot_idx].op_idx, op_idx, __ATOMIC_RELEASE);
+    };
+
+    // (1) Inject a record whose destination memview is invalid -> prepareSubmission
+    // fails with NIXL_ERR_NOT_FOUND, the worker publishes a terminal error and latches
+    // the channel (exactly the failure a disconnecting rank produces).
+    nixlProxySubmission bad{};
+    bad.opcode = nixl_proxy_opcode_t::PUT;
+    bad.channel_id = kChannel;
+    bad.dst_proxy_memview_id = 9999;  // not registered
+    bad.dst_offset = 0;
+    bad.size = 32;
+    publishRecord(0, bad, 11);
+
+    ASSERT_TRUE(waitForCompletedIdx(slot, 11));
+    EXPECT_LT(slot->next_status, 0);  // terminal error published, channel now latched
+
+    // (2) Revive rank 1's channels. Blocks until the worker applies the reset.
+    ASSERT_EQ(runtime_.resetRankChannels(1), NIXL_SUCCESS);
+    EXPECT_EQ(slot->next_status, NIXL_IN_PROG);  // latch cleared
+
+    // (3) A valid submission on the revived channel must now complete. Without the
+    // reset the channel would stay latched and completed_idx would never reach 12.
+    nixlProxySubmission good{};
+    good.opcode = nixl_proxy_opcode_t::PUT;
+    good.channel_id = kChannel;
+    good.src_proxy_memview_id = reinterpret_cast<uint64_t>(src_proxy);
+    good.src_offset = 4;
+    good.dst_proxy_memview_id = reinterpret_cast<uint64_t>(dst_proxy);
+    good.dst_offset = 8;
+    good.size = 32;
+    publishRecord(1, good, 12);
+
+    ASSERT_TRUE(waitForCompletedIdx(slot, 12));
+    EXPECT_EQ(slot->next_status, NIXL_SUCCESS);
+
+    ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
 }
 
 } // namespace proxy_runtime

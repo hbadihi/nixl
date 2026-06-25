@@ -36,6 +36,7 @@ struct nixlAgentConfig {
     static constexpr bool kDefaultEnableDeviceProxy = false;
     static constexpr uint32_t kDefaultProxyWorkerCount = 1;
     static constexpr uint32_t kDefaultProxyChannelCount = 1;
+    static constexpr uint32_t kDefaultProxyChannelsPerRank = 0;
     static constexpr uint64_t kDefaultPthrDelayUs = 0;
     static constexpr uint64_t kDefaultLthrDelayUs = 100000;
     static constexpr std::chrono::microseconds kDefaultEtcdWatchTimeout =
@@ -66,6 +67,15 @@ struct nixlAgentConfig {
      *      multiple GPU submission queues while using one proxy worker.
      */
     uint32_t proxyChannelCount = kDefaultProxyChannelCount;
+    /**
+     * @var Number of proxy channels (lanes) allocated per destination rank.
+     *      When > 0, the device encodes the ring as `rank * proxyChannelsPerRank
+     *      + lane`, isolating each (rank, lane) so one rank's failure/teardown
+     *      cannot poison rings shared with other ranks (required for elasticity).
+     *      Must equal proxyWorkerCount and divide proxyChannelCount. The default
+     *      0 disables rank encoding (ring == channel_id), preserving prior behavior.
+     */
+    uint32_t proxyChannelsPerRank = kDefaultProxyChannelsPerRank;
 
     /**
      * @var Progress thread event waiting timeout.

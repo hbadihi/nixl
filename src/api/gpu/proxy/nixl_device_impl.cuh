@@ -72,10 +72,17 @@ put(const nixlMemViewElem &src,
         if (ctx == nullptr) {
             status = NIXL_ERR_BACKEND;
         } else {
+            // Ring isolation: select the ring from the DESTINATION rank + lane via
+            // ProxyDeviceContext::ringFor (rank * channels_per_rank + lane). Keyed off
+            // dst only (dst.index == global rank); src.index must never drive a ring.
+            // channels_per_rank equals the UCX worker count, so the host recovers the
+            // lane via `ring % num_workers`.
+            const uint32_t ring_channel =
+                ctx->ringFor(static_cast<uint32_t>(dst.index), static_cast<uint32_t>(channel_id));
             status = ctx->enqueue(
                 nixlProxySubmission{
                     .opcode               = nixl_proxy_opcode_t::PUT,
-                    .channel_id           = static_cast<uint32_t>(channel_id),
+                    .channel_id           = ring_channel,
                     .flags                = static_cast<uint32_t>(flags),
                     .src_index            = static_cast<uint32_t>(src.index),
                     .src_offset           = static_cast<uint32_t>(src.offset),
@@ -106,10 +113,13 @@ atomic_add(uint64_t value,
         if (ctx == nullptr) {
             status = NIXL_ERR_BACKEND;
         } else {
+            // Ring isolation, keyed off the destination counter's rank. See put().
+            const uint32_t ring_channel =
+                ctx->ringFor(static_cast<uint32_t>(counter.index), static_cast<uint32_t>(channel_id));
             status = ctx->enqueue(
                 nixlProxySubmission{
                     .opcode               = nixl_proxy_opcode_t::ATOMIC_ADD,
-                    .channel_id           = static_cast<uint32_t>(channel_id),
+                    .channel_id           = ring_channel,
                     .flags                = static_cast<uint32_t>(flags),
                     .dst_index            = static_cast<uint32_t>(counter.index),
                     .dst_offset           = static_cast<uint32_t>(counter.offset),

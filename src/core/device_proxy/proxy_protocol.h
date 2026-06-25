@@ -81,6 +81,14 @@ struct nixlProxyChannelView {
 struct nixlProxyDeviceContextData {
     nixlProxyChannelView *channels = nullptr;
     uint32_t num_channels = 0;
+    /**
+     * Number of channels (lanes) allocated per destination rank. The device
+     * encodes the ring as `rank * channels_per_rank + lane`, giving each
+     * (rank, lane) its own ring/completion slot so a single rank's failure or
+     * teardown cannot poison rings shared with other ranks. Must equal the UCX
+     * worker count so the host adapter recovers the lane via `ring % num_workers`.
+     */
+    uint32_t channels_per_rank = 0;
     uint32_t *shutdown_word = nullptr;
 };
 

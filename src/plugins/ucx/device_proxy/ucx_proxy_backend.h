@@ -49,6 +49,14 @@ class nixlUcxProxyBackendAdapter : public nixlDeviceProxyBackendAdapter {
         shutdown() override;
 
     private:
+        // Deterministically map a proxy channel to a UCX worker so each channel uses
+        // its own worker/EP/QP per peer. (The single proxy drain thread would otherwise
+        // bind to one worker via getWorkerId()'s thread-local round-robin, collapsing
+        // every channel onto a single QP.) channels_per_rank == num_workers, so for the
+        // rank-encoded ring this recovers the lane.
+        size_t
+        workerIdForChannel(uint32_t channel_id) const;
+
         nixl_status_t
         submitPut(const nixlBackendProxySubmission &submission, uint64_t &request_token);
 

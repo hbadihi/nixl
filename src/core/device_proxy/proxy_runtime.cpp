@@ -20,7 +20,9 @@
 #include "proxy_worker.h"
 #include "nixl_log.h"
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
+#include <thread>
 #include <utility>
 #include <cuda_runtime.h>
 
@@ -552,17 +554,31 @@ nixl_status_t
 nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
                    uint32_t channel_count,
                    uint32_t worker_count,
+                   uint32_t channels_per_rank,
                    uint64_t pthr_delay_us) {
     NIXL_INFO << "ProxyRuntime::init: channel_count=" << channel_count
               << " worker_count=" << worker_count
+              << " channels_per_rank=" << channels_per_rank
               << " pthr_delay_us=" << pthr_delay_us
               << " backend=" << backend.get();
     if (backend == nullptr || channel_count == 0 || worker_count == 0) {
         NIXL_ERROR << "ProxyRuntime::init: invalid params";
         return NIXL_ERR_INVALID_PARAM;
     }
+    // channels_per_rank == 0 disables device-side rank encoding (ring == channel_id).
+    // When enabled, the device computes ring = rank * channels_per_rank + lane, so the
+    // total channel count must be a whole number of per-rank strides. (The further
+    // requirement channels_per_rank == UCX num_workers — needed so the host adapter's
+    // `ring % num_workers` recovers the lane — is enforced by the caller, e.g. the EP
+    // host wiring, since the proxy runtime does not know the UCX worker count.)
+    if (channels_per_rank != 0 && (channel_count % channels_per_rank) != 0) {
+        NIXL_ERROR << "ProxyRuntime::init: channel_count (" << channel_count
+                   << ") must be a multiple of channels_per_rank (" << channels_per_rank << ")";
+        return NIXL_ERR_INVALID_PARAM;
+    }
 
     backend_ = std::move(backend);
+    channels_per_rank_ = channels_per_rank;
     memview_registry_.clear();
     resetSubmittedWorkCount();
 
@@ -648,6 +664,7 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
     nixlProxyDeviceContextData device_context{
         device_channel_views_dev_,
         channel_count,
+        channels_per_rank,
         shutdown_word_dev_
     };
     if (cudaMalloc(reinterpret_cast<void **>(&device_context_),
@@ -672,6 +689,10 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
         return NIXL_ERR_BACKEND;
     }
 
+    // One revive flag per channel, zero-initialized. Allocated before workers so each
+    // worker can be handed the slice covering its assigned channels.
+    reset_flags_ = std::make_unique<std::atomic<uint32_t>[]>(channel_count);
+
     workers_.clear();
     workers_.reserve(worker_count);
     workers_started_ = false;
@@ -690,7 +711,8 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
             &channels_[first_ch],
             n_ch,
             pthr_delay_us,
-            &submitted_work_count_));
+            &submitted_work_count_,
+            &reset_flags_[first_ch]));
     }
 
     NIXL_INFO << "ProxyRuntime::init: complete — "
@@ -708,6 +730,50 @@ nixlProxyRuntime::submittedWorkCount() const {
 void
 nixlProxyRuntime::resetSubmittedWorkCount() {
     submitted_work_count_.store(0, std::memory_order_relaxed);
+}
+
+nixl_status_t
+nixlProxyRuntime::resetRankChannels(uint32_t rank) {
+    // Rank encoding disabled => channels are not partitioned per rank; nothing to revive.
+    if (channels_per_rank_ == 0) {
+        return NIXL_SUCCESS;
+    }
+
+    const uint64_t first = static_cast<uint64_t>(rank) * channels_per_rank_;
+    const uint64_t end = first + channels_per_rank_;
+    if (end > channels_.size() || reset_flags_ == nullptr) {
+        NIXL_ERROR << "ProxyRuntime::resetRankChannels: rank " << rank
+                   << " channel range [" << first << ", " << end
+                   << ") exceeds channel count " << channels_.size();
+        return NIXL_ERR_INVALID_PARAM;
+    }
+
+    // No worker is running: channels are freshly allocated and cannot be latched, so
+    // there is nothing to clear (and nobody to consume the flags).
+    if (!workers_started_) {
+        return NIXL_SUCCESS;
+    }
+
+    // Hand the reset to the owning worker(s) and wait until they apply it. The caller
+    // contract is that the rank is masked and the device is synchronized, so the rings
+    // are quiescent while the worker discards stale entries.
+    for (uint64_t ch = first; ch < end; ++ch) {
+        reset_flags_[ch].store(1, std::memory_order_release);
+    }
+
+    constexpr int kMaxSpins = 1000000;  // ~ generous; worker loop turns over in microseconds
+    for (uint64_t ch = first; ch < end; ++ch) {
+        int spins = 0;
+        while (reset_flags_[ch].load(std::memory_order_acquire) != 0) {
+            if (++spins > kMaxSpins) {
+                NIXL_WARN << "ProxyRuntime::resetRankChannels: timed out waiting for worker to "
+                             "revive channel " << ch << " (rank " << rank << ")";
+                break;
+            }
+            std::this_thread::yield();
+        }
+    }
+    return NIXL_SUCCESS;
 }
 
 nixl_status_t
