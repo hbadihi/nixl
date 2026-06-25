@@ -32,6 +32,9 @@
 
 set -u
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+EP_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
 UCX_WORKERS="${UCX_WORKERS:-1 2 4 8}"
 PROXY_WORKERS="${PROXY_WORKERS:-1}"
 PLAN="${PLAN:-tests/elastic/expansion_contraction.json}"
@@ -40,6 +43,12 @@ TIMEOUT_MS="${TIMEOUT_MS:-30000}"
 CELL_WALL_TIMEOUT="${CELL_WALL_TIMEOUT:-180}"
 OUT_DIR="${OUT_DIR:-/tmp/ep_proxy_matrix}"
 LOG_LEVEL="${NIXL_LOG_LEVEL:-INFO}"
+
+if [[ "$PLAN" = /* ]]; then
+    PLAN_PATH="$PLAN"
+else
+    PLAN_PATH="$EP_DIR/$PLAN"
+fi
 
 # Pre-flight: confirm the EP extension is importable (PYTHONPATH points at a built tree).
 if ! python3 -c "import nixl_ep; print('nixl_ep backend:', nixl_ep.get_gpu_device_api_backend())" 2>/tmp/_ep_import.txt; then
@@ -57,7 +66,7 @@ SUMMARY="$OUT_DIR/summary.tsv"
 printf "ucx_workers\tproxy_workers\tresult\texit\tdispatch_timeouts\tfailure_detections\tevidence_accepted\tevidence_files\tlog\n" > "$SUMMARY"
 
 echo "Matrix: UCX_WORKERS=[$UCX_WORKERS] x PROXY_WORKERS=[$PROXY_WORKERS]"
-echo "  plan=$PLAN procs=$NUM_PROCESSES timeout_ms=$TIMEOUT_MS wall=${CELL_WALL_TIMEOUT}s backend=$backend"
+echo "  plan=$PLAN_PATH procs=$NUM_PROCESSES timeout_ms=$TIMEOUT_MS wall=${CELL_WALL_TIMEOUT}s backend=$backend"
 echo "  output: $OUT_DIR"
 echo
 
@@ -73,8 +82,8 @@ for uw in $UCX_WORKERS; do
     NIXL_EP_PROXY_WORKER_COUNT="$pw" \
     NIXL_LOG_LEVEL="$LOG_LEVEL" \
       timeout -s INT "$CELL_WALL_TIMEOUT" \
-        python3 tests/elastic/elastic.py \
-          --plan "$PLAN" \
+        python3 "$SCRIPT_DIR/elastic.py" \
+          --plan "$PLAN_PATH" \
           --num-processes "$NUM_PROCESSES" \
           --timeout-ms "$TIMEOUT_MS" \
           --evidence-output "$ev" \
