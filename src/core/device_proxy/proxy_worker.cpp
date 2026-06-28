@@ -21,6 +21,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <cuda_runtime.h>
+#include <unistd.h>
 
 ProxyWorker::ProxyWorker(nixlDeviceProxyBackendAdapter *backend,
                          const nixlProxyMemViewRegistry *proxy_memview_registry,
@@ -38,7 +39,8 @@ ProxyWorker::ProxyWorker(nixlDeviceProxyBackendAdapter *backend,
       pthr_delay_us_(pthr_delay_us),
       submitted_work_count_(submitted_work_count),
       assigned_generations_(assigned_generations),
-      last_seen_gen_(assigned_channel_count, 0) {
+      last_seen_gen_(assigned_channel_count, 0),
+      channel_debug_counters_(assigned_channel_count) {
     stall_log_enabled_ = std::getenv("NIXL_EP_PROXY_STALL_LOG") != nullptr;
     last_stall_log_ = std::chrono::steady_clock::now();
 }
@@ -71,6 +73,7 @@ ProxyWorker::join() noexcept {
 
 void
 ProxyWorker::runOnce() {
+    ++run_once_count_;
     for (uint32_t i = 0; i < assigned_channel_count_; i++) {
         nixlProxyChannelState &channel = assigned_channels_[i];
         // Revive: the connection layer bumped this band's generation because its remote
@@ -109,15 +112,70 @@ ProxyWorker::maybeLogStalls() {
         return;
     }
     last_stall_log_ = now;
-    // Surface any assigned channel that still has outstanding (unpublished) work. A survivor
-    // channel showing a growing inflight count with an IN_PROG head => transport stall on the
-    // shared worker; an idle survivor channel => the stall is upstream (GPU enqueue / receiver).
+
+    size_t total_inflight = 0;
+    uint32_t total_ready_records = 0;
+    uint32_t blocked_hole_channels = 0;
+    uint32_t error_latched_channels = 0;
+
+    // Surface outstanding backend work and ring state. Scanning all slots (debug-only) matters:
+    // tryDequeue stops at the consumer head, so a producer that reserves a slot but never
+    // publishes op_idx could otherwise hide later ready records indefinitely.
     for (uint32_t i = 0; i < assigned_channel_count_; i++) {
         const nixlProxyChannelState &channel = assigned_channels_[i];
-        if (channel.inflight_requests.empty() && !channel.error_latched) {
+        const uint64_t consumer =
+            __atomic_load_n(channel.consumer_idx_host_, __ATOMIC_RELAXED);
+        uint32_t ready_records = 0;
+        uint32_t first_ready_offset = channel.ring_depth_;
+        uint64_t head_ring_op = 0;
+        int head_ring_opcode = -1;
+        int first_ready_opcode = -1;
+        for (uint32_t offset = 0; offset < channel.ring_depth_; ++offset) {
+            const uint32_t slot =
+                static_cast<uint32_t>((consumer + offset) % channel.ring_depth_);
+            const uint64_t op_idx =
+                __atomic_load_n(&channel.records_host_[slot].op_idx, __ATOMIC_ACQUIRE);
+            if (offset == 0) {
+                head_ring_op = op_idx;
+                if (op_idx != 0) {
+                    head_ring_opcode =
+                        static_cast<int>(channel.records_host_[slot].opcode);
+                }
+            }
+            if (op_idx != 0) {
+                if (first_ready_offset == channel.ring_depth_) {
+                    first_ready_offset = offset;
+                    first_ready_opcode =
+                        static_cast<int>(channel.records_host_[slot].opcode);
+                }
+                ++ready_records;
+            }
+        }
+
+        const bool blocked_hole =
+            ready_records != 0 && head_ring_op == 0 && first_ready_offset != 0;
+        total_inflight += channel.inflight_requests.size();
+        total_ready_records += ready_records;
+        blocked_hole_channels += blocked_hole ? 1 : 0;
+        error_latched_channels += channel.error_latched ? 1 : 0;
+
+        if (channel.inflight_requests.empty() && ready_records == 0
+            && !channel.error_latched) {
             continue;
         }
+        const ChannelDebugCounters &counters = channel_debug_counters_[i];
         NIXL_INFO << "ProxyWorker STALLDBG: channel=" << channel.device_view.channel_id
+                  << " pid=" << ::getpid()
+                  << " consumer=" << consumer
+                  << " ready_records=" << ready_records
+                  << " first_ready_offset="
+                  << (first_ready_offset == channel.ring_depth_
+                          ? -1
+                          : static_cast<int64_t>(first_ready_offset))
+                  << " head_ring_op=" << head_ring_op
+                  << " head_ring_opcode=" << head_ring_opcode
+                  << " first_ready_opcode=" << first_ready_opcode
+                  << " blocked_hole=" << blocked_hole
                   << " inflight=" << channel.inflight_requests.size()
                   << " error_latched=" << channel.error_latched
                   << " head_op="
@@ -127,8 +185,36 @@ ProxyWorker::maybeLogStalls() {
                   << " head_status="
                   << (channel.inflight_requests.empty()
                           ? 0
-                          : static_cast<int>(channel.inflight_requests.front().status));
+                          : static_cast<int>(channel.inflight_requests.front().status))
+                  << " head_opcode="
+                  << (channel.inflight_requests.empty()
+                          ? -1
+                          : static_cast<int>(channel.inflight_requests.front().opcode))
+                  << " tail_opcode="
+                  << (channel.inflight_requests.empty()
+                          ? -1
+                          : static_cast<int>(channel.inflight_requests.back().opcode))
+                  << " dequeued_put=" << counters.dequeued_put
+                  << " dequeued_atomic=" << counters.dequeued_atomic
+                  << " completed_put=" << counters.completed_put
+                  << " completed_atomic=" << counters.completed_atomic
+                  << " prepare_errors=" << counters.prepare_errors
+                  << " submit_errors=" << counters.submit_errors;
     }
+
+    const uint64_t run_once_delta = run_once_count_ - last_logged_run_once_count_;
+    last_logged_run_once_count_ = run_once_count_;
+    NIXL_INFO << "ProxyWorker STALLDBG heartbeat: pid=" << ::getpid()
+              << " run_once=" << run_once_count_
+              << " run_once_delta=" << run_once_delta
+              << " submitted="
+              << (submitted_work_count_ == nullptr
+                      ? 0
+                      : submitted_work_count_->load(std::memory_order_relaxed))
+              << " inflight=" << total_inflight
+              << " ready_records=" << total_ready_records
+              << " blocked_hole_channels=" << blocked_hole_channels
+              << " error_latched_channels=" << error_latched_channels;
 }
 
 bool
@@ -160,15 +246,24 @@ ProxyWorker::tryDequeue(nixlProxyChannelState &channel, nixlProxySubmission &sub
 
 void
 ProxyWorker::submitToBackend(nixlProxyChannelState &channel, const nixlProxySubmission &submission) {
+    const size_t channel_index = static_cast<size_t>(&channel - assigned_channels_);
+    ChannelDebugCounters &counters = channel_debug_counters_[channel_index];
+    if (submission.opcode == nixl_proxy_opcode_t::PUT) {
+        ++counters.dequeued_put;
+    } else if (submission.opcode == nixl_proxy_opcode_t::ATOMIC_ADD) {
+        ++counters.dequeued_atomic;
+    }
+
     nixlBackendProxySubmission prepared_submission;
     nixl_status_t status =
         proxy_memview_registry_->prepareSubmission(submission, prepared_submission);
     if (status != NIXL_SUCCESS) {
+        ++counters.prepare_errors;
         NIXL_DEBUG << "ProxyWorker::submitToBackend: submission preparation failed"
                    << " op_idx=" << submission.op_idx
                    << " status=" << status;
         channel.inflight_requests.push_back(
-            {submission.op_idx, 0, status});
+            {submission.op_idx, 0, status, submission.opcode});
         // The terminal error is queued for publishCompletions(); the worker handled it.
         return;
     }
@@ -184,12 +279,14 @@ ProxyWorker::submitToBackend(nixlProxyChannelState &channel, const nixlProxySubm
     uint64_t request_token = 0;
     nixlProxyRequestState inflight{};
     inflight.op_idx = submission.op_idx;
+    inflight.opcode = submission.opcode;
     if (submitted_work_count_ != nullptr) {
         submitted_work_count_->fetch_add(1, std::memory_order_relaxed);
     }
     status = backend_->submit(prepared_submission, request_token);
     inflight.backend_req_token = request_token;
     if (status != NIXL_SUCCESS) {
+        ++counters.submit_errors;
         // backend submit failed, so status is already terminal and can be
         // published without polling the backend.
         NIXL_ERROR << "ProxyWorker::submitToBackend: backend submit failed"
@@ -232,6 +329,13 @@ ProxyWorker::publishCompletions(nixlProxyChannelState &channel) {
         channel.completion_slot_host_->next_status = st;
         __atomic_store_n(&channel.completion_slot_host_->completed_idx,
                          front.op_idx, __ATOMIC_RELEASE);
+        const size_t channel_index = static_cast<size_t>(&channel - assigned_channels_);
+        ChannelDebugCounters &counters = channel_debug_counters_[channel_index];
+        if (front.opcode == nixl_proxy_opcode_t::PUT) {
+            ++counters.completed_put;
+        } else if (front.opcode == nixl_proxy_opcode_t::ATOMIC_ADD) {
+            ++counters.completed_atomic;
+        }
         channel.inflight_requests.pop_front();
         if (st != NIXL_SUCCESS) {
             channel.error_latched = true;

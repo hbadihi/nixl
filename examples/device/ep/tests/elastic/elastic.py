@@ -547,7 +547,8 @@ def worker(torch_rank: int, args: argparse.Namespace):
 
     max_num_ranks = plan.get_max_rank() + 1
     print(
-        f"Process {torch_rank} -> global_rank={global_rank}, local_rank={local_rank}",
+        f"Process {torch_rank} (pid={os.getpid()}) -> "
+        f"global_rank={global_rank}, local_rank={local_rank}",
         flush=True,
     )
 
@@ -692,6 +693,16 @@ def worker(torch_rank: int, args: argparse.Namespace):
         )
 
         if not plan.next():
+            post_phase_hold_seconds = float(
+                os.environ.get("NIXL_EP_POST_PHASE_HOLD_SECONDS", "0")
+            )
+            if post_phase_hold_seconds > 0:
+                print(
+                    f"global_rank={global_rank}, local_rank={local_rank} -> "
+                    f"holding {post_phase_hold_seconds:g}s before teardown",
+                    flush=True,
+                )
+                time.sleep(post_phase_hold_seconds)
             break
 
     buffer.destroy()
