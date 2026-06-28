@@ -47,6 +47,15 @@ class ProxyWorker {
         runOnce();
 
     private:
+        struct ChannelDebugCounters {
+            uint64_t dequeued_put = 0;
+            uint64_t dequeued_atomic = 0;
+            uint64_t completed_put = 0;
+            uint64_t completed_atomic = 0;
+            uint64_t prepare_errors = 0;
+            uint64_t submit_errors = 0;
+        };
+
         bool
         tryDequeue(nixlProxyChannelState &channel, nixlProxySubmission &submission);
 
@@ -65,7 +74,8 @@ class ProxyWorker {
         void
         resetChannel(nixlProxyChannelState &channel);
 
-        // Diagnostics: rate-limited per-channel inflight dump when NIXL_EP_PROXY_STALL_LOG is set.
+        // Diagnostics: rate-limited worker/ring/inflight dump when
+        // NIXL_EP_PROXY_STALL_LOG is set.
         void
         maybeLogStalls();
 
@@ -82,12 +92,16 @@ class ProxyWorker {
         std::atomic<uint64_t> *assigned_generations_ = nullptr;
         std::vector<uint64_t> last_seen_gen_;
 
-        // Diagnostics (NIXL_EP_PROXY_STALL_LOG): periodically log any assigned channel with
-        // outstanding inflight requests so a stuck (rank,lane) is localized. Read-only; no
-        // behavior change. Distinguishes a transport stall (survivor channel: inflight grows,
-        // head stays IN_PROG) from a GPU-side stall (survivor channel idle / never enqueued).
+        // Diagnostics (NIXL_EP_PROXY_STALL_LOG): periodically log a worker heartbeat and
+        // any assigned channel with outstanding inflight requests or published ring records.
+        // Read-only; no behavior change. The heartbeat distinguishes an idle worker from one
+        // stuck in backend progress; scanning the ring detects published records stranded
+        // behind an unpublished head slot.
         bool stall_log_enabled_ = false;
         std::chrono::steady_clock::time_point last_stall_log_{};
+        uint64_t run_once_count_ = 0;
+        uint64_t last_logged_run_once_count_ = 0;
+        std::vector<ChannelDebugCounters> channel_debug_counters_;
 
         std::thread thread_;
 };
