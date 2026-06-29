@@ -579,12 +579,16 @@ def worker(torch_rank: int, args: argparse.Namespace):
         tcp_store_group=tcp_store,
         timeout_ms=args.timeout_ms,
     )
+    if local_rank == 0:
+        print("Buffer initialized", flush=True)
     buffer.update_memory_buffers(
         num_ranks=max_num_ranks,
         num_experts_per_rank=args.num_experts_per_rank,
         num_rdma_bytes=num_rdma_bytes,
         proxy_lane_ceiling=args.num_experts_per_rank,
     )
+    if local_rank == 0:
+        print("Memory buffers updated", flush=True)
     signal.signal(
         signal.SIGTERM,
         partial(handle_sigterm, buffer=buffer, plan=plan, rank_client=rank_client),

@@ -779,11 +779,15 @@ nixlProxyRuntime::activateRemoteBands(const nixl_remote_meta_dlist_t &dlist) {
 nixl_status_t
 nixlProxyRuntime::loadRemoteConnInfo(const std::string &remote_name,
                                  const nixl_blob_t &conn_info) {
+    NIXL_INFO << "ProxyRuntime::loadRemoteConnInfo: remote='" << remote_name
+              << "' conn_info_size=" << conn_info.size();
     if (backend_ == nullptr) {
         NIXL_ERROR << "ProxyRuntime::loadRemoteConnInfo: no backend";
-        return NIXL_ERR_BACKEND;
+        return NIXL_ERR_NOT_SUPPORTED;
     }
-    return backend_->loadRemoteConnInfo(remote_name, conn_info);
+    nixl_status_t rc = backend_->loadRemoteConnInfo(remote_name, conn_info);
+    NIXL_INFO << "ProxyRuntime::loadRemoteConnInfo: result=" << rc;
+    return rc;
 }
 
 nixl_status_t
