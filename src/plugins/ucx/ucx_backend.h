@@ -269,6 +269,9 @@ private:
                          size_t worker_id,
                          nixlBackendReqH *&handle) const;
 
+    nixl_status_t
+    checkProxyReqStatus(nixlBackendReqH *handle) const;
+
     // Memory management helpers
     nixl_status_t
     internalMDHelper(const nixl_blob_t &blob, const std::string &agent, nixlBackendMD *&output);

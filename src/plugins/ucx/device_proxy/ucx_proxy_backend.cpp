@@ -24,6 +24,13 @@ constexpr uint64_t kInvalidToken = 0;
 }
 
 nixl_status_t
+nixlUcxProxyBackendAdapter::init(uint32_t, uint32_t channel_count) {
+    tracked_requests_.clear();
+    tracked_requests_.resize(channel_count);
+    return NIXL_SUCCESS;
+}
+
+nixl_status_t
 nixlUcxProxyBackendAdapter::submit(const nixlBackendProxySubmission &submission,
                                    uint64_t &request_token) {
     request_token = kInvalidToken;
@@ -50,6 +57,10 @@ nixlUcxProxyBackendAdapter::workerIdForChannel(uint32_t channel_id) const {
 nixl_status_t
 nixlUcxProxyBackendAdapter::submitPut(const nixlBackendProxySubmission &submission,
                                       uint64_t &request_token) {
+    if (submission.channel_id >= tracked_requests_.size()) {
+        return NIXL_ERR_INVALID_PARAM;
+    }
+
     const size_t worker_id = workerIdForChannel(submission.channel_id);
 
     nixlBackendReqH *handle = nullptr;
@@ -65,7 +76,7 @@ nixlUcxProxyBackendAdapter::submitPut(const nixlBackendProxySubmission &submissi
         return status;
     }
 
-    request_token = trackRequest(handle);
+    request_token = trackRequest(submission.channel_id, submission.op_idx, handle);
     NIXL_DEBUG << "nixlUcxProxyBackendAdapter::submitPut: posted RDMA write"
                << " src_addr=0x" << std::hex
                << submission.local.desc.addr << std::dec
@@ -80,6 +91,10 @@ nixlUcxProxyBackendAdapter::submitPut(const nixlBackendProxySubmission &submissi
 nixl_status_t
 nixlUcxProxyBackendAdapter::submitAtomicAdd(const nixlBackendProxySubmission &submission,
                                             uint64_t &request_token) {
+    if (submission.channel_id >= tracked_requests_.size()) {
+        return NIXL_ERR_INVALID_PARAM;
+    }
+
     // Same channel -> worker mapping as submitPut so a channel's put and its follow-up
     // atomic flag travel the same worker/EP/QP, preserving IB write-before-atomic order.
     const size_t worker_id = workerIdForChannel(submission.channel_id);
@@ -96,7 +111,7 @@ nixlUcxProxyBackendAdapter::submitAtomicAdd(const nixlBackendProxySubmission &su
         return status;
     }
 
-    request_token = trackRequest(handle);
+    request_token = trackRequest(submission.channel_id, submission.op_idx, handle);
     NIXL_DEBUG << "nixlUcxProxyBackendAdapter::submitAtomicAdd: posted RDMA atomic add"
                << " dst_addr=0x" << std::hex
                << submission.remote.desc.addr << std::dec
@@ -108,27 +123,47 @@ nixlUcxProxyBackendAdapter::submitAtomicAdd(const nixlBackendProxySubmission &su
 }
 
 nixl_status_t
-nixlUcxProxyBackendAdapter::checkCompletion(uint64_t request_token) {
+nixlUcxProxyBackendAdapter::checkCompletion(uint32_t channel_id, uint64_t request_token) {
     if (engine_ == nullptr) {
         return NIXL_ERR_INVALID_PARAM;
     }
 
-    std::lock_guard<std::mutex> lock(request_mutex_);
-    const auto it = tracked_requests_.find(request_token);
-    if (it == tracked_requests_.end()) {
+    if (channel_id >= tracked_requests_.size()) {
+        return NIXL_ERR_INVALID_PARAM;
+    }
+
+    auto &channel_requests = tracked_requests_[channel_id];
+    if (channel_requests.empty()) {
         return NIXL_ERR_NOT_FOUND;
     }
 
-    nixlBackendReqH *handle = it->second;
-    const nixl_status_t status = engine_->checkXfer(handle);
+    auto it = channel_requests.begin();
+    if (it->op_idx != request_token) {
+        // resetChannel() can drop proxy-side inflight state while older backend
+        // handles remain queued for shutdown cleanup. Let revived channels find
+        // their new request without being blocked by those stale entries.
+        for (; it != channel_requests.end(); ++it) {
+            if (it->op_idx == request_token) {
+                break;
+            }
+        }
+        if (it == channel_requests.end()) {
+            return NIXL_ERR_NOT_FOUND;
+        }
+    }
+
+    nixlBackendReqH *handle = it->handle;
+    const nixl_status_t status = engine_->checkProxyReqStatus(handle);
     if (status == NIXL_IN_PROG) {
         return NIXL_IN_PROG;
     }
 
-    NIXL_DEBUG << "nixlUcxProxyBackendAdapter::checkCompletion: token=" << request_token
+    channel_requests.erase(it);
+
+    NIXL_DEBUG << "nixlUcxProxyBackendAdapter::checkCompletion: channel=" << channel_id
+               << " token=" << request_token
                << " status=" << status;
     engine_->releaseReqH(handle);
-    tracked_requests_.erase(it);
     return status;
 }
 
@@ -143,24 +178,31 @@ nixlUcxProxyBackendAdapter::progress() {
 
 nixl_status_t
 nixlUcxProxyBackendAdapter::shutdown() {
+    size_t tracked_request_count = 0;
+    for (const auto &channel_requests : tracked_requests_) {
+        tracked_request_count += channel_requests.size();
+    }
+
     NIXL_INFO << "nixlUcxProxyBackendAdapter::shutdown: releasing "
-              << tracked_requests_.size() << " tracked request(s)";
-    {
-        std::lock_guard<std::mutex> lock(request_mutex_);
-        if (engine_ != nullptr) {
-            for (auto &entry : tracked_requests_) {
-                engine_->releaseReqH(entry.second);
+              << tracked_request_count << " tracked request(s)";
+    if (engine_ != nullptr) {
+        for (auto &channel_requests : tracked_requests_) {
+            for (auto &request : channel_requests) {
+                engine_->releaseReqH(request.handle);
             }
         }
-        tracked_requests_.clear();
+    }
+    for (auto &channel_requests : tracked_requests_) {
+        channel_requests.clear();
     }
     return NIXL_SUCCESS;
 }
 
 uint64_t
-nixlUcxProxyBackendAdapter::trackRequest(nixlBackendReqH *handle) {
-    std::lock_guard<std::mutex> lock(request_mutex_);
-    const uint64_t token = next_request_token_++;
-    tracked_requests_.emplace(token, handle);
-    return token;
+nixlUcxProxyBackendAdapter::trackRequest(uint32_t channel_id,
+                                         uint64_t op_idx,
+                                         nixlBackendReqH *handle) {
+    NIXL_ASSERT(channel_id < tracked_requests_.size());
+    tracked_requests_[channel_id].push_back({op_idx, handle});
+    return op_idx;
 }

@@ -63,7 +63,7 @@ public:
     }
 
     nixl_status_t
-    checkCompletion(uint64_t) override { return NIXL_SUCCESS; }
+    checkCompletion(uint32_t, uint64_t) override { return NIXL_SUCCESS; }
 
     nixl_status_t
     progress() override { return NIXL_SUCCESS; }
@@ -100,9 +100,14 @@ public:
     }
 
     nixl_status_t
-    checkCompletion(uint64_t token) override
+    checkCompletion(uint32_t channel_id, uint64_t token) override
     {
         std::lock_guard<std::mutex> lk(mu_);
+        auto channel_it = token_channel_.find(token);
+        if (channel_it == token_channel_.end() || channel_it->second != channel_id) {
+            return NIXL_ERR_NOT_FOUND;
+        }
+
         auto it = completed_.find(token);
         if (it != completed_.end()) {
             nixl_status_t status = it->second;
@@ -216,7 +221,7 @@ public:
     }
 
     nixl_status_t
-    checkCompletion(uint64_t) override { return NIXL_ERR_BACKEND; }
+    checkCompletion(uint32_t, uint64_t) override { return NIXL_ERR_BACKEND; }
 
     nixl_status_t
     progress() override { return NIXL_SUCCESS; }
@@ -248,7 +253,7 @@ public:
     }
 
     nixl_status_t
-    checkCompletion(uint64_t) override
+    checkCompletion(uint32_t, uint64_t) override
     {
         ++check_completion_calls_;
         return NIXL_SUCCESS;

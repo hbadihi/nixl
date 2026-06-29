@@ -63,7 +63,7 @@ class StubBackend : public nixlDeviceProxyBackendAdapter {
         }
 
         nixl_status_t
-        checkCompletion(uint64_t) override {
+        checkCompletion(uint32_t, uint64_t) override {
             return NIXL_SUCCESS;
         }
 

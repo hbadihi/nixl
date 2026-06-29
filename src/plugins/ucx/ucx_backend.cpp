@@ -131,14 +131,16 @@ public:
     }
 
     [[nodiscard]] virtual nixl_status_t
-    status() {
+    status(bool progress = true) {
         if (requests_.empty()) {
             /* No pending transmissions */
             connections_.clear();
             return NIXL_SUCCESS;
         }
 
-        worker_->progressLoop();
+        if (progress) {
+            worker_->progressLoop();
+        }
 
         /* If last request is incomplete, return NIXL_IN_PROG early without
          * checking other requests */
@@ -423,7 +425,7 @@ public:
     complete(nixl_status_t status);
 
     [[nodiscard]] nixl_status_t
-    status() override;
+    status(bool progress = true) override;
 
     friend std::ostream &
     operator<<(std::ostream &os, const nixlUcxChunkBackendReqH &chunk) {
@@ -468,13 +470,13 @@ nixlUcxChunkBackendReqH::complete(const nixl_status_t status) {
 }
 
 nixl_status_t
-nixlUcxChunkBackendReqH::status() {
+nixlUcxChunkBackendReqH::status(bool progress) {
     // First check if entire request was cancelled or failed
     const nixl_status_t status = sharedState_->status.load();
     if (status != NIXL_SUCCESS) {
         return status;
     }
-    return nixlUcxBackendReqH::status();
+    return nixlUcxBackendReqH::status(progress);
 }
 
 /*
@@ -538,14 +540,16 @@ public:
     }
 
     [[nodiscard]] nixl_status_t
-    status() override {
-        getWorker()->progressLoop();
+    status(bool progress = true) override {
+        if (progress) {
+            getWorker()->progressLoop();
+        }
 
         if (sharedState_->pendingReqs.load()) {
             return NIXL_IN_PROG;
         }
 
-        const nixl_status_t status = nixlUcxBackendReqH::status();
+        const nixl_status_t status = nixlUcxBackendReqH::status(false);
         if (status != NIXL_SUCCESS) {
             return status;
         }
@@ -1427,6 +1431,12 @@ nixl_status_t nixlUcxEngine::checkXfer (nixlBackendReqH* handle) const
     }
 
     return int_handle->status();
+}
+
+nixl_status_t
+nixlUcxEngine::checkProxyReqStatus(nixlBackendReqH *handle) const {
+    const auto int_handle = static_cast<nixlUcxBackendReqH *>(handle);
+    return int_handle->status(false);
 }
 
 nixl_status_t nixlUcxEngine::releaseReqH(nixlBackendReqH* handle) const

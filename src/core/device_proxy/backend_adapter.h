@@ -62,7 +62,7 @@ class nixlDeviceProxyBackendAdapter {
         submit(const nixlBackendProxySubmission &submission, uint64_t &request_token) = 0;
 
         virtual nixl_status_t
-        checkCompletion(uint64_t request_token) = 0;
+        checkCompletion(uint32_t channel_id, uint64_t request_token) = 0;
 
         virtual nixl_status_t
         progress() {

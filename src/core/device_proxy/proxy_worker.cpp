@@ -219,7 +219,8 @@ ProxyWorker::publishCompletions(nixlProxyChannelState &channel) {
         if (front.status != NIXL_IN_PROG) {
             st = front.status;
         } else {
-            st = backend_->checkCompletion(front.backend_req_token);
+            st = backend_->checkCompletion(channel.device_view.channel_id,
+                                           front.backend_req_token);
             if (st == NIXL_IN_PROG) {
                 break;
             }
@@ -264,7 +265,8 @@ ProxyWorker::resetChannel(nixlProxyChannelState &channel) {
     // transport-failure case) is dropped; the backend adapter cleans up on shutdown.
     for (auto &inflight : channel.inflight_requests) {
         if (inflight.status == NIXL_IN_PROG) {
-            backend_->checkCompletion(inflight.backend_req_token);
+            backend_->checkCompletion(channel.device_view.channel_id,
+                                      inflight.backend_req_token);
         }
     }
     channel.inflight_requests.clear();

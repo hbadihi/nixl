@@ -18,9 +18,9 @@
 #define NIXL_SRC_PLUGINS_UCX_DEVICE_PROXY_UCX_PROXY_BACKEND_H
 
 #include <cstdint>
-#include <mutex>
+#include <deque>
 #include <string>
-#include <unordered_map>
+#include <vector>
 
 #include "backend/backend_aux.h"
 #include "../../../core/device_proxy/backend_adapter.h"
@@ -37,10 +37,13 @@ class nixlUcxProxyBackendAdapter : public nixlDeviceProxyBackendAdapter {
         ~nixlUcxProxyBackendAdapter() override = default;
 
         nixl_status_t
+        init(uint32_t worker_count, uint32_t channel_count) override;
+
+        nixl_status_t
         submit(const nixlBackendProxySubmission &submission, uint64_t &request_token) override;
 
         nixl_status_t
-        checkCompletion(uint64_t request_token) override;
+        checkCompletion(uint32_t channel_id, uint64_t request_token) override;
 
         nixl_status_t
         progress() override;
@@ -63,14 +66,17 @@ class nixlUcxProxyBackendAdapter : public nixlDeviceProxyBackendAdapter {
         nixl_status_t
         submitAtomicAdd(const nixlBackendProxySubmission &submission, uint64_t &request_token);
 
+        struct TrackedRequest {
+            uint64_t op_idx = 0;
+            nixlBackendReqH *handle = nullptr;
+        };
+
         uint64_t
-        trackRequest(nixlBackendReqH *handle);
+        trackRequest(uint32_t channel_id, uint64_t op_idx, nixlBackendReqH *handle);
 
         nixlUcxEngine *engine_ = nullptr;
         bool progress_thread_enabled_ = false;
-        std::mutex request_mutex_;
-        std::unordered_map<uint64_t, nixlBackendReqH *> tracked_requests_;
-        uint64_t next_request_token_ = 1;
+        std::vector<std::deque<TrackedRequest>> tracked_requests_;
 };
 
 #endif // NIXL_SRC_PLUGINS_UCX_DEVICE_PROXY_UCX_PROXY_BACKEND_H
