@@ -68,6 +68,14 @@ class ProxyWorker {
         void
         publishCompletions(nixlProxyChannelState &channel);
 
+        // Fire-and-forget reap (NIXL_EP_PROXY_FIRE_AND_FORGET): poll in-flight tokens and free
+        // terminal backend requests out-of-order, without publishing completed_idx, preserving
+        // FIFO order, or error-latching. For EP, which never reads completions
+        // (no nixlGetGpuXferStatus), this removes the head-of-line block and permanent latch
+        // that can otherwise wedge a channel.
+        void
+        reapCompletions(nixlProxyChannelState &channel);
+
         // Drain-and-discard any stale ring entries + clear inflight/error/completion
         // state for a channel whose owning rank is (re)connecting. Runs only on the
         // worker thread (sole accessor of channel state), triggered by a generation bump.
@@ -98,6 +106,9 @@ class ProxyWorker {
         // stuck in backend progress; scanning the ring detects published records stranded
         // behind an unpublished head slot.
         bool stall_log_enabled_ = false;
+        // Fire-and-forget completion handling (NIXL_EP_PROXY_FIRE_AND_FORGET): skip the
+        // FIFO/latch/device-publish path in favor of reapCompletions().
+        bool fire_and_forget_ = false;
         std::chrono::steady_clock::time_point last_stall_log_{};
         uint64_t run_once_count_ = 0;
         uint64_t last_logged_run_once_count_ = 0;
