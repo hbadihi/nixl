@@ -97,11 +97,21 @@ ProxyWorker::runOnce() {
         }
     }
     driveBackendProgress();
-    for (uint32_t i = 0; i < assigned_channel_count_; i++) {
-        nixlProxyChannelState &channel = assigned_channels_[i];
-        if (fire_and_forget_) {
-            reapCompletions(channel);
-        } else {
+    // Fire-and-forget (NIXL_EP_PROXY_FIRE_AND_FORGET): skip completion handling ENTIRELY.
+    // EP never reads completions (no nixlGetGpuXferStatus), and dropping the per-op
+    // checkCompletion()+mutex is the bulk of the measured speedup (e.g. 5.3 -> 11.8 GB/s).
+    //
+    // !!! LEAK WARNING -- BENCHMARK/EXPERIMENT ONLY, NOT PRODUCTION-SAFE !!!
+    // Nothing drains channel.inflight_requests, so that deque grows without bound; and the
+    // backend never sees checkCompletion(), so its tracked request handles (e.g. the UCX
+    // adapter's tracked_requests_ + the underlying ucp requests) are never released until
+    // shutdown(). On a long-lived run this is not just RSS growth -- it exhausts the UCX
+    // request pool and submits start failing. Fine only for short, teardown-bounded runs.
+    // TODO: replace with a leak-free fast path before shipping (self-freeing UCX completion
+    // callback, or a periodic bulk reap), then this branch goes away.
+    if (!fire_and_forget_) {
+        for (uint32_t i = 0; i < assigned_channel_count_; i++) {
+            nixlProxyChannelState &channel = assigned_channels_[i];
             publishCompletions(channel);
         }
     }
@@ -357,31 +367,6 @@ ProxyWorker::publishCompletions(nixlProxyChannelState &channel) {
             channel.error_latched = true;
             break;
         }
-    }
-}
-
-void
-ProxyWorker::reapCompletions(nixlProxyChannelState &channel) {
-    // Fire-and-forget: EP never reads completions (no nixlGetGpuXferStatus), so we skip the
-    // completed_idx device publish, the strict FIFO ordering, and the permanent error-latch.
-    // We still poll each in-flight token so the backend releases its transport handle when it
-    // reaches a terminal state (checkCompletion frees + untracks it). Polling out of order
-    // removes the head-of-line block and the latch that can otherwise wedge a channel after a
-    // single slow or failed op.
-    auto &inflight = channel.inflight_requests;
-    auto it = inflight.begin();
-    while (it != inflight.end()) {
-        nixl_status_t st = it->status;
-        if (st == NIXL_IN_PROG) {
-            st = backend_->checkCompletion(it->backend_req_token);
-        }
-        if (st == NIXL_IN_PROG) {
-            ++it;
-            continue;
-        }
-        // Terminal: the backend has released the handle (or there was none); drop the entry.
-        // erase() returns the next valid iterator for the deque.
-        it = inflight.erase(it);
     }
 }
 
