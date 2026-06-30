@@ -52,6 +52,7 @@ ProxyWorker::~ProxyWorker() {
 
 void
 ProxyWorker::start(uint32_t worker_idx) {
+    worker_idx_ = worker_idx;
     thread_ = std::thread([this, worker_idx]() {
         NIXL_INFO << "ProxyWorker thread " << worker_idx << " started";
         while (__atomic_load_n(shutdown_word_, __ATOMIC_ACQUIRE)
@@ -220,6 +221,16 @@ ProxyWorker::maybeLogStalls() {
               << " ready_records=" << total_ready_records
               << " blocked_hole_channels=" << blocked_hole_channels
               << " error_latched_channels=" << error_latched_channels;
+
+    // Only worker 0 dumps the backend-global per-UCX-worker submit histogram, so it
+    // appears once per heartbeat interval per process rather than once per drain thread.
+    if (worker_idx_ == 0 && backend_ != nullptr) {
+        const std::string histogram = backend_->workerSubmitHistogram();
+        if (!histogram.empty()) {
+            NIXL_INFO << "ProxyWorker STALLDBG qp_histogram: pid=" << ::getpid()
+                      << " " << histogram;
+        }
+    }
 }
 
 bool

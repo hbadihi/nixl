@@ -17,7 +17,10 @@
 #ifndef NIXL_SRC_PLUGINS_UCX_DEVICE_PROXY_UCX_PROXY_BACKEND_H
 #define NIXL_SRC_PLUGINS_UCX_DEVICE_PROXY_UCX_PROXY_BACKEND_H
 
+#include <array>
+#include <atomic>
 #include <cstdint>
+#include <cstdlib>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -32,7 +35,8 @@ class nixlUcxProxyBackendAdapter : public nixlDeviceProxyBackendAdapter {
         explicit nixlUcxProxyBackendAdapter(nixlUcxEngine *engine = nullptr,
                                             bool progress_thread_enabled = false) noexcept
             : engine_(engine),
-              progress_thread_enabled_(progress_thread_enabled) {}
+              progress_thread_enabled_(progress_thread_enabled),
+              stall_log_enabled_(std::getenv("NIXL_EP_PROXY_STALL_LOG") != nullptr) {}
 
         ~nixlUcxProxyBackendAdapter() override = default;
 
@@ -47,6 +51,9 @@ class nixlUcxProxyBackendAdapter : public nixlDeviceProxyBackendAdapter {
 
         nixl_status_t
         shutdown() override;
+
+        std::string
+        workerSubmitHistogram() const override;
 
     private:
         // Deterministically map a proxy channel to a UCX worker so each channel uses
@@ -71,6 +78,13 @@ class nixlUcxProxyBackendAdapter : public nixlDeviceProxyBackendAdapter {
         std::mutex request_mutex_;
         std::unordered_map<uint64_t, nixlBackendReqH *> tracked_requests_;
         uint64_t next_request_token_ = 1;
+
+        // Debug-only QP-utilization counters (gated on NIXL_EP_PROXY_STALL_LOG). Indexed by
+        // worker_id = channel_id % num_workers; a fixed cap avoids needing an init() hook.
+        // Submits with worker_id >= cap are not counted (num_workers never approaches this).
+        static constexpr size_t kMaxTrackedWorkers = 256;
+        bool stall_log_enabled_ = false;
+        std::array<std::atomic<uint64_t>, kMaxTrackedWorkers> worker_submit_counts_{};
 };
 
 #endif // NIXL_SRC_PLUGINS_UCX_DEVICE_PROXY_UCX_PROXY_BACKEND_H
