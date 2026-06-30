@@ -68,14 +68,6 @@ class ProxyWorker {
         void
         publishCompletions(nixlProxyChannelState &channel);
 
-        // Fire-and-forget reap (NIXL_EP_PROXY_FIRE_AND_FORGET): poll in-flight tokens and free
-        // terminal backend requests out-of-order, without publishing completed_idx, preserving
-        // FIFO order, or error-latching. For EP, which never reads completions
-        // (no nixlGetGpuXferStatus), this removes the head-of-line block and permanent latch
-        // that can otherwise wedge a channel.
-        void
-        reapCompletions(nixlProxyChannelState &channel);
-
         // Drain-and-discard any stale ring entries + clear inflight/error/completion
         // state for a channel whose owning rank is (re)connecting. Runs only on the
         // worker thread (sole accessor of channel state), triggered by a generation bump.
