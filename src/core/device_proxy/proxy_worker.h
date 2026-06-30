@@ -109,6 +109,9 @@ class ProxyWorker {
         // Fire-and-forget completion handling (NIXL_EP_PROXY_FIRE_AND_FORGET): skip the
         // FIFO/latch/device-publish path in favor of reapCompletions().
         bool fire_and_forget_ = false;
+        // This worker's index; only worker 0 dumps the process-wide QP histogram so the
+        // (backend-global) counters aren't logged once per drain thread.
+        uint32_t worker_idx_ = 0;
         std::chrono::steady_clock::time_point last_stall_log_{};
         uint64_t run_once_count_ = 0;
         uint64_t last_logged_run_once_count_ = 0;
