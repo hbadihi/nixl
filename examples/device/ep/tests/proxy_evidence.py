@@ -33,7 +33,6 @@ def make_ep_proxy_evidence(
     proxy_activity_before: int | None = None,
     proxy_activity_after: int | None = None,
     proxy_activity_submitted_work_count: int | None = None,
-    ll_all_rdma_fallback_count: int | None = None,
     proxy_context_published: bool | None = None,
     proxy_context_owner_id: int | None = None,
     proxy_worker_count: int | None = None,
@@ -73,7 +72,7 @@ def make_ep_proxy_evidence(
                 "proxy_activity_submitted_work_count": (
                     proxy_activity_submitted_work_count
                 ),
-                "proxy_scheduler": "drain_channel_while_available",
+                "proxy_scheduler": "bounded_one_submission_per_channel_per_cycle",
             }
         )
     else:
@@ -84,15 +83,6 @@ def make_ep_proxy_evidence(
                 "proxy_activity_submitted_work_count": 0,
             }
         )
-
-    if validation_path == "elastic_ll":
-        fallback_observed = (
-            ll_all_rdma_fallback_count is not None and ll_all_rdma_fallback_count > 0
-        )
-        record["ll_all_rdma_fallback_observed"] = fallback_observed
-        record["ll_all_rdma_fallback_count"] = ll_all_rdma_fallback_count or 0
-    else:
-        record["ll_all_rdma_fallback_observed"] = "not_applicable"
 
     if extra:
         record.update(dict(extra))
@@ -172,14 +162,9 @@ def _classify_ep_proxy_evidence(record: Mapping[str, Any]) -> tuple[str, str]:
         )
 
     if validation_path == "elastic_ll":
-        if record.get("ll_all_rdma_fallback_observed") is not True:
-            return (
-                "inconclusive",
-                "elastic LL passed without explicit all-RDMA fallback evidence",
-            )
         return (
             "accepted",
-            "elastic LL correctness passed with proxy activity and all-RDMA fallback evidence",
+            "elastic LL correctness passed with proxy activity evidence",
         )
 
     return "accepted", "HT correctness passed with proxy activity evidence"

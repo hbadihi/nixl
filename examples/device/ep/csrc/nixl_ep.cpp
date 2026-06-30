@@ -273,11 +273,6 @@ void Buffer::init(int num_ranks, int num_experts_per_rank, int64_t num_nvl_bytes
         CUDA_CHECK(cudaMemset(last_ht_barrier_counter, 0, sizeof(uint64_t)));
     }
 
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-    CUDA_CHECK(cudaMalloc(&ll_all_rdma_fallback_counter, sizeof(uint64_t)));
-    CUDA_CHECK(cudaMemset(ll_all_rdma_fallback_counter, 0, sizeof(uint64_t)));
-#endif
-
     CUDA_CHECK(cudaDeviceSynchronize());
 
     my_peer_info.rdma_buffer_ptr = rdma_buffer_ptr;
@@ -372,30 +367,6 @@ void Buffer::reset_proxy_activity_count() {
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
     if (nixl_agent_info && nixl_agent_info->agent != nullptr) {
         nixl_agent_info->agent->resetProxySubmittedWorkCount();
-    }
-#endif
-}
-
-uint64_t Buffer::get_ll_all_rdma_fallback_count() const {
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-    if (ll_all_rdma_fallback_counter != nullptr) {
-        uint64_t count = 0;
-        CUDA_CHECK(cudaDeviceSynchronize());
-        CUDA_CHECK(cudaMemcpy(&count,
-                              ll_all_rdma_fallback_counter,
-                              sizeof(count),
-                              cudaMemcpyDeviceToHost));
-        return count;
-    }
-#endif
-    return 0;
-}
-
-void Buffer::reset_ll_all_rdma_fallback_count() {
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-    if (ll_all_rdma_fallback_counter != nullptr) {
-        CUDA_CHECK(cudaMemset(ll_all_rdma_fallback_counter, 0, sizeof(uint64_t)));
-        CUDA_CHECK(cudaDeviceSynchronize());
     }
 #endif
 }
@@ -522,13 +493,6 @@ void Buffer::destroy() {
     sync_buffer_ptr = nullptr;
     m_sync_count_alloc.reset();
     sync_count_ptr = nullptr;
-
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-    if (ll_all_rdma_fallback_counter != nullptr) {
-        warn_cuda(cudaFree(ll_all_rdma_fallback_counter), "free LL all-RDMA fallback counter");
-        ll_all_rdma_fallback_counter = nullptr;
-    }
-#endif
 
     if (!low_latency_mode) {
         warn_cuda(cudaFree(local_ht_barrier_counter), "free local ht barrier counter");
@@ -1529,12 +1493,6 @@ void Buffer::_nixl_ep_init(void) {
         .last_ht_barrier_counter = last_ht_barrier_counter,
         .local_ht_barrier_counter_ptr = local_ht_barrier_counter,
         .rdma_buffer_ptr = rdma_buffer_ptr,
-        .ll_all_rdma_fallback_counter =
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-            ll_all_rdma_fallback_counter,
-#else
-            nullptr,
-#endif
         .max_num_ranks = max_num_ranks,
         .num_rdma_ranks = num_rdma_ranks,
         .rank = rank,
@@ -1565,8 +1523,9 @@ void Buffer::_nixl_agent_init() {
     // Proxy drain-thread count. Independent of channels_per_rank and the UCX worker count:
     // the runtime fans the N channels across these threads (clamped to channel count).
     // Env-overridable (NIXL_EP_PROXY_WORKER_COUNT) for sweeps; default 1, with a
-    // non-positive/garbage value falling back to 1. NOTE: values > 1 make multiple drain
-    // threads call into the shared UCX engine concurrently, which is not yet MT-validated.
+    // non-positive/garbage value falling back to 1. For values > 1 the UCX proxy adapter
+    // requires every shared UCP worker's queried actual mode to be MULTI and fails init
+    // before dispatch if that transport-safety precondition is not met.
     const char* worker_count_env = std::getenv("NIXL_EP_PROXY_WORKER_COUNT");
     proxy_worker_count = worker_count_env ? std::atoi(worker_count_env) : 1;
     if (proxy_worker_count < 1) {
@@ -1755,8 +1714,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         .def("get_comm_stream", &nixl_ep::Buffer::get_comm_stream)
         .def("get_proxy_activity_count", &nixl_ep::Buffer::get_proxy_activity_count)
         .def("reset_proxy_activity_count", &nixl_ep::Buffer::reset_proxy_activity_count)
-        .def("get_ll_all_rdma_fallback_count", &nixl_ep::Buffer::get_ll_all_rdma_fallback_count)
-        .def("reset_ll_all_rdma_fallback_count", &nixl_ep::Buffer::reset_ll_all_rdma_fallback_count)
         .def("is_proxy_context_published", &nixl_ep::Buffer::is_proxy_context_published)
         .def("get_proxy_context_owner_id", &nixl_ep::Buffer::get_proxy_context_owner_id)
         .def("get_required_proxy_channels", &nixl_ep::Buffer::get_required_proxy_channels)

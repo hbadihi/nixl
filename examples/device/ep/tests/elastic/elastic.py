@@ -79,18 +79,12 @@ def write_elastic_evidence(
         0,
         buffer.get_proxy_activity_count,
     )
-    fallback_count = safe_evidence_value(
-        "ll_all_rdma_fallback_count",
-        0,
-        buffer.get_ll_all_rdma_fallback_count,
-    )
     record = proxy_evidence.make_ep_proxy_evidence(
         backend=nixl_ep.get_gpu_device_api_backend(),
         rank=rank,
         validation_path="elastic_ll",
         correctness=correctness,
         proxy_activity_submitted_work_count=activity_count,
-        ll_all_rdma_fallback_count=fallback_count,
         proxy_context_published=safe_evidence_value(
             "proxy_context_published",
             False,
@@ -640,7 +634,6 @@ def worker(torch_rank: int, args: argparse.Namespace):
         current_num_experts = args.num_experts_per_rank * current_num_ranks
 
         buffer.reset_proxy_activity_count()
-        buffer.reset_ll_all_rdma_fallback_count()
         try:
             test_main(
                 args.num_tokens,

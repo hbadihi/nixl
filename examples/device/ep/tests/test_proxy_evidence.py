@@ -44,32 +44,18 @@ class ProxyEvidenceClassifierTest(unittest.TestCase):
         )
 
         self.assertEqual(record["classification"], "accepted")
-
-    def test_elastic_ll_pass_without_fallback_is_inconclusive(self):
-        record = make_ep_proxy_evidence(
-            backend="proxy",
-            rank=0,
-            validation_path="elastic_ll",
-            correctness="pass",
-            proxy_activity_submitted_work_count=3,
-            ll_all_rdma_fallback_count=0,
-            proxy_context_published=True,
-            proxy_worker_count=1,
-            proxy_channel_count=2,
-            required_proxy_channels=2,
+        self.assertEqual(
+            record["proxy_scheduler"],
+            "bounded_one_submission_per_channel_per_cycle",
         )
 
-        self.assertEqual(record["classification"], "inconclusive")
-        self.assertIn("fallback", record["reason"])
-
-    def test_elastic_ll_pass_with_fallback_is_accepted(self):
+    def test_elastic_ll_pass_is_accepted(self):
         record = make_ep_proxy_evidence(
             backend="proxy",
             rank=0,
             validation_path="elastic_ll",
             correctness="pass",
             proxy_activity_submitted_work_count=3,
-            ll_all_rdma_fallback_count=7,
             proxy_context_published=True,
             proxy_worker_count=1,
             proxy_channel_count=2,

@@ -192,14 +192,6 @@ class Buffer:
         """Reset the proxy worker backend-submission counter for this buffer."""
         self.runtime.reset_proxy_activity_count()
 
-    def get_ll_all_rdma_fallback_count(self) -> int:
-        """Return the LL all-RDMA fallback branch counter for this buffer."""
-        return int(self.runtime.get_ll_all_rdma_fallback_count())
-
-    def reset_ll_all_rdma_fallback_count(self) -> None:
-        """Reset the LL all-RDMA fallback branch counter for this buffer."""
-        self.runtime.reset_ll_all_rdma_fallback_count()
-
     def is_proxy_context_published(self) -> bool:
         """Return whether this buffer owns a published proxy device context."""
         return bool(self.runtime.is_proxy_context_published())

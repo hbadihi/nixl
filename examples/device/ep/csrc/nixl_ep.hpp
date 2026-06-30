@@ -150,7 +150,6 @@ private:
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
     uint64_t proxy_context_owner_id = 0;
     bool proxy_context_published = false;
-    uint64_t *ll_all_rdma_fallback_counter = nullptr;
     int required_proxy_channels = 0;
     int configured_proxy_channels = 0;
     int proxy_worker_count = 0;
@@ -214,10 +213,6 @@ public:
     uint64_t get_proxy_activity_count() const;
 
     void reset_proxy_activity_count();
-
-    uint64_t get_ll_all_rdma_fallback_count() const;
-
-    void reset_ll_all_rdma_fallback_count();
 
     bool is_proxy_context_published() const;
 
