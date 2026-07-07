@@ -288,8 +288,10 @@ ProxyWorker::submitToBackend(nixlProxyChannelState &channel, const nixlProxySubm
         NIXL_DEBUG << "ProxyWorker::submitToBackend: submission preparation failed"
                    << " op_idx=" << submission.op_idx
                    << " status=" << status;
+        if (!fire_and_forget_) {
         channel.inflight_requests.push_back(
             {submission.op_idx, 0, status, submission.opcode});
+        }
         // The terminal error is queued for publishCompletions(); the worker handled it.
         return;
     }
@@ -323,7 +325,9 @@ ProxyWorker::submitToBackend(nixlProxyChannelState &channel, const nixlProxySubm
 
     NIXL_DEBUG << "ProxyWorker::submitToBackend: submitted op_idx=" << submission.op_idx
                << " request_token=" << request_token << " status=" << status;
+    if (!fire_and_forget_) {
     channel.inflight_requests.push_back(inflight);
+    }
 }
 
 void
