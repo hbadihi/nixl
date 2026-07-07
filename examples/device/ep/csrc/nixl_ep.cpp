@@ -490,6 +490,10 @@ void Buffer::_nixl_agents_connect(const std::vector<int>& ranks, const std::vect
             sleep_ms(10);
         }
     }
+
+    for (int remote_rank : remote_ranks) {
+        printf("connected to rank: %d\n", remote_rank);
+    }
 }
 
 void Buffer::_nixl_agents_peer_info_gather(std::vector<int>& ranks) {
@@ -573,21 +577,27 @@ void Buffer::connect_ranks(const std::vector<int>& remote_ranks_list, const std:
     if (new_ranks.empty())
         return;
 
+    printf("connect ranks\n");
     _nixl_agents_connect(new_ranks, new_ranks_mds);
 
+    printf("gather peer info\n");
     _nixl_agents_peer_info_gather(new_ranks);
 
+    printf("destroy memory views\n");
     _nixl_ep_memory_views_destroy();
 
     // Rebuilding the remote memviews here is also the proxy's channel-activation signal:
     // prepMemView drives per-rank ring activation/quiesce inside the runtime (it diffs each
     // element's remote agent and revives only the bands that changed), so no explicit
     // per-rank reset call is needed — connect and disconnect both rebuild these memviews.
+    printf("create memory views\n");
     _nixl_ep_memory_views_create();
 
+    printf("synchronize\n");
     CUDA_CHECK(cudaDeviceSynchronize());
 
     // Ready to use
+    printf("ready to use\n");
     available = true;
 }
 
@@ -1557,6 +1567,7 @@ void Buffer::_nixl_agent_init() {
     }
 
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    printf("publish proxy context\n");
     void *proxy_ctx = agent->getProxyDeviceContext();
     if (proxy_ctx == nullptr) {
         throw std::runtime_error("EP_PROXY_CONTEXT_UNAVAILABLE: proxy device context is not available after UCX backend creation");
@@ -1568,6 +1579,7 @@ void Buffer::_nixl_agent_init() {
                                  cudaGetErrorString(proxy_publish_status));
     }
     proxy_context_published = true;
+    printf("proxy context published\n");
 #endif
 }
 
