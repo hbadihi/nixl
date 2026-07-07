@@ -5,12 +5,12 @@
 # Two INDEPENDENT axes (wired in Buffer::_nixl_agent_init, examples/device/ep/csrc/nixl_ep.cpp):
 #   NIXL_EP_PROXY_UCX_WORKERS   UCX host workers  -> one EP/QP/rkey per worker per peer.
 #                               A submission routes to worker (channel_id % num_workers), so
-#                               this is QP-level parallelism per peer. (default = lane ceiling)
-#   NIXL_EP_PROXY_WORKER_COUNT  proxy drain threads that consume the GPU rings. (default = 1)
+#                               this is QP-level parallelism per peer. (default = proxy channels)
+#   NIXL_EP_PROXY_WORKERS  proxy drain threads that consume the GPU rings. (default = 1)
 #
-# channels_per_rank (the device ring stride / per-rank isolation) is fixed at the lane ceiling
-# and is independent of both knobs, so any (ucx_workers, proxy_workers) combo is correctness-safe;
-# they only change which QP carries a channel and how many CPU threads drain.
+# channels_per_rank is the configured per-rank proxy channel count. Logical kernel channel ids
+# fold into that band, so worker knobs only change which QP carries a channel and how many CPU
+# threads drain.
 #
 # Usage (PYTHONPATH must point at a BUILT proxy tree; cwd does not matter — all paths below
 # are resolved absolutely, and the import check runs from a neutral cwd):
@@ -81,10 +81,10 @@ for uw in $UCX_WORKERS; do
     log="$OUT_DIR/$cell.log"
     ev="$OUT_DIR/$cell.evidence"
     rm -rf "$ev"; mkdir -p "$ev"
-    echo "=== cell $cell : NIXL_EP_PROXY_UCX_WORKERS=$uw NIXL_EP_PROXY_WORKER_COUNT=$pw ==="
+    echo "=== cell $cell : NIXL_EP_PROXY_UCX_WORKERS=$uw NIXL_EP_PROXY_WORKERS=$pw ==="
 
     NIXL_EP_PROXY_UCX_WORKERS="$uw" \
-    NIXL_EP_PROXY_WORKER_COUNT="$pw" \
+    NIXL_EP_PROXY_WORKERS="$pw" \
     NIXL_LOG_LEVEL="$LOG_LEVEL" \
       timeout -s INT "$CELL_WALL_TIMEOUT" \
         python3 "$SCRIPT_DIR/elastic.py" \

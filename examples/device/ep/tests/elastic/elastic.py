@@ -26,7 +26,7 @@ import sys
 import threading
 import time
 from functools import partial
-from typing import Any, Callable, cast
+from typing import cast
 
 import nixl_ep
 import rank_server
@@ -37,8 +37,6 @@ from plan import Plan
 
 # Add tests directory to path to import test utils
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-import proxy_evidence  # noqa: E402
 
 from utils import (  # noqa: E402
     bench,
@@ -51,69 +49,6 @@ from utils import (  # noqa: E402
 TCP_STORE_PORT = 9999
 RANK_SERVER_PORT = 10000
 
-
-def safe_evidence_value(
-    name: str,
-    default: Any,
-    getter: Callable[[], Any],
-) -> Any:
-    try:
-        return getter()
-    except Exception as exc:
-        print(f"[evidence] failed to read {name}: {exc}", file=sys.stderr, flush=True)
-        return default
-
-
-def write_elastic_evidence(
-    args: argparse.Namespace,
-    buffer: nixl_ep.Buffer,
-    rank: int,
-    phase: int,
-    correctness: str,
-) -> None:
-    if not args.evidence_output:
-        return
-
-    activity_count = safe_evidence_value(
-        "proxy_activity_count",
-        0,
-        buffer.get_proxy_activity_count,
-    )
-    record = proxy_evidence.make_ep_proxy_evidence(
-        backend=nixl_ep.get_gpu_device_api_backend(),
-        rank=rank,
-        validation_path="elastic_ll",
-        correctness=correctness,
-        proxy_activity_submitted_work_count=activity_count,
-        proxy_context_published=safe_evidence_value(
-            "proxy_context_published",
-            False,
-            buffer.is_proxy_context_published,
-        ),
-        proxy_context_owner_id=safe_evidence_value(
-            "proxy_context_owner_id",
-            0,
-            buffer.get_proxy_context_owner_id,
-        ),
-        proxy_worker_count=safe_evidence_value(
-            "proxy_worker_count",
-            None,
-            buffer.get_proxy_worker_count,
-        ),
-        proxy_channel_count=safe_evidence_value(
-            "proxy_channel_count",
-            None,
-            buffer.get_configured_proxy_channels,
-        ),
-        required_proxy_channels=args.num_experts_per_rank,
-        extra={"phase": phase},
-    )
-    proxy_evidence.write_evidence_record(
-        record,
-        args.evidence_output,
-        rank=rank,
-        phase=phase,
-    )
 
 
 def non_negative_int(value: str) -> int:
@@ -578,7 +513,6 @@ def worker(torch_rank: int, args: argparse.Namespace):
         num_ranks=max_num_ranks,
         num_experts_per_rank=args.num_experts_per_rank,
         num_rdma_bytes=num_rdma_bytes,
-        proxy_lane_ceiling=args.num_experts_per_rank,
     )
     signal.signal(
         signal.SIGTERM,
@@ -633,37 +567,18 @@ def worker(torch_rank: int, args: argparse.Namespace):
         current_num_ranks = max(active_ranks_list) + 1  # Sparse indexing
         current_num_experts = args.num_experts_per_rank * current_num_ranks
 
-        buffer.reset_proxy_activity_count()
-        try:
-            test_main(
-                args.num_tokens,
-                args.hidden_dim,
-                current_num_experts,
-                args.num_topk,
-                global_rank,
-                current_num_ranks,
-                max_num_ranks,
-                buffer,
-                kineto=args.kineto,
-                fault_tolerance_test=kill_rank,
-            )
-        except BaseException:
-            write_elastic_evidence(
-                args,
-                buffer,
-                global_rank,
-                plan.get_phase(),
-                correctness="fail",
-            )
-            raise
-        else:
-            write_elastic_evidence(
-                args,
-                buffer,
-                global_rank,
-                plan.get_phase(),
-                correctness="pass",
-            )
+        test_main(
+            args.num_tokens,
+            args.hidden_dim,
+            current_num_experts,
+            args.num_topk,
+            global_rank,
+            current_num_ranks,
+            max_num_ranks,
+            buffer,
+            kineto=args.kineto,
+            fault_tolerance_test=kill_rank,
+        )
         # Query mask buffer to detect any unexpected rank failures and clean them up
         buffer.query_mask_buffer(mask_status)
         newly_failed_ranks = set()
@@ -686,16 +601,6 @@ def worker(torch_rank: int, args: argparse.Namespace):
         )
 
         if not plan.next():
-            post_phase_hold_seconds = float(
-                os.environ.get("NIXL_EP_POST_PHASE_HOLD_SECONDS", "0")
-            )
-            if post_phase_hold_seconds > 0:
-                print(
-                    f"global_rank={global_rank}, local_rank={local_rank} -> "
-                    f"holding {post_phase_hold_seconds:g}s before teardown",
-                    flush=True,
-                )
-                time.sleep(post_phase_hold_seconds)
             break
 
     buffer.destroy()
@@ -741,11 +646,6 @@ def main():
         type=non_negative_int,
         default=DEFAULT_TIMEOUT_MS,
         help="GPU timeout in milliseconds (non-negative integer)",
-    )
-    parser.add_argument(
-        "--evidence-output",
-        type=str,
-        help="write ep_proxy_evidence_v1 JSON evidence records; rank and phase suffixes are added",
     )
 
     args = parser.parse_args()

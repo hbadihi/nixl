@@ -53,14 +53,12 @@ def write_ht_evidence(
     rank: int,
     num_nodes: int,
     num_local_ranks: int,
-    num_qps_per_rank: int,
     correctness: str,
 ) -> None:
     if not args.evidence_output:
         return
 
     validation_path = "ht_proxy_smoke" if args.proxy_smoke else "ht_two_node_rdma"
-    activity_count = buffer.get_proxy_activity_count()
     record = proxy_evidence.make_ep_proxy_evidence(
         backend=nixl_ep.get_gpu_device_api_backend(),
         rank=rank,
@@ -71,7 +69,6 @@ def write_ht_evidence(
         proxy_context_owner_id=buffer.get_proxy_context_owner_id(),
         proxy_worker_count=buffer.get_proxy_worker_count(),
         proxy_channel_count=buffer.get_configured_proxy_channels(),
-        required_proxy_channels=num_qps_per_rank,
         extra={
             "num_nodes": num_nodes,
             "unsupported_single_node_fallback": (
@@ -539,7 +536,6 @@ def test_loop(local_rank: int, num_local_ranks: int, args: argparse.Namespace):
         num_experts_per_rank=num_qps_per_rank,
         num_nvl_bytes=int(2e9),
         num_rdma_bytes=int(1e9),
-        proxy_lane_ceiling=num_qps_per_rank,
     )
     buffer.connect_ranks([i for i in range(num_ranks) if i != rank])
 
@@ -556,7 +552,6 @@ def test_loop(local_rank: int, num_local_ranks: int, args: argparse.Namespace):
         )
     torch.manual_seed(rank)
 
-    buffer.reset_proxy_activity_count()
     try:
         for i in (num_sms,):
             test_main(
@@ -579,7 +574,6 @@ def test_loop(local_rank: int, num_local_ranks: int, args: argparse.Namespace):
             rank,
             num_nodes,
             num_local_ranks,
-            num_qps_per_rank,
             correctness="fail",
         )
         raise
@@ -590,7 +584,6 @@ def test_loop(local_rank: int, num_local_ranks: int, args: argparse.Namespace):
             rank,
             num_nodes,
             num_local_ranks,
-            num_qps_per_rank,
             correctness="pass",
         )
 
