@@ -180,7 +180,7 @@ ProxyWorker::maybeLogStalls() {
             continue;
         }
         const ChannelDebugCounters &counters = channel_debug_counters_[i];
-        NIXL_INFO << "ProxyWorker STALLDBG: channel=" << channel.device_view.channel_id
+        NIXL_WARN << "ProxyWorker STALLDBG: channel=" << channel.device_view.channel_id
                   << " pid=" << ::getpid()
                   << " consumer=" << consumer
                   << " ready_records=" << ready_records
@@ -220,7 +220,7 @@ ProxyWorker::maybeLogStalls() {
 
     const uint64_t run_once_delta = run_once_count_ - last_logged_run_once_count_;
     last_logged_run_once_count_ = run_once_count_;
-    NIXL_INFO << "ProxyWorker STALLDBG heartbeat: pid=" << ::getpid()
+    NIXL_WARN << "ProxyWorker STALLDBG heartbeat: pid=" << ::getpid()
               << " run_once=" << run_once_count_
               << " run_once_delta=" << run_once_delta
               << " submitted="
@@ -237,7 +237,7 @@ ProxyWorker::maybeLogStalls() {
     if (worker_idx_ == 0 && backend_ != nullptr) {
         const std::string histogram = backend_->workerSubmitHistogram();
         if (!histogram.empty()) {
-            NIXL_INFO << "ProxyWorker STALLDBG qp_histogram: pid=" << ::getpid()
+            NIXL_WARN << "ProxyWorker STALLDBG qp_histogram: pid=" << ::getpid()
                       << " " << histogram;
         }
     }
