@@ -1521,7 +1521,6 @@ void Buffer::_nixl_agent_init() {
     init_params["num_workers"] = ucx_workers_env
         ? std::string(ucx_workers_env)
         : std::to_string(cfg.proxyChannelsPerRank);
-    init_params["ucx_num_device_channels"] = "1";
 #endif
 
     nixlBackendH* ucx_backend = nullptr;
