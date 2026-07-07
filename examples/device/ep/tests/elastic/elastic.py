@@ -49,6 +49,31 @@ from utils import (  # noqa: E402
 TCP_STORE_PORT = 9999
 RANK_SERVER_PORT = 10000
 
+_SM_CLOCK_MHZ: float | None = None
+
+
+def get_sm_clock_mhz() -> float:
+    """SM clock in MHz, used to convert clock64 cycles to microseconds
+    (microseconds = cycles / MHz). Cached per process."""
+    global _SM_CLOCK_MHZ
+    if _SM_CLOCK_MHZ is None:
+        try:
+            import pynvml
+
+            pynvml.nvmlInit()
+            handle = pynvml.nvmlDeviceGetHandleByIndex(torch.cuda.current_device())
+            _SM_CLOCK_MHZ = float(
+                pynvml.nvmlDeviceGetMaxClockInfo(handle, pynvml.NVML_CLOCK_SM)
+            )
+        except Exception:
+            import subprocess
+
+            out = subprocess.check_output(
+                ["nvidia-smi", "--query-gpu=clocks.max.sm",
+                 "--format=csv,noheader,nounits"]
+            )
+            _SM_CLOCK_MHZ = float(out.decode().splitlines()[0].strip())
+    return _SM_CLOCK_MHZ
 
 
 def non_negative_int(value: str) -> int:
@@ -567,6 +592,7 @@ def worker(torch_rank: int, args: argparse.Namespace):
         current_num_ranks = max(active_ranks_list) + 1  # Sparse indexing
         current_num_experts = args.num_experts_per_rank * current_num_ranks
 
+        nixl_ep._nixl_ep_cpp.reset_nixl_call_stats()
         test_main(
             args.num_tokens,
             args.hidden_dim,
@@ -579,6 +605,23 @@ def worker(torch_rank: int, args: argparse.Namespace):
             kineto=args.kineto,
             fault_tolerance_test=kill_rank,
         )
+        # TMP - print nixl call stats
+        _nixl_stats = nixl_ep._nixl_ep_cpp.get_nixl_call_stats()
+        _mhz = get_sm_clock_mhz()
+        _parts = []
+        for _name, _s in _nixl_stats.items():
+            _avg_cyc = (_s["cycles"] / _s["count"]) if _s["count"] else 0.0
+            _avg_us = _avg_cyc / _mhz  # cycles / MHz = microseconds
+            _total_us = _s["cycles"] / _mhz
+            _parts.append(
+                f"{_name}: n={_s['count']} avg={_avg_us:.2f}us total={_total_us:.1f}us"
+            )
+        print(
+            f"[NIXL-CALL-STATS] global_rank={global_rank} phase={plan.get_phase()} "
+            f"(sm_clock={_mhz:.0f}MHz) -> " + " | ".join(_parts),
+            flush=True,
+        )
+
         # Query mask buffer to detect any unexpected rank failures and clean them up
         buffer.query_mask_buffer(mask_status)
         newly_failed_ranks = set()

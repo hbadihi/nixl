@@ -1653,4 +1653,34 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         });
     m.attr("topk_idx_t") = pybind11::cast(c10::CppTypeToScalarType<nixl_ep::topk_idx_t>::value);
     m.def("is_sm90_compiled", nixl_ep::is_sm90_compiled);
+
+    // clock64 timing instrumentation for the low-latency NIXL put/atomic-add call sites.
+    m.def("reset_nixl_call_stats", []() {
+        CUDA_CHECK(cudaDeviceSynchronize());
+        nixl_ep::ep_kernels::reset_nixl_call_stats(0);
+        CUDA_CHECK(cudaDeviceSynchronize());
+    }, "Zero the NIXL call-site timing counters");
+
+    m.def("get_nixl_call_stats", []() {
+        unsigned long long cycles[nixl_ep::ep_kernels::NIXL_CS_COUNT] = {};
+        unsigned long long counts[nixl_ep::ep_kernels::NIXL_CS_COUNT] = {};
+        nixl_ep::ep_kernels::get_nixl_call_stats(cycles, counts);
+
+        const char* names[nixl_ep::ep_kernels::NIXL_CS_COUNT] = {
+            "dispatch_put",
+            "dispatch_atomic",
+            "combine_put",
+            "combine_atomic",
+            "barrier_put",
+        };
+
+        pybind11::dict stats;
+        for (int i = 0; i < nixl_ep::ep_kernels::NIXL_CS_COUNT; ++i) {
+            pybind11::dict site_stats;
+            site_stats["cycles"] = cycles[i];
+            site_stats["count"] = counts[i];
+            stats[names[i]] = site_stats;
+        }
+        return stats;
+    }, "Read the NIXL call-site timing counters");
 }
