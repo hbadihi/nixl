@@ -97,18 +97,11 @@ ProxyWorker::runOnce() {
         }
     }
     driveBackendProgress();
-    // Fire-and-forget (NIXL_EP_PROXY_FIRE_AND_FORGET): skip completion handling ENTIRELY.
-    // EP never reads completions (no nixlGetGpuXferStatus), and dropping the per-op
-    // checkCompletion()+mutex is the bulk of the measured speedup (e.g. 5.3 -> 11.8 GB/s).
-    //
-    // !!! LEAK WARNING -- BENCHMARK/EXPERIMENT ONLY, NOT PRODUCTION-SAFE !!!
-    // Nothing drains channel.inflight_requests, so that deque grows without bound; and the
-    // backend never sees checkCompletion(), so its tracked request handles (e.g. the UCX
-    // adapter's tracked_requests_ + the underlying ucp requests) are never released until
-    // shutdown(). On a long-lived run this is not just RSS growth -- it exhausts the UCX
-    // request pool and submits start failing. Fine only for short, teardown-bounded runs.
-    // TODO: replace with a leak-free fast path before shipping (self-freeing UCX completion
-    // callback, or a periodic bulk reap), then this branch goes away.
+    // Fire-and-forget (NIXL_EP_PROXY_FIRE_AND_FORGET): skip completion handling entirely.
+    // EP never reads completions (no nixlGetGpuXferStatus). Leak-free: submitToBackend
+    // releases each request immediately after posting and queues nothing, so this mode
+    // only skips the publish sweep. With the lockless tokenless backend it should now be
+    // close to the default path in cost; it remains as an A/B knob.
     if (!fire_and_forget_) {
         for (uint32_t i = 0; i < assigned_channel_count_; i++) {
             nixlProxyChannelState &channel = assigned_channels_[i];
@@ -289,8 +282,8 @@ ProxyWorker::submitToBackend(nixlProxyChannelState &channel, const nixlProxySubm
                    << " op_idx=" << submission.op_idx
                    << " status=" << status;
         if (!fire_and_forget_) {
-        channel.inflight_requests.push_back(
-            {submission.op_idx, 0, status, submission.opcode});
+            channel.inflight_requests.push_back(
+                {submission.op_idx, 0, status, submission.opcode});
         }
         // The terminal error is queued for publishCompletions(); the worker handled it.
         return;
@@ -301,8 +294,7 @@ ProxyWorker::submitToBackend(nixlProxyChannelState &channel, const nixlProxySubm
                << " channel=" << submission.channel_id
                << " local_addr=0x" << std::hex << prepared_submission.local.desc.addr
                << " remote_addr=0x" << prepared_submission.remote.desc.addr << std::dec
-               << " size=" << submission.size
-               << " remote_agent='" << prepared_submission.remote_agent << "'";
+               << " size=" << submission.size;
 
     uint64_t request_token = 0;
     nixlProxyRequestState inflight{};
@@ -313,21 +305,31 @@ ProxyWorker::submitToBackend(nixlProxyChannelState &channel, const nixlProxySubm
     }
     status = backend_->submit(prepared_submission, request_token);
     inflight.backend_req_token = request_token;
-    if (status != NIXL_SUCCESS) {
-        ++counters.submit_errors;
-        // backend submit failed, so status is already terminal and can be
-        // published without polling the backend.
-        NIXL_ERROR << "ProxyWorker::submitToBackend: backend submit failed"
-                   << " status=" << status << " op_idx=" << submission.op_idx
-                   << " request_token=" << request_token;
+    if (status != NIXL_IN_PROG) {
+        // Terminal at submit time: immediate completion (NIXL_SUCCESS) or a
+        // failure. Either way publishCompletions() publishes it without ever
+        // polling the backend.
         inflight.status = status;
+        if (status != NIXL_SUCCESS) {
+            ++counters.submit_errors;
+            NIXL_ERROR << "ProxyWorker::submitToBackend: backend submit failed"
+                       << " status=" << status << " op_idx=" << submission.op_idx
+                       << " request_token=" << request_token;
+        }
     }
 
     NIXL_DEBUG << "ProxyWorker::submitToBackend: submitted op_idx=" << submission.op_idx
                << " request_token=" << request_token << " status=" << status;
-    if (!fire_and_forget_) {
-    channel.inflight_requests.push_back(inflight);
+    if (fire_and_forget_) {
+        // No completion tracking: hand the request straight back to the backend
+        // (safe on in-progress requests; the transfer keeps progressing). This is
+        // what makes fire-and-forget leak-free.
+        if (status == NIXL_IN_PROG && request_token != 0) {
+            backend_->releaseRequest(request_token);
+        }
+        return;
     }
+    channel.inflight_requests.push_back(inflight);
 }
 
 void
@@ -393,12 +395,11 @@ ProxyWorker::resetChannel(nixlProxyChannelState &channel) {
     }
     __atomic_store_n(channel.consumer_idx_host_, consumer, __ATOMIC_RELEASE);
 
-    // Best-effort release of any backend handles still tracked for this channel, then
-    // drop the inflight queue. A handle that never reaches a terminal status (rare,
-    // transport-failure case) is dropped; the backend adapter cleans up on shutdown.
+    // Release any backend requests still pending for this channel (cancel+free),
+    // then drop the inflight queue.
     for (auto &inflight : channel.inflight_requests) {
-        if (inflight.status == NIXL_IN_PROG) {
-            backend_->checkCompletion(inflight.backend_req_token);
+        if (inflight.status == NIXL_IN_PROG && inflight.backend_req_token != 0) {
+            backend_->releaseRequest(inflight.backend_req_token);
         }
     }
     channel.inflight_requests.clear();

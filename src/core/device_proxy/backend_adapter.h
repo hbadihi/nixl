@@ -38,7 +38,6 @@ struct nixlBackendProxySubmission {
 
     nixlBackendProxyXferDesc local{};
     nixlBackendProxyXferDesc remote{};
-    std::string remote_agent;
 
     size_t size = 0;
     uint64_t value = 0;
@@ -58,11 +57,22 @@ class nixlDeviceProxyBackendAdapter {
             return NIXL_ERR_NOT_SUPPORTED;
         }
 
+        // Submit one proxy op. Returns NIXL_SUCCESS when the op completed at
+        // submit time (request_token is 0 and must not be polled), NIXL_IN_PROG
+        // with a nonzero request_token to poll via checkCompletion(), or a
+        // terminal error. checkCompletion() releases the request on any
+        // terminal status; a token abandoned before reaching a terminal status
+        // must be handed to releaseRequest() instead.
         virtual nixl_status_t
         submit(const nixlBackendProxySubmission &submission, uint64_t &request_token) = 0;
 
         virtual nixl_status_t
         checkCompletion(uint64_t request_token) = 0;
+
+        virtual nixl_status_t
+        releaseRequest(uint64_t) {
+            return NIXL_ERR_NOT_SUPPORTED;
+        }
 
         virtual nixl_status_t
         progress() {

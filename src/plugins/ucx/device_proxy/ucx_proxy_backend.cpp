@@ -23,13 +23,34 @@
 #include <sstream>
 
 namespace {
-constexpr uint64_t kInvalidToken = 0;
+// Token layout: worker_id in the top 8 bits, ucp request pointer in the low 56
+// (user-space pointers fit well within 56 bits on x86-64/aarch64). worker_id is
+// carried so release/cancel can reach the owning UCX worker without any lookup.
+// A token of 0 means "no pending request" (op completed at submit time).
+constexpr unsigned kTokenWorkerShift = 56;
+constexpr uint64_t kTokenReqMask = (uint64_t{1} << kTokenWorkerShift) - 1;
+
+uint64_t
+encodeToken(size_t worker_id, nixlUcxReq req) noexcept {
+    return (static_cast<uint64_t>(worker_id) << kTokenWorkerShift) |
+        reinterpret_cast<uint64_t>(req);
 }
+
+nixlUcxReq
+tokenReq(uint64_t token) noexcept {
+    return reinterpret_cast<nixlUcxReq>(token & kTokenReqMask);
+}
+
+size_t
+tokenWorkerId(uint64_t token) noexcept {
+    return static_cast<size_t>(token >> kTokenWorkerShift);
+}
+} // namespace
 
 nixl_status_t
 nixlUcxProxyBackendAdapter::submit(const nixlBackendProxySubmission &submission,
                                    uint64_t &request_token) {
-    request_token = kInvalidToken;
+    request_token = 0;
     if (engine_ == nullptr) {
         return NIXL_ERR_INVALID_PARAM;
     }
@@ -75,29 +96,29 @@ nixlUcxProxyBackendAdapter::submitPut(const nixlBackendProxySubmission &submissi
         worker_submit_counts_[worker_id].fetch_add(1, std::memory_order_relaxed);
     }
 
-    nixlBackendReqH *handle = nullptr;
-    nixl_status_t status = engine_->submitProxyRmaWrite(submission.local.desc,
-                                                        submission.remote.desc,
-                                                        submission.size,
-                                                        worker_id,
-                                                        handle);
-    if (status != NIXL_SUCCESS && status != NIXL_IN_PROG) {
+    nixlUcxReq req = nullptr;
+    const nixl_status_t status = engine_->submitProxyRmaWrite(submission.local.desc,
+                                                              submission.remote.desc,
+                                                              submission.size,
+                                                              worker_id,
+                                                              req);
+    if (status == NIXL_IN_PROG) {
+        request_token = encodeToken(worker_id, req);
+    } else if (status != NIXL_SUCCESS) {
         NIXL_DEBUG << "nixlUcxProxyBackendAdapter::submitPut: submitProxyRmaWrite failed "
                       "status="
                    << status;
         return status;
     }
 
-    request_token = trackRequest(handle);
     NIXL_DEBUG << "nixlUcxProxyBackendAdapter::submitPut: posted RDMA write"
                << " src_addr=0x" << std::hex
                << submission.local.desc.addr << std::dec
                << " dst_addr=0x" << std::hex
                << submission.remote.desc.addr << std::dec
                << " size=" << submission.size
-               << " remote_agent='" << submission.remote_agent << "'"
                << " token=" << request_token;
-    return NIXL_SUCCESS;
+    return status;
 }
 
 nixl_status_t
@@ -110,52 +131,54 @@ nixlUcxProxyBackendAdapter::submitAtomicAdd(const nixlBackendProxySubmission &su
         worker_submit_counts_[worker_id].fetch_add(1, std::memory_order_relaxed);
     }
 
-    nixlBackendReqH *handle = nullptr;
-    nixl_status_t status = engine_->submitProxyAtomicAdd(submission.remote.desc,
-                                                         submission.value,
-                                                         worker_id,
-                                                         handle);
-    if (status != NIXL_SUCCESS && status != NIXL_IN_PROG) {
+    nixlUcxReq req = nullptr;
+    const nixl_status_t status = engine_->submitProxyAtomicAdd(submission.remote.desc,
+                                                               submission.value,
+                                                               worker_id,
+                                                               req);
+    if (status == NIXL_IN_PROG) {
+        request_token = encodeToken(worker_id, req);
+    } else if (status != NIXL_SUCCESS) {
         NIXL_DEBUG << "nixlUcxProxyBackendAdapter::submitAtomicAdd: submitProxyAtomicAdd "
                       "failed status="
                    << status;
         return status;
     }
 
-    request_token = trackRequest(handle);
     NIXL_DEBUG << "nixlUcxProxyBackendAdapter::submitAtomicAdd: posted RDMA atomic add"
                << " dst_addr=0x" << std::hex
                << submission.remote.desc.addr << std::dec
                << " size=" << submission.size
                << " value=" << submission.value
-               << " remote_agent='" << submission.remote_agent << "'"
                << " token=" << request_token;
-    return NIXL_SUCCESS;
+    return status;
 }
 
 nixl_status_t
 nixlUcxProxyBackendAdapter::checkCompletion(uint64_t request_token) {
-    if (engine_ == nullptr) {
+    if (engine_ == nullptr || request_token == 0) {
         return NIXL_ERR_INVALID_PARAM;
     }
 
-    std::lock_guard<std::mutex> lock(request_mutex_);
-    const auto it = tracked_requests_.find(request_token);
-    if (it == tracked_requests_.end()) {
-        return NIXL_ERR_NOT_FOUND;
-    }
-
-    nixlBackendReqH *handle = it->second;
-    const nixl_status_t status = engine_->checkXfer(handle);
+    nixlUcxReq req = tokenReq(request_token);
+    const nixl_status_t status = engine_->checkProxyRequest(req);
     if (status == NIXL_IN_PROG) {
         return NIXL_IN_PROG;
     }
 
     NIXL_DEBUG << "nixlUcxProxyBackendAdapter::checkCompletion: token=" << request_token
                << " status=" << status;
-    engine_->releaseReqH(handle);
-    tracked_requests_.erase(it);
+    engine_->releaseProxyRequest(tokenWorkerId(request_token), req);
     return status;
+}
+
+nixl_status_t
+nixlUcxProxyBackendAdapter::releaseRequest(uint64_t request_token) {
+    if (engine_ == nullptr || request_token == 0) {
+        return NIXL_ERR_INVALID_PARAM;
+    }
+    engine_->releaseProxyRequest(tokenWorkerId(request_token), tokenReq(request_token));
+    return NIXL_SUCCESS;
 }
 
 nixl_status_t
@@ -169,24 +192,7 @@ nixlUcxProxyBackendAdapter::progress() {
 
 nixl_status_t
 nixlUcxProxyBackendAdapter::shutdown() {
-    NIXL_INFO << "nixlUcxProxyBackendAdapter::shutdown: releasing "
-              << tracked_requests_.size() << " tracked request(s)";
-    {
-        std::lock_guard<std::mutex> lock(request_mutex_);
-        if (engine_ != nullptr) {
-            for (auto &entry : tracked_requests_) {
-                engine_->releaseReqH(entry.second);
-            }
-        }
-        tracked_requests_.clear();
-    }
+    // Nothing tracked here: outstanding tokens live in the channels' inflight
+    // queues and are released by the runtime before it shuts the adapter down.
     return NIXL_SUCCESS;
-}
-
-uint64_t
-nixlUcxProxyBackendAdapter::trackRequest(nixlBackendReqH *handle) {
-    std::lock_guard<std::mutex> lock(request_mutex_);
-    const uint64_t token = next_request_token_++;
-    tracked_requests_.emplace(token, handle);
-    return token;
 }
