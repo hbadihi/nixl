@@ -38,7 +38,6 @@ def make_ep_proxy_evidence(
     proxy_context_owner_id: int | None = None,
     proxy_worker_count: int | None = None,
     proxy_channel_count: int | None = None,
-    required_proxy_channels: int | None = None,
     backend_source: str = BACKEND_SOURCE,
     extra: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -62,10 +61,6 @@ def make_ep_proxy_evidence(
             {
                 "proxy_worker_count": proxy_worker_count,
                 "proxy_channel_count": proxy_channel_count,
-                "required_proxy_channels": required_proxy_channels,
-                "proxy_lane_ceiling_source": (
-                    "explicit_update_memory_buffers_parameter"
-                ),
                 "proxy_context_owner_id": proxy_context_owner_id,
                 "proxy_context_published": proxy_context_published,
                 "proxy_activity_observed": (proxy_activity_submitted_work_count > 0),
@@ -116,15 +111,6 @@ def _classify_ep_proxy_evidence(record: Mapping[str, Any]) -> tuple[str, str]:
     setup_error = record.get("setup_error")
     if setup_error:
         return "failed", str(setup_error)
-
-    required_channels = record.get("required_proxy_channels")
-    configured_channels = record.get("proxy_channel_count")
-    if required_channels is not None and configured_channels is not None:
-        if int(configured_channels) < int(required_channels):
-            return (
-                "failed",
-                "configured proxy channels are below the required lane ceiling",
-            )
 
     correctness = record.get("correctness")
     if correctness == "fail":

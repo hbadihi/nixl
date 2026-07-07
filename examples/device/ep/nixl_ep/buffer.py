@@ -184,22 +184,6 @@ class Buffer:
             device_type=ts.device_type,
         )
 
-    def get_proxy_activity_count(self) -> int:
-        """Return the proxy worker backend-submission counter for this buffer."""
-        return int(self.runtime.get_proxy_activity_count())
-
-    def reset_proxy_activity_count(self) -> None:
-        """Reset the proxy worker backend-submission counter for this buffer."""
-        self.runtime.reset_proxy_activity_count()
-
-    def get_ll_all_rdma_fallback_count(self) -> int:
-        """Return the LL all-RDMA fallback branch counter for this buffer."""
-        return int(self.runtime.get_ll_all_rdma_fallback_count())
-
-    def reset_ll_all_rdma_fallback_count(self) -> None:
-        """Reset the LL all-RDMA fallback branch counter for this buffer."""
-        self.runtime.reset_ll_all_rdma_fallback_count()
-
     def is_proxy_context_published(self) -> bool:
         """Return whether this buffer owns a published proxy device context."""
         return bool(self.runtime.is_proxy_context_published())
@@ -207,10 +191,6 @@ class Buffer:
     def get_proxy_context_owner_id(self) -> int:
         """Return this buffer's process-local proxy context owner id, or zero."""
         return int(self.runtime.get_proxy_context_owner_id())
-
-    def get_required_proxy_channels(self) -> int:
-        """Return the explicit proxy lane ceiling required by this buffer."""
-        return int(self.runtime.get_required_proxy_channels())
 
     def get_configured_proxy_channels(self) -> int:
         """Return the configured proxy channel count for this buffer."""
@@ -805,7 +785,6 @@ class Buffer:
         num_experts_per_rank: int,
         num_rdma_bytes: int,
         num_nvl_bytes: int = 0,
-        proxy_lane_ceiling: Optional[int] = None,
     ):
         """
         Allocate remote memory for the communication buffer.
@@ -815,7 +794,6 @@ class Buffer:
             num_experts_per_rank: the number of experts per rank.
             num_rdma_bytes: the buffer size for RDMA communication.
             num_nvl_bytes: the buffer size for intranode NVLink communication (default: 0).
-            proxy_lane_ceiling: required proxy lane count for proxy builds (default: None).
         """
         self.group_size = num_ranks
         self.num_nvl_bytes = num_nvl_bytes
@@ -825,7 +803,6 @@ class Buffer:
             num_experts_per_rank,
             num_rdma_bytes,
             num_nvl_bytes,
-            proxy_lane_ceiling,
         )
 
     def set_tcp_store_group(self, tcp_store_group: Optional[dist.TCPStore]) -> None:

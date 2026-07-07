@@ -91,7 +91,7 @@ bash tests/elastic/proxy_worker_matrix.sh
 #                NIXL_LOG_LEVEL=DEBUG bash tests/elastic/proxy_worker_matrix.sh
 ```
 `NIXL_EP_PROXY_UCX_WORKERS` sets UCX host workers (QPs per peer; submission routes to
-`channel_id % num_workers`) and `NIXL_EP_PROXY_WORKER_COUNT` sets the proxy drain-thread count; both
+`channel_id % num_workers`) and `NIXL_EP_PROXY_WORKERS` sets the proxy drain-thread count; both
 are independent of the fixed per-rank ring stride, so any combo is correctness-safe.
 
 ### Pass criteria

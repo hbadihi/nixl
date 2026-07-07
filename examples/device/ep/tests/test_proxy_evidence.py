@@ -24,7 +24,6 @@ class ProxyEvidenceClassifierTest(unittest.TestCase):
             proxy_context_published=True,
             proxy_worker_count=1,
             proxy_channel_count=12,
-            required_proxy_channels=12,
         )
 
         self.assertEqual(record["classification"], "inconclusive")
@@ -40,7 +39,6 @@ class ProxyEvidenceClassifierTest(unittest.TestCase):
             proxy_context_published=True,
             proxy_worker_count=1,
             proxy_channel_count=12,
-            required_proxy_channels=12,
         )
 
         self.assertEqual(record["classification"], "accepted")
@@ -73,7 +71,6 @@ class ProxyEvidenceClassifierTest(unittest.TestCase):
             proxy_context_published=True,
             proxy_worker_count=1,
             proxy_channel_count=2,
-            required_proxy_channels=2,
         )
 
         self.assertEqual(record["classification"], "accepted")
@@ -88,26 +85,9 @@ class ProxyEvidenceClassifierTest(unittest.TestCase):
             proxy_context_published=True,
             proxy_worker_count=1,
             proxy_channel_count=12,
-            required_proxy_channels=12,
         )
 
         self.assertEqual(record["classification"], "failed")
-
-    def test_underprovisioned_channels_are_failed(self):
-        record = make_ep_proxy_evidence(
-            backend="proxy",
-            rank=0,
-            validation_path="ht_proxy_smoke",
-            correctness="pass",
-            proxy_activity_submitted_work_count=3,
-            proxy_context_published=True,
-            proxy_worker_count=1,
-            proxy_channel_count=4,
-            required_proxy_channels=12,
-        )
-
-        self.assertEqual(record["classification"], "failed")
-        self.assertIn("channels", record["reason"])
 
     def test_ucx_direct_smoke_accepts_ucx_only(self):
         record = make_ep_proxy_evidence(
@@ -130,7 +110,6 @@ class ProxyEvidenceClassifierTest(unittest.TestCase):
             proxy_context_published=True,
             proxy_worker_count=1,
             proxy_channel_count=12,
-            required_proxy_channels=12,
         )
 
         self.assertEqual(record["classification"], "inconclusive")
