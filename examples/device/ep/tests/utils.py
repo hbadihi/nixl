@@ -113,7 +113,13 @@ def create_grouped_scores(
     return (scores * mask).view(num_tokens, num_experts)
 
 
-def bench(fn, num_warmups: int = 50, num_tests: int = 50, post_fn=None):
+def bench(
+    fn,
+    num_warmups: int = 50,
+    num_tests: int = 50,
+    post_fn=None,
+    return_percentiles: bool = False,
+):
     # Flush L2 cache with 256 MB data
     torch.cuda.synchronize()
     cache = torch.empty(int(256e6 // 4), dtype=torch.int, device="cuda")
@@ -140,7 +146,17 @@ def bench(fn, num_warmups: int = 50, num_tests: int = 50, post_fn=None):
     times = np.array(
         [s.elapsed_time(e) / 1e3 for s, e in zip(start_events, end_events)]
     )[1:]
-    return np.average(times), np.min(times), np.max(times)
+    avg_t, min_t, max_t = np.average(times), np.min(times), np.max(times)
+    if return_percentiles:
+        return (
+            avg_t,
+            min_t,
+            max_t,
+            np.median(times),
+            np.percentile(times, 50),
+            np.percentile(times, 90),
+        )
+    return avg_t, min_t, max_t
 
 
 class empty_suppress:
@@ -195,6 +211,7 @@ def bench_kineto(
     barrier_comm_profiling: bool = False,
     num_kernels_per_period: int = 1,
     barrier_fn: Optional[Callable] = None,
+    return_percentiles: bool = False,
 ):
     # Profile
     suppress = suppress_stdout_stderr if suppress_kineto_output else empty_suppress
@@ -237,6 +254,12 @@ def bench_kineto(
     if trace_path is not None:
         prof.export_chrome_trace(trace_path)
 
+    profile_data = None
+    if return_percentiles or num_kernels_per_period > 1:
+        with tempfile.NamedTemporaryFile(suffix=".json") as tmp:
+            prof.export_chrome_trace(tmp.name)
+            profile_data = json.loads(Path(tmp.name).read_text())
+
     # Return average kernel durations
     units = {"ms": 1e3, "us": 1e6}
     kernel_durations = []
@@ -252,12 +275,16 @@ def bench_kineto(
                         break
                 break
 
-    # Expand the kernels by periods
-    if num_kernels_per_period > 1:
-        with tempfile.NamedTemporaryFile(suffix=".json") as tmp:
-            prof.export_chrome_trace(tmp.name)
-            profile_data = json.loads(Path(tmp.name).read_text())
+    def duration_stats(avg_t, durations):
+        return (
+            avg_t,
+            np.median(durations),
+            np.percentile(durations, 50),
+            np.percentile(durations, 90),
+        )
 
+    # Expand the kernels by periods
+    if profile_data is not None:
         for i, kernel_name in enumerate(kernel_names):
             events = [
                 event
@@ -266,9 +293,28 @@ def bench_kineto(
             ]
             events = sorted(events, key=lambda event: event["ts"])
             durations = [event["dur"] / 1e6 for event in events]
+            assert len(durations) > 0, f"No trace events found for kernel {kernel_name}"
+            if num_kernels_per_period == 1:
+                if return_percentiles:
+                    kernel_durations[i] = duration_stats(kernel_durations[i], durations)
+                continue
+
             assert len(durations) % num_kernels_per_period == 0
             num_kernel_patterns = len(durations) // num_kernels_per_period
-            kernel_durations[i] = [sum(durations[j::num_kernels_per_period]) / num_kernel_patterns for j in range(num_kernels_per_period)]  # type: ignore[call-overload]
+            period_durations = [
+                durations[j::num_kernels_per_period]
+                for j in range(num_kernels_per_period)
+            ]
+            period_avgs = [
+                sum(period) / num_kernel_patterns for period in period_durations
+            ]
+            if return_percentiles:
+                kernel_durations[i] = [
+                    duration_stats(avg_t, period)
+                    for avg_t, period in zip(period_avgs, period_durations)
+                ]
+            else:
+                kernel_durations[i] = period_avgs
 
     # Return execution durations
     return kernel_durations if is_tuple else kernel_durations[0]
