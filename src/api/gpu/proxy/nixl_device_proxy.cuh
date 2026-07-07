@@ -92,14 +92,17 @@ __device__ inline void nixlProxySync() {
 
 struct ProxyDeviceContext : nixlProxyDeviceContextData {
 
-    // Map a destination rank + logical lane to the physical ring id. Each rank owns
-    // its own band of `channels_per_rank` rings (ring = rank * channels_per_rank +
-    // lane), isolating its rings/completion slots/error latch from other ranks. When
-    // channels_per_rank == 0 rank encoding is disabled and the lane is the ring.
+    // Map a destination rank + logical channel to a configured physical ring. Each rank
+    // owns its own band of `channels_per_rank` rings; logical channels fold into that band.
+    // When channels_per_rank == 0 rank encoding is disabled and channels fold over the
+    // total runtime channel count.
     // dst_index is the destination memview index, which for the EP is the global rank.
     __device__ __forceinline__ uint32_t
-    ringFor(uint32_t dst_index, uint32_t lane) const {
-        return dst_index * channels_per_rank + lane;
+    ringFor(uint32_t dst_index, uint32_t channel_id) const {
+        if (channels_per_rank == 0) {
+            return channel_id % num_channels;
+        }
+        return dst_index * channels_per_rank + (channel_id % channels_per_rank);
     }
 
     // Enqueue a transfer submission into the MPSC work ring for the selected

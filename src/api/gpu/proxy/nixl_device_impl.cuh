@@ -72,11 +72,6 @@ put(const nixlMemViewElem &src,
         if (ctx == nullptr) {
             status = NIXL_ERR_BACKEND;
         } else {
-            // Ring isolation: select the ring from the DESTINATION rank + lane via
-            // ProxyDeviceContext::ringFor (rank * channels_per_rank + lane). Keyed off
-            // dst only (dst.index == global rank); src.index must never drive a ring.
-            // channels_per_rank equals the UCX worker count, so the host recovers the
-            // lane via `ring % num_workers`.
             const uint32_t ring_channel =
                 ctx->ringFor(static_cast<uint32_t>(dst.index), static_cast<uint32_t>(channel_id));
             status = ctx->enqueue(
