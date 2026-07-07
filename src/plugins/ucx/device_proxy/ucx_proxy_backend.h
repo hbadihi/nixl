@@ -21,9 +21,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdlib>
-#include <mutex>
 #include <string>
-#include <unordered_map>
 
 #include "backend/backend_aux.h"
 #include "../../../core/device_proxy/backend_adapter.h"
@@ -45,6 +43,9 @@ class nixlUcxProxyBackendAdapter : public nixlDeviceProxyBackendAdapter {
 
         nixl_status_t
         checkCompletion(uint64_t request_token) override;
+
+        nixl_status_t
+        releaseRequest(uint64_t request_token) override;
 
         nixl_status_t
         progress() override;
@@ -70,14 +71,8 @@ class nixlUcxProxyBackendAdapter : public nixlDeviceProxyBackendAdapter {
         nixl_status_t
         submitAtomicAdd(const nixlBackendProxySubmission &submission, uint64_t &request_token);
 
-        uint64_t
-        trackRequest(nixlBackendReqH *handle);
-
         nixlUcxEngine *engine_ = nullptr;
         bool progress_thread_enabled_ = false;
-        std::mutex request_mutex_;
-        std::unordered_map<uint64_t, nixlBackendReqH *> tracked_requests_;
-        uint64_t next_request_token_ = 1;
 
         // Debug-only QP-utilization counters (gated on NIXL_EP_PROXY_STALL_LOG). Indexed by
         // worker_id = channel_id % num_workers; a fixed cap avoids needing an init() hook.

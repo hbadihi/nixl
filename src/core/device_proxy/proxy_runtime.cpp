@@ -217,11 +217,6 @@ nixlProxyMemViewRegistry::prepareSubmission(const nixlProxySubmission &submissio
     prepared.flags = submission.flags;
     prepared.size = transfer_size;
     prepared.value = submission.value;
-    // Use the element's own agent (the aggregate memview spans many peers; the
-    // view-level remote_agent is only the first one).
-    prepared.remote_agent = dst_metadata->remote_agent.empty()
-        ? remote_metadata->remote_agent
-        : dst_metadata->remote_agent;
     prepared.remote.mem_type = remote_metadata->mem_type;
     prepared.remote.desc = nixlMetaDesc(
         dst_metadata->base_addr + submission.dst_offset,
@@ -912,6 +907,26 @@ nixlProxyRuntime::shutdown() {
     joinWorkerThreads();
     workers_started_ = false;
     NIXL_INFO << "ProxyRuntime::shutdown: all worker threads joined";
+
+    // Workers are stopped, so the inflight queues are stable: release any backend
+    // requests that never reached a terminal status (this also covers everything
+    // deferred by fire-and-forget mode).
+    if (backend_ != nullptr) {
+        size_t released = 0;
+        for (auto &channel : channels_) {
+            for (auto &inflight : channel.inflight_requests) {
+                if (inflight.status == NIXL_IN_PROG && inflight.backend_req_token != 0) {
+                    backend_->releaseRequest(inflight.backend_req_token);
+                    ++released;
+                }
+            }
+            channel.inflight_requests.clear();
+        }
+        if (released != 0) {
+            NIXL_INFO << "ProxyRuntime::shutdown: released " << released
+                      << " pending backend request(s)";
+        }
+    }
 
     nixl_status_t backend_status = NIXL_SUCCESS;
     if (backend_ != nullptr) {

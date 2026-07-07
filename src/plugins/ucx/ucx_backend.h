@@ -256,18 +256,34 @@ protected:
 private:
     friend class nixlUcxProxyBackendAdapter;
 
+    // Proxy hot path: one op == at most one UCX request, so these bypass
+    // nixlUcxBackendReqH entirely (no allocation, no connection set). Returns
+    // NIXL_SUCCESS with req == nullptr when the op completed immediately,
+    // NIXL_IN_PROG with req set, or an error.
     nixl_status_t
     submitProxyRmaWrite(const nixlMetaDesc &local,
                         const nixlMetaDesc &remote,
                         size_t size,
                         size_t worker_id,
-                        nixlBackendReqH *&handle) const;
+                        nixlUcxReq &req) const;
 
     nixl_status_t
     submitProxyAtomicAdd(const nixlMetaDesc &remote,
                          uint64_t value,
                          size_t worker_id,
-                         nixlBackendReqH *&handle) const;
+                         nixlUcxReq &req) const;
+
+    // Non-progressing completion check for proxy requests. The proxy worker
+    // drives progress once per loop iteration; checking status must not spin
+    // the worker (that spin used to run under the adapter's global lock).
+    nixl_status_t
+    checkProxyRequest(nixlUcxReq req) const;
+
+    // Safe on incomplete requests: ucp_request_free releases the request
+    // regardless of state (the operation keeps progressing internally), which
+    // is what fire-and-forget relies on.
+    void
+    releaseProxyRequest(size_t worker_id, nixlUcxReq req) const;
 
     // Memory management helpers
     nixl_status_t

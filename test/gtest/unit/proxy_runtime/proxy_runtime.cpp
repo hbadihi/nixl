@@ -372,7 +372,6 @@ TEST_F(ProxyRuntimeTest, PrepMemViewProducesReadyEntries) {
     EXPECT_EQ(prepared_submission.remote.desc.addr, 0x2008u);
     EXPECT_EQ(prepared_submission.remote.desc.len, 32u);
     EXPECT_EQ(prepared_submission.remote.desc.metadataP, &remote_md);
-    EXPECT_EQ(prepared_submission.remote_agent, "peer");
 }
 
 TEST_F(ProxyRuntimeTest, PrepMemViewRejectsNullOutput) {
@@ -466,7 +465,6 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedTransportDescriptors) {
     EXPECT_EQ(prepared.remote.desc.addr, 0x2008u);
     EXPECT_EQ(prepared.remote.desc.len, 32u);
     EXPECT_EQ(prepared.remote.desc.metadataP, &remote_md);
-    EXPECT_EQ(prepared.remote_agent, "peer");
 }
 
 TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedAtomicAddDescriptor) {
@@ -536,7 +534,6 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedAtomicAddDescriptor) {
     EXPECT_EQ(prepared.remote.desc.addr, 0x2008u);
     EXPECT_EQ(prepared.remote.desc.len, sizeof(uint64_t));
     EXPECT_EQ(prepared.remote.desc.metadataP, &remote_md);
-    EXPECT_EQ(prepared.remote_agent, "peer");
     EXPECT_EQ(prepared.value, 42u);
 }
 

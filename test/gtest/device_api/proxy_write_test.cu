@@ -74,8 +74,9 @@ public:
 
 // ---------------------------------------------------------------------------
 // Controllable stub — lets the test thread decide when each submission
-// completes.  submit() assigns unique monotonic tokens; checkCompletion()
-// returns NIXL_IN_PROG until markComplete() is called for a token.
+// completes.  submit() assigns unique monotonic tokens and returns
+// NIXL_IN_PROG; checkCompletion() returns NIXL_IN_PROG until markComplete()
+// is called for a token.
 // ---------------------------------------------------------------------------
 class ControllableStubAdapter : public nixlDeviceProxyBackendAdapter {
 public:
@@ -96,7 +97,7 @@ public:
         pending_.insert(token);
         token_channel_[token] = submission.channel_id;
         submitted_opcodes_.push_back(submission.opcode);
-        return NIXL_SUCCESS;
+        return NIXL_IN_PROG;
     }
 
     nixl_status_t
@@ -211,8 +212,8 @@ public:
     nixl_status_t
     submit(const nixlBackendProxySubmission &, uint64_t &token) override
     {
-        token = 0;
-        return NIXL_SUCCESS;
+        token = 1;
+        return NIXL_IN_PROG;
     }
 
     nixl_status_t
