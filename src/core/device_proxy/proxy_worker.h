@@ -101,6 +101,12 @@ class ProxyWorker {
         // Fire-and-forget completion handling (NIXL_EP_PROXY_FIRE_AND_FORGET): skip the
         // FIFO/latch/device-publish path in favor of reapCompletions().
         bool fire_and_forget_ = false;
+        // Per-channel dequeue budget per runOnce pass (NIXL_EP_PROXY_DEQUEUE_BUDGET).
+        // Bounds how many records a single bursting channel can submit before the worker
+        // moves on to its other channels and the progress/publish sweeps. An env value of
+        // 0 means unlimited (drain-until-empty, the old behavior, kept as an A/B knob)
+        // and is normalized to UINT32_MAX at parse time.
+        uint32_t dequeue_budget_ = 16;
         // This worker's index; only worker 0 dumps the process-wide QP histogram so the
         // (backend-global) counters aren't logged once per drain thread.
         uint32_t worker_idx_ = 0;

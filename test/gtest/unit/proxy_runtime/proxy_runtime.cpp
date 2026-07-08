@@ -688,5 +688,104 @@ TEST_F(ProxyRuntimeTest, MemviewReregisterRevivesLatchedChannel) {
     ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
 }
 
+// Set an env var for the duration of a test (workers parse their knobs at construction,
+// i.e. inside runtime_.init(), so the guard must be alive across initRuntime()).
+class ScopedEnvVar {
+    public:
+        ScopedEnvVar(const char *name, const char *value) : name_(name) {
+            setenv(name, value, 1);
+        }
+        ~ScopedEnvVar() {
+            unsetenv(name_);
+        }
+
+    private:
+        const char *name_;
+};
+
+// Bounded round-robin dequeue (NIXL_EP_PROXY_DEQUEUE_BUDGET): a bursting channel must not
+// be drained to exhaustion before its sibling channels get service. With budget=2, six
+// records pre-published on channel 0 and one on channel 1 (single worker owning both),
+// the channel-1 record must be submitted right after the first two channel-0 records —
+// not after all six.
+TEST_F(ProxyRuntimeTest, DequeueBudgetBoundsPerChannelDrain) {
+    ScopedEnvVar budget_env("NIXL_EP_PROXY_DEQUEUE_BUDGET", "2");
+    DummyBackendMD local_md;
+    DummyBackendMD remote_md;
+
+    ASSERT_EQ(initRuntime(2, 1), NIXL_SUCCESS);
+
+    nixlMemViewH src_proxy = nullptr;
+    nixlMemViewH dst_proxy = nullptr;
+    ASSERT_EQ(runtime_.registerProxyMemView(reinterpret_cast<nixlMemViewH>(uintptr_t{0x10}),
+                                           &src_proxy),
+              NIXL_SUCCESS);
+    ASSERT_EQ(runtime_.registerProxyMemView(reinterpret_cast<nixlMemViewH>(uintptr_t{0x20}),
+                                           &dst_proxy),
+              NIXL_SUCCESS);
+    nixl_meta_dlist_t local_dlist(DRAM_SEG);
+    local_dlist.addDesc(nixlMetaDesc(0x1000, 4096, 0, &local_md));
+    ASSERT_EQ(runtime_.storeMetadata(src_proxy, local_dlist), NIXL_SUCCESS);
+    nixl_remote_meta_dlist_t remote_dlist(DRAM_SEG);
+    nixlRemoteMetaDesc remote_desc("peer");
+    remote_desc.addr = 0x2000;
+    remote_desc.len = 4096;
+    remote_desc.devId = 0;
+    remote_desc.metadataP = &remote_md;
+    remote_dlist.addDesc(remote_desc);
+    ASSERT_EQ(runtime_.storeMetadata(dst_proxy, remote_dlist), NIXL_SUCCESS);
+
+    auto goodPut = [&](uint32_t channel) {
+        nixlProxySubmission s{};
+        s.opcode = nixl_proxy_opcode_t::PUT;
+        s.channel_id = channel;
+        s.src_proxy_memview_id = reinterpret_cast<uint64_t>(src_proxy);
+        s.dst_proxy_memview_id = reinterpret_cast<uint64_t>(dst_proxy);
+        s.size = 32;
+        return s;
+    };
+
+    // Pre-publish everything BEFORE starting the worker so the first runOnce pass sees
+    // both rings loaded: 6 records on channel 0 (the burst), 1 on channel 1.
+    constexpr uint32_t kBurst = 6;
+    auto *records0 = hostAliasOf(copyDeviceWorkRing(runtime_.deviceChannelViews()[0]).records);
+    auto *records1 = hostAliasOf(copyDeviceWorkRing(runtime_.deviceChannelViews()[1]).records);
+    for (uint32_t r = 0; r < kBurst; ++r) {
+        publishRecord(records0, r, goodPut(0), 11 + r);
+    }
+    publishRecord(records1, 0, goodPut(1), 21);
+
+    ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+    while (std::chrono::steady_clock::now() < deadline) {
+        {
+            std::lock_guard<std::mutex> lock(backend_->submit_mutex_);
+            if (backend_->submissions_.size() >= kBurst + 1) {
+                break;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+
+    std::vector<nixlBackendProxySubmission> submissions;
+    {
+        std::lock_guard<std::mutex> lock(backend_->submit_mutex_);
+        submissions = backend_->submissions_;
+    }
+    ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
+
+    ASSERT_EQ(submissions.size(), kBurst + 1);
+    // Single worker + pre-loaded rings => deterministic order: budget-limited slice of
+    // channel 0 (2 records), then channel 1's record, then the rest of channel 0.
+    EXPECT_EQ(submissions[0].channel_id, 0u);
+    EXPECT_EQ(submissions[1].channel_id, 0u);
+    EXPECT_EQ(submissions[2].channel_id, 1u);
+    EXPECT_EQ(submissions[2].op_idx, 21u);
+    for (size_t i = 3; i < submissions.size(); ++i) {
+        EXPECT_EQ(submissions[i].channel_id, 0u) << "index " << i;
+    }
+}
+
 } // namespace proxy_runtime
 } // namespace gtest

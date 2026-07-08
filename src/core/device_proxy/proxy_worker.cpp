@@ -43,6 +43,14 @@ ProxyWorker::ProxyWorker(nixlDeviceProxyBackendAdapter *backend,
       channel_debug_counters_(assigned_channel_count) {
     stall_log_enabled_ = std::getenv("NIXL_EP_PROXY_STALL_LOG") != nullptr;
     fire_and_forget_ = std::getenv("NIXL_EP_PROXY_FIRE_AND_FORGET") != nullptr;
+    if (const char *budget_env = std::getenv("NIXL_EP_PROXY_DEQUEUE_BUDGET")) {
+        dequeue_budget_ = static_cast<uint32_t>(std::strtoul(budget_env, nullptr, 0));
+        if (dequeue_budget_ == 0) {
+            // 0 = unlimited (old drain-to-empty behavior): normalize here so the
+            // dequeue loop needs no special case.
+            dequeue_budget_ = UINT32_MAX;
+        }
+    }
     last_stall_log_ = std::chrono::steady_clock::now();
 }
 
@@ -91,8 +99,14 @@ ProxyWorker::runOnce() {
                 last_seen_gen_[i] = gen;
             }
         }
+        // Bounded round-robin dequeue: take at most dequeue_budget_ records from this
+        // channel per pass, then move on. This keeps cross-channel
+        // fairness — one bursting channel cannot pin the worker while its siblings' rings
+        // back up — and bounds the time between driveBackendProgress()/publishCompletions()
+        // sweeps. No outer "repeat until all empty" loop: runOnce is called in a tight
+        // loop by the worker thread, so leftovers are picked up next pass.
         nixlProxySubmission submission;
-        while (tryDequeue(channel, submission)) {
+        for (uint32_t n = 0; n < dequeue_budget_ && tryDequeue(channel, submission); ++n) {
             submitToBackend(channel, submission);
         }
     }
