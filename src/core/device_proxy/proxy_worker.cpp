@@ -22,6 +22,47 @@
 #include <cstdlib>
 #include <cuda_runtime.h>
 #include <unistd.h>
+#if defined(__x86_64__) || defined(__i386__)
+#include <x86intrin.h>
+#endif
+
+namespace {
+// Low-overhead per-op CPU cost timing for NIXL_EP_PROXY_STALL_LOG. Uses the TSC
+// on x86 (a few cycles per read, no fence) so it can wrap the sub-microsecond
+// submit path without perturbing it; falls back to steady_clock nanoseconds
+// elsewhere (in which case the "cycle" unit is already a nanosecond).
+inline uint64_t
+nowTsc() noexcept {
+#if defined(__x86_64__) || defined(__i386__)
+    return __rdtsc();
+#else
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+            .count());
+#endif
+}
+
+// One-time TSC->Hz calibration against steady_clock (~5 ms busy spin). Only ever
+// called from the ctor when diagnostics are enabled, so the spin is off the hot
+// path. On non-x86 nowTsc() already yields nanoseconds, so Hz is exactly 1e9.
+double
+calibrateTscHz() noexcept {
+#if defined(__x86_64__) || defined(__i386__)
+    using clk = std::chrono::steady_clock;
+    const auto wall0 = clk::now();
+    const uint64_t tsc0 = nowTsc();
+    while (std::chrono::duration_cast<std::chrono::microseconds>(clk::now() - wall0).count()
+           < 5000) {
+    }
+    const uint64_t tsc1 = nowTsc();
+    const double secs = std::chrono::duration<double>(clk::now() - wall0).count();
+    return secs > 0.0 ? static_cast<double>(tsc1 - tsc0) / secs : 0.0;
+#else
+    return 1e9;
+#endif
+}
+} // namespace
 
 ProxyWorker::ProxyWorker(nixlDeviceProxyBackendAdapter *backend,
                          const nixlProxyMemViewRegistry *proxy_memview_registry,
@@ -44,6 +85,9 @@ ProxyWorker::ProxyWorker(nixlDeviceProxyBackendAdapter *backend,
     stall_log_enabled_ = std::getenv("NIXL_EP_PROXY_STALL_LOG") != nullptr;
     fire_and_forget_ = std::getenv("NIXL_EP_PROXY_FIRE_AND_FORGET") != nullptr;
     last_stall_log_ = std::chrono::steady_clock::now();
+    if (stall_log_enabled_) {
+        tsc_hz_ = calibrateTscHz();
+    }
 }
 
 ProxyWorker::~ProxyWorker() {
@@ -225,6 +269,39 @@ ProxyWorker::maybeLogStalls() {
               << " blocked_hole_channels=" << blocked_hole_channels
               << " error_latched_channels=" << error_latched_channels;
 
+    // Per-op CPU cost breakdown for this worker over the last heartbeat interval.
+    // avg_submit_ns is the ucp_put_nbx cost; avg_prepare_ns is the memview-registry
+    // lookup; avg_progress_ns is the once-per-runOnce ucp_worker_progress (doorbell
+    // flush). ops_per_progress shows how many submits batch behind one flush.
+    const double cyc_to_ns = tsc_hz_ > 0.0 ? 1e9 / tsc_hz_ : 0.0;
+    const uint64_t timed_ops = timing_ops_;
+    const uint64_t progress_calls = timing_progress_calls_;
+    const double avg_prepare_ns =
+        timed_ops ? (static_cast<double>(timing_prepare_cycles_) / timed_ops) * cyc_to_ns : 0.0;
+    const double avg_submit_ns =
+        timed_ops ? (static_cast<double>(timing_submit_cycles_) / timed_ops) * cyc_to_ns : 0.0;
+    const double avg_progress_ns =
+        progress_calls
+            ? (static_cast<double>(timing_progress_cycles_) / progress_calls) * cyc_to_ns
+            : 0.0;
+    const double ops_per_progress =
+        progress_calls ? static_cast<double>(timed_ops) / progress_calls : 0.0;
+    NIXL_WARN << "ProxyWorker STALLDBG timing: pid=" << ::getpid()
+              << " worker=" << worker_idx_
+              << " timed_ops=" << timed_ops
+              << " avg_prepare_ns=" << avg_prepare_ns
+              << " avg_submit_ns=" << avg_submit_ns
+              << " avg_prepare_plus_submit_ns=" << (avg_prepare_ns + avg_submit_ns)
+              << " progress_calls=" << progress_calls
+              << " avg_progress_ns=" << avg_progress_ns
+              << " ops_per_progress=" << ops_per_progress
+              << " tsc_ghz=" << (tsc_hz_ / 1e9);
+    timing_prepare_cycles_ = 0;
+    timing_submit_cycles_ = 0;
+    timing_progress_cycles_ = 0;
+    timing_ops_ = 0;
+    timing_progress_calls_ = 0;
+
     // Only worker 0 dumps the backend-global per-UCX-worker submit histogram, so it
     // appears once per heartbeat interval per process rather than once per drain thread.
     if (worker_idx_ == 0 && backend_ != nullptr) {
@@ -274,8 +351,12 @@ ProxyWorker::submitToBackend(nixlProxyChannelState &channel, const nixlProxySubm
     }
 
     nixlBackendProxySubmission prepared_submission;
+    const uint64_t t_prepare0 = stall_log_enabled_ ? nowTsc() : 0;
     nixl_status_t status =
         proxy_memview_registry_->prepareSubmission(submission, prepared_submission);
+    if (stall_log_enabled_) {
+        timing_prepare_cycles_ += nowTsc() - t_prepare0;
+    }
     if (status != NIXL_SUCCESS) {
         ++counters.prepare_errors;
         NIXL_DEBUG << "ProxyWorker::submitToBackend: submission preparation failed"
@@ -303,7 +384,12 @@ ProxyWorker::submitToBackend(nixlProxyChannelState &channel, const nixlProxySubm
     if (submitted_work_count_ != nullptr) {
         submitted_work_count_->fetch_add(1, std::memory_order_relaxed);
     }
+    const uint64_t t_submit0 = stall_log_enabled_ ? nowTsc() : 0;
     status = backend_->submit(prepared_submission, request_token);
+    if (stall_log_enabled_) {
+        timing_submit_cycles_ += nowTsc() - t_submit0;
+        ++timing_ops_;
+    }
     inflight.backend_req_token = request_token;
     if (status != NIXL_IN_PROG) {
         // Terminal at submit time: immediate completion (NIXL_SUCCESS) or a
@@ -334,6 +420,13 @@ ProxyWorker::submitToBackend(nixlProxyChannelState &channel, const nixlProxySubm
 
 void
 ProxyWorker::driveBackendProgress() {
+    if (stall_log_enabled_) {
+        const uint64_t t0 = nowTsc();
+        backend_->progress();
+        timing_progress_cycles_ += nowTsc() - t0;
+        ++timing_progress_calls_;
+        return;
+    }
     backend_->progress();
 }
 

@@ -109,6 +109,18 @@ class ProxyWorker {
         uint64_t last_logged_run_once_count_ = 0;
         std::vector<ChannelDebugCounters> channel_debug_counters_;
 
+        // Per-op CPU cost accounting (NIXL_EP_PROXY_STALL_LOG only). TSC cycles
+        // accumulated over a heartbeat interval and reset each dump; converted to
+        // nanoseconds via tsc_hz_ (calibrated once in the ctor when diagnostics are on).
+        // Splits the serial critical path into prepareSubmission, the ucp_put_nbx
+        // submit, and the once-per-runOnce ucp_worker_progress doorbell flush.
+        uint64_t timing_prepare_cycles_ = 0;
+        uint64_t timing_submit_cycles_ = 0;
+        uint64_t timing_progress_cycles_ = 0;
+        uint64_t timing_ops_ = 0;
+        uint64_t timing_progress_calls_ = 0;
+        double tsc_hz_ = 0.0;
+
         std::thread thread_;
 };
 
