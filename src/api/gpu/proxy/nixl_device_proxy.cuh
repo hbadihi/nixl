@@ -159,6 +159,9 @@ struct ProxyDeviceContext : nixlProxyDeviceContextData {
             ring->records[slot].op_idx);
         record_op_idx.store(submission_op_idx, cuda::memory_order_release);
 
+        // // HACK!!!!!!!!!
+        // ring->records[slot].op_idx = submission_op_idx;
+
         if (xfer_status != nullptr) {
             ProxyXferStatus pxs{channel_view.completion_slot, submission_op_idx};
             memcpy(xfer_status->storage, &pxs, sizeof(ProxyXferStatus));
