@@ -214,11 +214,6 @@ void Buffer::init(int num_ranks, int num_experts_per_rank, int64_t num_nvl_bytes
         CUDA_CHECK(cudaMemset(last_ht_barrier_counter, 0, sizeof(uint64_t)));
     }
 
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-    CUDA_CHECK(cudaMalloc(&ll_all_rdma_fallback_counter, sizeof(uint64_t)));
-    CUDA_CHECK(cudaMemset(ll_all_rdma_fallback_counter, 0, sizeof(uint64_t)));
-#endif
-
     CUDA_CHECK(cudaDeviceSynchronize());
 
     my_peer_info.rdma_buffer_ptr = rdma_buffer_ptr;
@@ -414,13 +409,6 @@ void Buffer::destroy() {
     sync_buffer_ptr = nullptr;
     m_sync_count_alloc.reset();
     sync_count_ptr = nullptr;
-
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-    if (ll_all_rdma_fallback_counter != nullptr) {
-        warn_cuda(cudaFree(ll_all_rdma_fallback_counter), "free LL all-RDMA fallback counter");
-        ll_all_rdma_fallback_counter = nullptr;
-    }
-#endif
 
     if (!low_latency_mode) {
         warn_cuda(cudaFree(local_ht_barrier_counter), "free local ht barrier counter");
@@ -1431,12 +1419,6 @@ void Buffer::_nixl_ep_init(void) {
         .last_ht_barrier_counter = last_ht_barrier_counter,
         .local_ht_barrier_counter_ptr = local_ht_barrier_counter,
         .rdma_buffer_ptr = rdma_buffer_ptr,
-        .ll_all_rdma_fallback_counter =
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-            ll_all_rdma_fallback_counter,
-#else
-            nullptr,
-#endif
         .max_num_ranks = max_num_ranks,
         .num_rdma_ranks = num_rdma_ranks,
         .rank = rank,
