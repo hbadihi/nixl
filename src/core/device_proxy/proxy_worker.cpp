@@ -21,48 +21,6 @@
 #include <chrono>
 #include <cstdlib>
 #include <cuda_runtime.h>
-#include <unistd.h>
-#if defined(__x86_64__) || defined(__i386__)
-#include <x86intrin.h>
-#endif
-
-namespace {
-// Low-overhead per-op CPU cost timing for NIXL_EP_PROXY_STALL_LOG. Uses the TSC
-// on x86 (a few cycles per read, no fence) so it can wrap the sub-microsecond
-// submit path without perturbing it; falls back to steady_clock nanoseconds
-// elsewhere (in which case the "cycle" unit is already a nanosecond).
-inline uint64_t
-nowTsc() noexcept {
-#if defined(__x86_64__) || defined(__i386__)
-    return __rdtsc();
-#else
-    return static_cast<uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now().time_since_epoch())
-            .count());
-#endif
-}
-
-// One-time TSC->Hz calibration against steady_clock (~5 ms busy spin). Only ever
-// called from the ctor when diagnostics are enabled, so the spin is off the hot
-// path. On non-x86 nowTsc() already yields nanoseconds, so Hz is exactly 1e9.
-double
-calibrateTscHz() noexcept {
-#if defined(__x86_64__) || defined(__i386__)
-    using clk = std::chrono::steady_clock;
-    const auto wall0 = clk::now();
-    const uint64_t tsc0 = nowTsc();
-    while (std::chrono::duration_cast<std::chrono::microseconds>(clk::now() - wall0).count()
-           < 5000) {
-    }
-    const uint64_t tsc1 = nowTsc();
-    const double secs = std::chrono::duration<double>(clk::now() - wall0).count();
-    return secs > 0.0 ? static_cast<double>(tsc1 - tsc0) / secs : 0.0;
-#else
-    return 1e9;
-#endif
-}
-} // namespace
 
 ProxyWorker::ProxyWorker(nixlDeviceProxyBackendAdapter *backend,
                          const nixlProxyMemViewRegistry *proxy_memview_registry,
@@ -80,14 +38,8 @@ ProxyWorker::ProxyWorker(nixlDeviceProxyBackendAdapter *backend,
       pthr_delay_us_(pthr_delay_us),
       submitted_work_count_(submitted_work_count),
       assigned_generations_(assigned_generations),
-      last_seen_gen_(assigned_channel_count, 0),
-      channel_debug_counters_(assigned_channel_count) {
-    stall_log_enabled_ = std::getenv("NIXL_EP_PROXY_STALL_LOG") != nullptr;
+      last_seen_gen_(assigned_channel_count, 0) {
     fire_and_forget_ = std::getenv("NIXL_EP_PROXY_FIRE_AND_FORGET") != nullptr;
-    last_stall_log_ = std::chrono::steady_clock::now();
-    if (stall_log_enabled_) {
-        tsc_hz_ = calibrateTscHz();
-    }
 }
 
 ProxyWorker::~ProxyWorker() {
@@ -96,7 +48,6 @@ ProxyWorker::~ProxyWorker() {
 
 void
 ProxyWorker::start(uint32_t worker_idx) {
-    worker_idx_ = worker_idx;
     thread_ = std::thread([this, worker_idx]() {
         NIXL_INFO << "ProxyWorker thread " << worker_idx << " started";
         while (__atomic_load_n(shutdown_word_, __ATOMIC_ACQUIRE)
@@ -119,7 +70,6 @@ ProxyWorker::join() noexcept {
 
 void
 ProxyWorker::runOnce() {
-    ++run_once_count_;
     for (uint32_t i = 0; i < assigned_channel_count_; i++) {
         nixlProxyChannelState &channel = assigned_channels_[i];
         // Revive: the connection layer bumped this band's generation because its remote
@@ -150,165 +100,6 @@ ProxyWorker::runOnce() {
         for (uint32_t i = 0; i < assigned_channel_count_; i++) {
             nixlProxyChannelState &channel = assigned_channels_[i];
             publishCompletions(channel);
-        }
-    }
-    maybeLogStalls();
-}
-
-void
-ProxyWorker::maybeLogStalls() {
-    if (!stall_log_enabled_) {
-        return;
-    }
-    const auto now = std::chrono::steady_clock::now();
-    if (now - last_stall_log_ < std::chrono::seconds(1)) {
-        return;
-    }
-    last_stall_log_ = now;
-
-    size_t total_inflight = 0;
-    uint32_t total_ready_records = 0;
-    uint32_t blocked_hole_channels = 0;
-    uint32_t error_latched_channels = 0;
-
-    // Surface outstanding backend work and ring state. Scanning all slots (debug-only) matters:
-    // tryDequeue stops at the consumer head, so a producer that reserves a slot but never
-    // publishes op_idx could otherwise hide later ready records indefinitely.
-    for (uint32_t i = 0; i < assigned_channel_count_; i++) {
-        const nixlProxyChannelState &channel = assigned_channels_[i];
-        const uint64_t consumer =
-            __atomic_load_n(channel.consumer_idx_host_, __ATOMIC_RELAXED);
-        uint32_t ready_records = 0;
-        uint32_t first_ready_offset = channel.ring_depth_;
-        uint64_t head_ring_op = 0;
-        int head_ring_opcode = -1;
-        int first_ready_opcode = -1;
-        for (uint32_t offset = 0; offset < channel.ring_depth_; ++offset) {
-            const uint32_t slot =
-                static_cast<uint32_t>((consumer + offset) % channel.ring_depth_);
-            const uint64_t op_idx =
-                __atomic_load_n(&channel.records_host_[slot].op_idx, __ATOMIC_ACQUIRE);
-            if (offset == 0) {
-                head_ring_op = op_idx;
-                if (op_idx != 0) {
-                    head_ring_opcode =
-                        static_cast<int>(channel.records_host_[slot].opcode);
-                }
-            }
-            if (op_idx != 0) {
-                if (first_ready_offset == channel.ring_depth_) {
-                    first_ready_offset = offset;
-                    first_ready_opcode =
-                        static_cast<int>(channel.records_host_[slot].opcode);
-                }
-                ++ready_records;
-            }
-        }
-
-        const bool blocked_hole =
-            ready_records != 0 && head_ring_op == 0 && first_ready_offset != 0;
-        total_inflight += channel.inflight_requests.size();
-        total_ready_records += ready_records;
-        blocked_hole_channels += blocked_hole ? 1 : 0;
-        error_latched_channels += channel.error_latched ? 1 : 0;
-
-        if (channel.inflight_requests.empty() && ready_records == 0
-            && !channel.error_latched) {
-            continue;
-        }
-        const ChannelDebugCounters &counters = channel_debug_counters_[i];
-        NIXL_WARN << "ProxyWorker STALLDBG: channel=" << channel.device_view.channel_id
-                  << " pid=" << ::getpid()
-                  << " consumer=" << consumer
-                  << " ready_records=" << ready_records
-                  << " first_ready_offset="
-                  << (first_ready_offset == channel.ring_depth_
-                          ? -1
-                          : static_cast<int64_t>(first_ready_offset))
-                  << " head_ring_op=" << head_ring_op
-                  << " head_ring_opcode=" << head_ring_opcode
-                  << " first_ready_opcode=" << first_ready_opcode
-                  << " blocked_hole=" << blocked_hole
-                  << " inflight=" << channel.inflight_requests.size()
-                  << " error_latched=" << channel.error_latched
-                  << " head_op="
-                  << (channel.inflight_requests.empty()
-                          ? 0
-                          : channel.inflight_requests.front().op_idx)
-                  << " head_status="
-                  << (channel.inflight_requests.empty()
-                          ? 0
-                          : static_cast<int>(channel.inflight_requests.front().status))
-                  << " head_opcode="
-                  << (channel.inflight_requests.empty()
-                          ? -1
-                          : static_cast<int>(channel.inflight_requests.front().opcode))
-                  << " tail_opcode="
-                  << (channel.inflight_requests.empty()
-                          ? -1
-                          : static_cast<int>(channel.inflight_requests.back().opcode))
-                  << " dequeued_put=" << counters.dequeued_put
-                  << " dequeued_atomic=" << counters.dequeued_atomic
-                  << " completed_put=" << counters.completed_put
-                  << " completed_atomic=" << counters.completed_atomic
-                  << " prepare_errors=" << counters.prepare_errors
-                  << " submit_errors=" << counters.submit_errors;
-    }
-
-    const uint64_t run_once_delta = run_once_count_ - last_logged_run_once_count_;
-    last_logged_run_once_count_ = run_once_count_;
-    NIXL_WARN << "ProxyWorker STALLDBG heartbeat: pid=" << ::getpid()
-              << " run_once=" << run_once_count_
-              << " run_once_delta=" << run_once_delta
-              << " submitted="
-              << (submitted_work_count_ == nullptr
-                      ? 0
-                      : submitted_work_count_->load(std::memory_order_relaxed))
-              << " inflight=" << total_inflight
-              << " ready_records=" << total_ready_records
-              << " blocked_hole_channels=" << blocked_hole_channels
-              << " error_latched_channels=" << error_latched_channels;
-
-    // Per-op CPU cost breakdown for this worker over the last heartbeat interval.
-    // avg_submit_ns is the ucp_put_nbx cost; avg_prepare_ns is the memview-registry
-    // lookup; avg_progress_ns is the once-per-runOnce ucp_worker_progress (doorbell
-    // flush). ops_per_progress shows how many submits batch behind one flush.
-    const double cyc_to_ns = tsc_hz_ > 0.0 ? 1e9 / tsc_hz_ : 0.0;
-    const uint64_t timed_ops = timing_ops_;
-    const uint64_t progress_calls = timing_progress_calls_;
-    const double avg_prepare_ns =
-        timed_ops ? (static_cast<double>(timing_prepare_cycles_) / timed_ops) * cyc_to_ns : 0.0;
-    const double avg_submit_ns =
-        timed_ops ? (static_cast<double>(timing_submit_cycles_) / timed_ops) * cyc_to_ns : 0.0;
-    const double avg_progress_ns =
-        progress_calls
-            ? (static_cast<double>(timing_progress_cycles_) / progress_calls) * cyc_to_ns
-            : 0.0;
-    const double ops_per_progress =
-        progress_calls ? static_cast<double>(timed_ops) / progress_calls : 0.0;
-    NIXL_WARN << "ProxyWorker STALLDBG timing: pid=" << ::getpid()
-              << " worker=" << worker_idx_
-              << " timed_ops=" << timed_ops
-              << " avg_prepare_ns=" << avg_prepare_ns
-              << " avg_submit_ns=" << avg_submit_ns
-              << " avg_prepare_plus_submit_ns=" << (avg_prepare_ns + avg_submit_ns)
-              << " progress_calls=" << progress_calls
-              << " avg_progress_ns=" << avg_progress_ns
-              << " ops_per_progress=" << ops_per_progress
-              << " tsc_ghz=" << (tsc_hz_ / 1e9);
-    timing_prepare_cycles_ = 0;
-    timing_submit_cycles_ = 0;
-    timing_progress_cycles_ = 0;
-    timing_ops_ = 0;
-    timing_progress_calls_ = 0;
-
-    // Only worker 0 dumps the backend-global per-UCX-worker submit histogram, so it
-    // appears once per heartbeat interval per process rather than once per drain thread.
-    if (worker_idx_ == 0 && backend_ != nullptr) {
-        const std::string histogram = backend_->workerSubmitHistogram();
-        if (!histogram.empty()) {
-            NIXL_WARN << "ProxyWorker STALLDBG qp_histogram: pid=" << ::getpid()
-                      << " " << histogram;
         }
     }
 }
@@ -342,23 +133,10 @@ ProxyWorker::tryDequeue(nixlProxyChannelState &channel, nixlProxySubmission &sub
 
 void
 ProxyWorker::submitToBackend(nixlProxyChannelState &channel, const nixlProxySubmission &submission) {
-    const size_t channel_index = static_cast<size_t>(&channel - assigned_channels_);
-    ChannelDebugCounters &counters = channel_debug_counters_[channel_index];
-    if (submission.opcode == nixl_proxy_opcode_t::PUT) {
-        ++counters.dequeued_put;
-    } else if (submission.opcode == nixl_proxy_opcode_t::ATOMIC_ADD) {
-        ++counters.dequeued_atomic;
-    }
-
     nixlBackendProxySubmission prepared_submission;
-    const uint64_t t_prepare0 = stall_log_enabled_ ? nowTsc() : 0;
     nixl_status_t status =
         proxy_memview_registry_->prepareSubmission(submission, prepared_submission);
-    if (stall_log_enabled_) {
-        timing_prepare_cycles_ += nowTsc() - t_prepare0;
-    }
     if (status != NIXL_SUCCESS) {
-        ++counters.prepare_errors;
         NIXL_DEBUG << "ProxyWorker::submitToBackend: submission preparation failed"
                    << " op_idx=" << submission.op_idx
                    << " status=" << status;
@@ -384,12 +162,7 @@ ProxyWorker::submitToBackend(nixlProxyChannelState &channel, const nixlProxySubm
     if (submitted_work_count_ != nullptr) {
         submitted_work_count_->fetch_add(1, std::memory_order_relaxed);
     }
-    const uint64_t t_submit0 = stall_log_enabled_ ? nowTsc() : 0;
     status = backend_->submit(prepared_submission, request_token);
-    if (stall_log_enabled_) {
-        timing_submit_cycles_ += nowTsc() - t_submit0;
-        ++timing_ops_;
-    }
     inflight.backend_req_token = request_token;
     if (status != NIXL_IN_PROG) {
         // Terminal at submit time: immediate completion (NIXL_SUCCESS) or a
@@ -397,7 +170,6 @@ ProxyWorker::submitToBackend(nixlProxyChannelState &channel, const nixlProxySubm
         // polling the backend.
         inflight.status = status;
         if (status != NIXL_SUCCESS) {
-            ++counters.submit_errors;
             NIXL_ERROR << "ProxyWorker::submitToBackend: backend submit failed"
                        << " status=" << status << " op_idx=" << submission.op_idx
                        << " request_token=" << request_token;
@@ -420,13 +192,6 @@ ProxyWorker::submitToBackend(nixlProxyChannelState &channel, const nixlProxySubm
 
 void
 ProxyWorker::driveBackendProgress() {
-    if (stall_log_enabled_) {
-        const uint64_t t0 = nowTsc();
-        backend_->progress();
-        timing_progress_cycles_ += nowTsc() - t0;
-        ++timing_progress_calls_;
-        return;
-    }
     backend_->progress();
 }
 
@@ -454,13 +219,6 @@ ProxyWorker::publishCompletions(nixlProxyChannelState &channel) {
         channel.completion_slot_host_->next_status = st;
         __atomic_store_n(&channel.completion_slot_host_->completed_idx,
                          front.op_idx, __ATOMIC_RELEASE);
-        const size_t channel_index = static_cast<size_t>(&channel - assigned_channels_);
-        ChannelDebugCounters &counters = channel_debug_counters_[channel_index];
-        if (front.opcode == nixl_proxy_opcode_t::PUT) {
-            ++counters.completed_put;
-        } else if (front.opcode == nixl_proxy_opcode_t::ATOMIC_ADD) {
-            ++counters.completed_atomic;
-        }
         channel.inflight_requests.pop_front();
         if (st != NIXL_SUCCESS) {
             channel.error_latched = true;

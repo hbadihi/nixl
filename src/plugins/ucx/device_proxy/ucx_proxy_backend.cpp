@@ -19,9 +19,6 @@
 #include "nixl_log.h"
 #include "nixl_types.h"
 
-#include <algorithm>
-#include <sstream>
-
 namespace {
 // Token layout: worker_id in the top 8 bits, ucp request pointer in the low 56
 // (user-space pointers fit well within 56 bits on x86-64/aarch64). worker_id is
@@ -71,31 +68,10 @@ nixlUcxProxyBackendAdapter::workerIdForChannel(uint32_t channel_id) const {
     return num_workers ? (channel_id % num_workers) : 0;
 }
 
-std::string
-nixlUcxProxyBackendAdapter::workerSubmitHistogram() const {
-    if (!stall_log_enabled_ || engine_ == nullptr) {
-        return {};
-    }
-    const size_t num_workers =
-        std::min<size_t>(engine_->getSharedWorkersSize(), kMaxTrackedWorkers);
-    std::ostringstream oss;
-    for (size_t w = 0; w < num_workers; ++w) {
-        if (w != 0) {
-            oss << ' ';
-        }
-        oss << 'w' << w << '=' << worker_submit_counts_[w].load(std::memory_order_relaxed);
-    }
-    return oss.str();
-}
-
 nixl_status_t
 nixlUcxProxyBackendAdapter::submitPut(const nixlBackendProxySubmission &submission,
                                       uint64_t &request_token) {
     const size_t worker_id = workerIdForChannel(submission.channel_id);
-    if (stall_log_enabled_ && worker_id < kMaxTrackedWorkers) {
-        worker_submit_counts_[worker_id].fetch_add(1, std::memory_order_relaxed);
-    }
-
     nixlUcxReq req = nullptr;
     const nixl_status_t status = engine_->submitProxyRmaWrite(submission.local.desc,
                                                               submission.remote.desc,
@@ -127,10 +103,6 @@ nixlUcxProxyBackendAdapter::submitAtomicAdd(const nixlBackendProxySubmission &su
     // Same channel -> worker mapping as submitPut so a channel's put and its follow-up
     // atomic flag travel the same worker/EP/QP, preserving IB write-before-atomic order.
     const size_t worker_id = workerIdForChannel(submission.channel_id);
-    if (stall_log_enabled_ && worker_id < kMaxTrackedWorkers) {
-        worker_submit_counts_[worker_id].fetch_add(1, std::memory_order_relaxed);
-    }
-
     nixlUcxReq req = nullptr;
     const nixl_status_t status = engine_->submitProxyAtomicAdd(submission.remote.desc,
                                                                submission.value,

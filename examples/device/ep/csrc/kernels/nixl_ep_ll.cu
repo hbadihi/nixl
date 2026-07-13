@@ -45,26 +45,6 @@ __device__ inline void* p2p_ptr_get(gpu_nixl_ctx& ctx, uint64_t dst_ptr, int dst
 
 namespace ep_kernels {
 
-// clock64 timing instrumentation for NIXL put/atomic-add call sites.
-// Accumulated sum of cycle deltas and number of calls, per call site.
-__device__ unsigned long long g_nixl_call_cycles[NIXL_CS_COUNT];
-__device__ unsigned long long g_nixl_call_counts[NIXL_CS_COUNT];
-
-__device__ __forceinline__ void record_nixl_call(int site, long long dt) {
-    atomicAdd(&g_nixl_call_cycles[site], static_cast<unsigned long long>(dt));
-    atomicAdd(&g_nixl_call_counts[site], 1ull);
-}
-
-// Flush a thread-local accumulation (registers) to the global counters with a
-// single pair of atomics. Used to keep the global atomics out of the timed
-// loops so the clock64 measurements are not skewed by per-call atomic latency.
-__device__ __forceinline__ void flush_nixl_call(int site, long long cycles, unsigned int count) {
-    if (count != 0) {
-        atomicAdd(&g_nixl_call_cycles[site], static_cast<unsigned long long>(cycles));
-        atomicAdd(&g_nixl_call_counts[site], static_cast<unsigned long long>(count));
-    }
-}
-
 template<bool use_warp_sync = false>
 __forceinline__ __device__ bool is_rank_masked(int* mask_buffer_ptr, int rank) {
     if (mask_buffer_ptr == nullptr) {
@@ -144,10 +124,6 @@ dispatch(void* packed_recv_x, void* packed_recv_x_scales,
         const auto num_threads = (num_warps - 1) * 32;
         const size_t hidden_bf16_int4 = kHidden / kNumElemsPerRead;
 
-        // Thread-local accumulators; flushed once after the loop (see below).
-        long long put_cycles = 0;
-        unsigned int put_count = 0;
-
         for (int token_idx = sm_id; token_idx < num_tokens; token_idx += num_sms) {
             const auto x_int4 = static_cast<const int4*>(x) + token_idx * hidden_bf16_int4;
             const auto rdma_x_src_idx = reinterpret_cast<int*>(static_cast<uint8_t*>(rdma_x) + token_idx * num_bytes_per_msg);
@@ -215,15 +191,8 @@ dispatch(void* packed_recv_x, void* packed_recv_x_scales,
                     if (dst_p2p_ptr == 0) {
                         nixlMemViewElem src_mdesc{nixl_ctx.local_mvh, 0, nixl_ctx.offset_get(src_ptr)};
                         nixlMemViewElem dst_mdesc{nixl_ctx.remote_mvh, (size_t) dst_rank, nixl_ctx.offset_get(dst_ptr)};
-                        auto nixl_t0 = clock64();
-                        auto nixl_rc = nixlPut<nixl_gpu_level_t::WARP>(src_mdesc, dst_mdesc, num_bytes_per_msg,
-                                dst_expert_local_idx, doorbell_flag(slot_idx));
-                        auto nixl_t1 = clock64();
-                        // if (lane_id == 0) {
-                        put_cycles += nixl_t1 - nixl_t0;
-                        ++put_count;
-                        // }
-                        EP_DEVICE_ASSERT(nixl_rc == NIXL_IN_PROG);
+                        EP_DEVICE_ASSERT(nixlPut<nixl_gpu_level_t::WARP>(src_mdesc, dst_mdesc, num_bytes_per_msg,
+                                dst_expert_local_idx, doorbell_flag(slot_idx)) == NIXL_IN_PROG);
                     } else {
                         // NOTES: only 2 load iterations for 7K hidden with 8 unrolls
                         const auto* src_int4_ptr = reinterpret_cast<const int4*>(src_ptr);
@@ -238,9 +207,6 @@ dispatch(void* packed_recv_x, void* packed_recv_x_scales,
             }
         }
 
-        // Flush timing once, after the send loop, to keep global atomics out of the timed region.
-        if (lane_id == 0)
-            flush_nixl_call(NIXL_CS_DISPATCH_PUT, put_cycles, put_count);
     } else if (warp_id == num_warps - 1) {
         EP_DEVICE_ASSERT(num_sms > 1);
         if (sm_id == 0) {
@@ -291,14 +257,10 @@ dispatch(void* packed_recv_x, void* packed_recv_x_scales,
         while (ld_acquire_global(atomic_finish_counter_per_expert + responsible_expert_idx) != FINISHED_SUM_TAG * 2);
         auto dst_ptr = reinterpret_cast<uint64_t>(rdma_recv_count + dst_expert_local_idx * num_ranks + rank);
         if (not is_rank_masked(mask_buffer_ptr, dst_rank)) {
-        void* dst_p2p_ptr = p2p_ptr_get(nixl_ctx, dst_ptr, dst_rank);
+            void* dst_p2p_ptr = p2p_ptr_get(nixl_ctx, dst_ptr, dst_rank);
             if (dst_p2p_ptr == 0) {
                 nixlMemViewElem dst_mdesc{nixl_ctx.remote_mvh, static_cast<size_t>(dst_rank), nixl_ctx.offset_get(dst_ptr)};
-                auto nixl_t0 = clock64();
-                auto nixl_rc = nixlAtomicAdd(num_tokens_sent + 1, dst_mdesc, dst_expert_local_idx);
-                auto nixl_t1 = clock64();
-                record_nixl_call(NIXL_CS_DISPATCH_ATOMIC, nixl_t1 - nixl_t0);
-                EP_DEVICE_ASSERT(nixl_rc == NIXL_IN_PROG);
+                EP_DEVICE_ASSERT(nixlAtomicAdd(num_tokens_sent + 1, dst_mdesc, dst_expert_local_idx) == NIXL_IN_PROG);
             } else {
                 st_release_sys_global(static_cast<uint64_t*>(dst_p2p_ptr), static_cast<uint64_t>(num_tokens_sent + 1));
             }
@@ -754,10 +716,6 @@ combine(void* combined_x,
             return min(kNumTMABufferBytes, static_cast<int>((hidden_bf16_int4 - offset_int4) * sizeof(int4)));
         };
 
-        // Thread-local accumulators; flushed once after the send loop (see below).
-        long long put_cycles = 0;
-        unsigned int put_count = 0;
-
         // Issue NIXL send
         if (not is_rank_masked<true>(mask_buffer_ptr, dst_rank)) {
             for (int token_idx = offset + sub_warp_id; token_idx < offset + num_tokens_to_send; token_idx += num_warps_per_group) {
@@ -837,22 +795,11 @@ combine(void* combined_x,
                 if (dst_p2p_ptr == 0) {
                     nixlMemViewElem src_mdesc{nixl_ctx.local_mvh, 0, nixl_ctx.offset_get(buf_ptr)};
                     nixlMemViewElem dst_mdesc{nixl_ctx.remote_mvh, (size_t) dst_rank, nixl_ctx.offset_get(dst_ptr)};
-                    auto nixl_t0 = clock64();
-                    auto nixl_rc = nixlPut<nixl_gpu_level_t::WARP>(src_mdesc, dst_mdesc, num_send_bytes,
-                            local_expert_idx, doorbell_flag(token_idx - offset));
-                    auto nixl_t1 = clock64();
-                    // if (lane_id == 0) {
-                    put_cycles += nixl_t1 - nixl_t0;
-                    ++put_count;
-                    // }
-                    EP_DEVICE_ASSERT(nixl_rc == NIXL_IN_PROG);
+                    EP_DEVICE_ASSERT(nixlPut<nixl_gpu_level_t::WARP>(src_mdesc, dst_mdesc, num_send_bytes,
+                            local_expert_idx, doorbell_flag(token_idx - offset)) == NIXL_IN_PROG);
                 }
             }
         }
-
-        // Flush timing once, after the send loop, to keep global atomics out of the timed region.
-        if (lane_id == 0)
-            flush_nixl_call(NIXL_CS_COMBINE_PUT, put_cycles, put_count);
 
         // Put the finishing flag
         EP_DEVICE_ASSERT(num_warps_per_group > 1 and num_warp_groups < 16);
@@ -861,14 +808,10 @@ combine(void* combined_x,
             while (ld_acquire_global(atomic_clean_flag) == 0);
             auto dst_ptr = reinterpret_cast<uint64_t>(rdma_recv_flag + global_expert_idx);
             if (not is_rank_masked(mask_buffer_ptr, dst_rank)) {
-            void* dst_p2p_ptr = p2p_ptr_get(nixl_ctx, dst_ptr, dst_rank);
+                void* dst_p2p_ptr = p2p_ptr_get(nixl_ctx, dst_ptr, dst_rank);
                 if (dst_p2p_ptr == 0) {
                     nixlMemViewElem dst_mdesc{nixl_ctx.remote_mvh, (size_t) dst_rank, nixl_ctx.offset_get(dst_ptr)};
-                    auto nixl_t0 = clock64();
-                    auto nixl_rc = nixlAtomicAdd(1, dst_mdesc, local_expert_idx);
-                    auto nixl_t1 = clock64();
-                    record_nixl_call(NIXL_CS_COMBINE_ATOMIC, nixl_t1 - nixl_t0);
-                    EP_DEVICE_ASSERT(nixl_rc == NIXL_IN_PROG);
+                    EP_DEVICE_ASSERT(nixlAtomicAdd(1, dst_mdesc, local_expert_idx) == NIXL_IN_PROG);
                 } else {
                     st_release_sys_global(static_cast<uint64_t*>(dst_p2p_ptr), 1);
                 }
@@ -1182,25 +1125,6 @@ void clean_mask_buffer(int* mask_buffer_ptr, int num_ranks, cudaStream_t stream)
     LAUNCH_KERNEL(&cfg, clean_mask_buffer<kNumThreads>, mask_buffer_ptr, num_ranks);
 }
 
-__global__ void reset_nixl_call_stats_kernel() {
-    const auto idx = static_cast<int>(threadIdx.x);
-    if (idx < NIXL_CS_COUNT) {
-        g_nixl_call_cycles[idx] = 0;
-        g_nixl_call_counts[idx] = 0;
-    }
-}
-
-void reset_nixl_call_stats(cudaStream_t stream) {
-    reset_nixl_call_stats_kernel<<<1, NIXL_CS_COUNT, 0, stream>>>();
-    CUDA_CHECK(cudaGetLastError());
-}
-
-void get_nixl_call_stats(unsigned long long* cycles, unsigned long long* counts) {
-    CUDA_CHECK(cudaDeviceSynchronize());
-    CUDA_CHECK(cudaMemcpyFromSymbol(cycles, g_nixl_call_cycles, NIXL_CS_COUNT * sizeof(unsigned long long)));
-    CUDA_CHECK(cudaMemcpyFromSymbol(counts, g_nixl_call_counts, NIXL_CS_COUNT * sizeof(unsigned long long)));
-}
-
 template <int kNumThreads>
 __forceinline__ __device__ void barrier(nixl_ep::gpu_nixl_ctx nixl_ctx, int* mask_buffer_ptr, int thread_id, uint64_t timeout_cycles) {
     EP_DEVICE_ASSERT(kNumThreads >= nixl_ctx.max_num_ranks);
@@ -1212,11 +1136,7 @@ __forceinline__ __device__ void barrier(nixl_ep::gpu_nixl_ctx nixl_ctx, int* mas
 
             nixlMemViewElem src_mdesc{nixl_ctx.local_mvh, 1, dst_rank * sizeof(int)};
             nixlMemViewElem dst_mdesc{nixl_ctx.barrier_mvh, (size_t) dst_rank, nixl_ctx.rank * sizeof(int)};
-            auto nixl_t0 = clock64();
-            auto nixl_rc = nixlPut<nixl_gpu_level_t::THREAD>(src_mdesc, dst_mdesc, sizeof(int), 0);
-            auto nixl_t1 = clock64();
-            record_nixl_call(NIXL_CS_BARRIER_PUT, nixl_t1 - nixl_t0);
-            EP_DEVICE_ASSERT(nixl_rc == NIXL_IN_PROG);
+            EP_DEVICE_ASSERT(nixlPut<nixl_gpu_level_t::THREAD>(src_mdesc, dst_mdesc, sizeof(int), 0) == NIXL_IN_PROG);
 
             auto start_time = clock64();
             uint64_t wait_recv_cost = 0;

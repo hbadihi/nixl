@@ -18,7 +18,6 @@
 #define NIXL_SRC_CORE_DEVICE_PROXY_PROXY_WORKER_H
 
 #include <atomic>
-#include <chrono>
 #include <cstdint>
 #include <thread>
 #include <vector>
@@ -47,15 +46,6 @@ class ProxyWorker {
         runOnce();
 
     private:
-        struct ChannelDebugCounters {
-            uint64_t dequeued_put = 0;
-            uint64_t dequeued_atomic = 0;
-            uint64_t completed_put = 0;
-            uint64_t completed_atomic = 0;
-            uint64_t prepare_errors = 0;
-            uint64_t submit_errors = 0;
-        };
-
         bool
         tryDequeue(nixlProxyChannelState &channel, nixlProxySubmission &submission);
 
@@ -74,11 +64,6 @@ class ProxyWorker {
         void
         resetChannel(nixlProxyChannelState &channel);
 
-        // Diagnostics: rate-limited worker/ring/inflight dump when
-        // NIXL_EP_PROXY_STALL_LOG is set.
-        void
-        maybeLogStalls();
-
         nixlDeviceProxyBackendAdapter *backend_ = nullptr;
         const nixlProxyMemViewRegistry *proxy_memview_registry_ = nullptr;
         uint32_t *shutdown_word_ = nullptr;
@@ -92,34 +77,9 @@ class ProxyWorker {
         std::atomic<uint64_t> *assigned_generations_ = nullptr;
         std::vector<uint64_t> last_seen_gen_;
 
-        // Diagnostics (NIXL_EP_PROXY_STALL_LOG): periodically log a worker heartbeat and
-        // any assigned channel with outstanding inflight requests or published ring records.
-        // Read-only; no behavior change. The heartbeat distinguishes an idle worker from one
-        // stuck in backend progress; scanning the ring detects published records stranded
-        // behind an unpublished head slot.
-        bool stall_log_enabled_ = false;
         // Fire-and-forget completion handling (NIXL_EP_PROXY_FIRE_AND_FORGET): skip the
         // FIFO/latch/device-publish path in favor of reapCompletions().
         bool fire_and_forget_ = false;
-        // This worker's index; only worker 0 dumps the process-wide QP histogram so the
-        // (backend-global) counters aren't logged once per drain thread.
-        uint32_t worker_idx_ = 0;
-        std::chrono::steady_clock::time_point last_stall_log_{};
-        uint64_t run_once_count_ = 0;
-        uint64_t last_logged_run_once_count_ = 0;
-        std::vector<ChannelDebugCounters> channel_debug_counters_;
-
-        // Per-op CPU cost accounting (NIXL_EP_PROXY_STALL_LOG only). TSC cycles
-        // accumulated over a heartbeat interval and reset each dump; converted to
-        // nanoseconds via tsc_hz_ (calibrated once in the ctor when diagnostics are on).
-        // Splits the serial critical path into prepareSubmission, the ucp_put_nbx
-        // submit, and the once-per-runOnce ucp_worker_progress doorbell flush.
-        uint64_t timing_prepare_cycles_ = 0;
-        uint64_t timing_submit_cycles_ = 0;
-        uint64_t timing_progress_cycles_ = 0;
-        uint64_t timing_ops_ = 0;
-        uint64_t timing_progress_calls_ = 0;
-        double tsc_hz_ = 0.0;
 
         std::thread thread_;
 };

@@ -83,14 +83,6 @@ class nixlDeviceProxyBackendAdapter {
         shutdown() {
             return NIXL_ERR_NOT_SUPPORTED;
         }
-
-        // Debug-only (NIXL_EP_PROXY_STALL_LOG): per-UCX-worker submit histogram, e.g.
-        // "w0=1234 w1=1230 ...", to verify QP utilization/spread across workers. Returns
-        // empty when unsupported or when debug counting is disabled.
-        virtual std::string
-        workerSubmitHistogram() const {
-            return {};
-        }
 };
 
 #endif // NIXL_SRC_CORE_DEVICE_PROXY_BACKEND_ADAPTER_H
