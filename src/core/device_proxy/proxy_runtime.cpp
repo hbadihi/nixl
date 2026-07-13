@@ -443,6 +443,7 @@ nixlProxyChannelState::allocate(uint32_t channel_id, uint32_t depth) {
         return NIXL_ERR_BACKEND;
     }
     __atomic_store_n(consumer_idx_host_, uint64_t{0}, __ATOMIC_RELEASE);
+    submit_idx_ = 0;
     completion_slot_host_->next_status = NIXL_IN_PROG;
     __atomic_store_n(&completion_slot_host_->completed_idx,
                      uint64_t{0}, __ATOMIC_RELEASE);
@@ -462,7 +463,9 @@ nixlProxyChannelState::allocate(uint32_t channel_id, uint32_t depth) {
     }
     device_view = nixlProxyChannelView{ work_ring_dev_, completion_slot_dev_, channel_id };
 
-    inflight_requests.clear();
+    // One in-flight slot per ring slot; the window [consumer_idx, submit_idx_)
+    // holds the submitted-but-not-completed ops in place of the old deque.
+    inflight_slots_.assign(depth, nixlProxyRequestState{});
     NIXL_INFO << "nixlProxyChannelState::allocate: channel " << channel_id << " ready"
               << " work_ring(dev)=" << work_ring_dev_
               << " records=" << records_host_
@@ -520,7 +523,9 @@ nixlProxyChannelState::operator=(nixlProxyChannelState &&other) noexcept {
     if (this != &other) {
         deallocate();
         device_view       = other.device_view;
-        inflight_requests = std::move(other.inflight_requests);
+        inflight_slots_   = std::move(other.inflight_slots_);
+        submit_idx_       = other.submit_idx_;
+        error_latched     = other.error_latched;
         work_ring_dev_       = other.work_ring_dev_;
         records_host_             = other.records_host_;
         producer_idx_dev_ = other.producer_idx_dev_;
@@ -535,6 +540,8 @@ nixlProxyChannelState::operator=(nixlProxyChannelState &&other) noexcept {
         other.consumer_idx_host_    = nullptr;
         other.consumer_idx_cache_dev_ = nullptr;
         other.ring_depth_           = 0;
+        other.submit_idx_           = 0;
+        other.error_latched         = false;
         other.completion_slot_host_ = nullptr;
         other.completion_slot_dev_  = nullptr;
         other.device_view      = nixlProxyChannelView{};
@@ -869,7 +876,12 @@ nixlProxyRuntime::startWorkers() {
     }
 
     for (auto &channel : channels_) {
-        channel.inflight_requests.clear();
+        // Start with an empty in-flight window: submit cursor collapsed onto CI.
+        channel.submit_idx_ =
+            __atomic_load_n(channel.consumer_idx_host_, __ATOMIC_RELAXED);
+        std::fill(channel.inflight_slots_.begin(),
+                  channel.inflight_slots_.end(),
+                  nixlProxyRequestState{});
         channel.error_latched = false;
     }
 
@@ -908,19 +920,28 @@ nixlProxyRuntime::shutdown() {
     workers_started_ = false;
     NIXL_INFO << "ProxyRuntime::shutdown: all worker threads joined";
 
-    // Workers are stopped, so the inflight queues are stable: release any backend
-    // requests that never reached a terminal status (this also covers everything
-    // deferred by fire-and-forget mode).
+    // Workers are stopped, so the in-flight state is stable: release any backend
+    // request that never reached a terminal status. The in-flight set is the
+    // window [consumer_idx, submit_idx_) of each channel. (Fire-and-forget never
+    // populates inflight_slots_ — it releases at submit — so it has nothing here.)
     if (backend_ != nullptr) {
         size_t released = 0;
         for (auto &channel : channels_) {
-            for (auto &inflight : channel.inflight_requests) {
+            if (channel.ring_depth_ == 0 || channel.consumer_idx_host_ == nullptr) {
+                continue;
+            }
+            const uint64_t consumer =
+                __atomic_load_n(channel.consumer_idx_host_, __ATOMIC_RELAXED);
+            for (uint64_t idx = consumer; idx < channel.submit_idx_; ++idx) {
+                nixlProxyRequestState &inflight =
+                    channel.inflight_slots_[idx % channel.ring_depth_];
                 if (inflight.status == NIXL_IN_PROG && inflight.backend_req_token != 0) {
                     backend_->releaseRequest(inflight.backend_req_token);
                     ++released;
                 }
+                inflight = nixlProxyRequestState{};
             }
-            channel.inflight_requests.clear();
+            channel.submit_idx_ = consumer;
         }
         if (released != 0) {
             NIXL_INFO << "ProxyRuntime::shutdown: released " << released

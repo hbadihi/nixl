@@ -281,8 +281,7 @@ private:
     checkProxyRequest(nixlUcxReq req) const;
 
     // Safe on incomplete requests: ucp_request_free releases the request
-    // regardless of state (the operation keeps progressing internally), which
-    // is what fire-and-forget relies on.
+    // regardless of state while the operation keeps progressing internally.
     void
     releaseProxyRequest(size_t worker_id, nixlUcxReq req) const;
 

@@ -19,7 +19,6 @@
 
 #include <atomic>
 #include <cstdint>
-#include <deque>
 #include <memory>
 #include <string>
 #include <vector>
@@ -41,7 +40,17 @@ struct nixlProxyRequestState {
 
 struct alignas(64) nixlProxyChannelState {
     nixlProxyChannelView device_view{};
-    std::deque<nixlProxyRequestState> inflight_requests;
+    // Per-slot in-flight request state (backend token + submit-time status),
+    // indexed by ring slot (op_idx % ring_depth_). Sized to ring_depth_ in
+    // allocate(). Replaces the old unbounded inflight deque: an op now lives in
+    // its ring slot from submit until its network completion advances CI, so the
+    // in-flight set is bounded by ring depth.
+    std::vector<nixlProxyRequestState> inflight_slots_;
+    // Host-only submit cursor: how far the worker has posted to the backend.
+    // Advances at submit time; consumer_idx_host_ (CI) now advances only on
+    // completion. Invariant: consumer_idx <= submit_idx_. The window
+    // [consumer_idx, submit_idx_) is exactly the submitted-but-not-completed set.
+    uint64_t submit_idx_ = 0;
     bool error_latched = false;
 
     nixlProxyWorkRing *work_ring_dev_ = nullptr;

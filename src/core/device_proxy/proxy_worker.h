@@ -46,11 +46,18 @@ class ProxyWorker {
         runOnce();
 
     private:
-        bool
-        tryDequeue(nixlProxyChannelState &channel, nixlProxySubmission &submission);
+        // Post every newly-produced ring record to the backend, advancing only
+        // the host-side submit cursor (submit_idx_). CI (consumer_idx_host_) is
+        // left untouched; it now advances solely on completion in
+        // publishCompletions(), so the ring holds each op until its network
+        // completion arrives and the in-flight set is bounded by ring depth.
+        void
+        submitReady(nixlProxyChannelState &channel);
 
         void
-        submitToBackend(nixlProxyChannelState &channel, const nixlProxySubmission &submission);
+        submitToBackend(nixlProxyChannelState &channel,
+                        uint32_t slot,
+                        const nixlProxySubmission &submission);
 
         void
         driveBackendProgress();
@@ -76,10 +83,6 @@ class ProxyWorker {
         // against last_seen_gen_ in runOnce and reconciles (resetChannel) when they differ.
         std::atomic<uint64_t> *assigned_generations_ = nullptr;
         std::vector<uint64_t> last_seen_gen_;
-
-        // Fire-and-forget completion handling (NIXL_EP_PROXY_FIRE_AND_FORGET): skip the
-        // FIFO/latch/device-publish path in favor of reapCompletions().
-        bool fire_and_forget_ = false;
 
         std::thread thread_;
 };
