@@ -252,6 +252,7 @@ protected:
     nixlUcxEngine(const nixlBackendInitParams &init_params);
 
     notif_list_t notifList_;
+    std::mutex notifMutex_;
 
 private:
     friend class nixlUcxProxyBackendAdapter;

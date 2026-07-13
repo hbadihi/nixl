@@ -1443,6 +1443,7 @@ void Buffer::_nixl_agent_init() {
     cfg.etcdWatchTimeout = NIXL_ETCD_WATCH_TIMEOUT;
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
     cfg.enableDeviceProxy = true;
+    cfg.useProgThread = false;
     const char* num_proxy_channels_env = std::getenv("NIXL_EP_PROXY_CHANNELS");
     configured_proxy_channels = num_proxy_channels_env ? std::atoi(num_proxy_channels_env) : 4;
     // Proxy drain-thread count. Independent of channels_per_rank and the UCX worker count:
