@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <limits>
 #include <thread>
 #include <utility>
 #include <cuda_runtime.h>
@@ -32,9 +33,13 @@ nixlProxyMemViewRegistry::registerProxyMemView(nixlMemViewH backend_memview,
     if (proxy_memview == nullptr) {
         return NIXL_ERR_INVALID_PARAM;
     }
+    if (next_proxy_memview_id_ > std::numeric_limits<uint32_t>::max()) {
+        NIXL_ERROR << "nixlProxyMemViewRegistry::register: proxy memview ID space exhausted";
+        return NIXL_ERR_NOT_ALLOWED;
+    }
 
     RegistryEntry entry;
-    entry.proxy_memview_id = next_proxy_memview_id_;
+    entry.proxy_memview_id = static_cast<uint32_t>(next_proxy_memview_id_);
     entry.backend_memview = backend_memview;
     entries_.push_back(entry);
 

@@ -76,13 +76,13 @@ put(const nixlMemViewElem &src,
                 ctx->ringFor(static_cast<uint32_t>(dst.index), static_cast<uint32_t>(channel_id));
             status = ctx->enqueue(
                 nixlProxySubmission{
+                    .src_offset           = static_cast<uint64_t>(src.offset),
+                    .dst_offset           = static_cast<uint64_t>(dst.offset),
                     .opcode               = nixl_proxy_opcode_t::PUT,
                     .channel_id           = ring_channel,
                     .flags                = static_cast<uint32_t>(flags),
                     .src_index            = static_cast<uint32_t>(src.index),
-                    .src_offset           = static_cast<uint32_t>(src.offset),
                     .dst_index            = static_cast<uint32_t>(dst.index),
-                    .dst_offset           = static_cast<uint32_t>(dst.offset),
                     .size                 = static_cast<uint32_t>(size),
                     .src_proxy_memview_id = proxyMemViewIdFromHandle(src.mvh),
                     .dst_proxy_memview_id = proxyMemViewIdFromHandle(dst.mvh)},
@@ -113,14 +113,14 @@ atomic_add(uint64_t value,
                 ctx->ringFor(static_cast<uint32_t>(counter.index), static_cast<uint32_t>(channel_id));
             status = ctx->enqueue(
                 nixlProxySubmission{
+                    .value                = value,
+                    .dst_offset           = static_cast<uint64_t>(counter.offset),
                     .opcode               = nixl_proxy_opcode_t::ATOMIC_ADD,
                     .channel_id           = ring_channel,
                     .flags                = static_cast<uint32_t>(flags),
                     .dst_index            = static_cast<uint32_t>(counter.index),
-                    .dst_offset           = static_cast<uint32_t>(counter.offset),
                     .size                 = static_cast<uint32_t>(sizeof(uint64_t)),
-                    .dst_proxy_memview_id = proxyMemViewIdFromHandle(counter.mvh),
-                    .value                = value},
+                    .dst_proxy_memview_id = proxyMemViewIdFromHandle(counter.mvh)},
                 xfer_status);
         }
     }

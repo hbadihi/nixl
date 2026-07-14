@@ -45,9 +45,9 @@ nixlProxyPublishContext(nixlProxyDeviceContextData *ctx);
 __host__ cudaError_t
 nixlProxyClearContext();
 
-__device__ __forceinline__  uint64_t
+__device__ __forceinline__ uint32_t
 proxyMemViewIdFromHandle(nixlMemViewH mvh) {
-    return static_cast<uint64_t>(reinterpret_cast<uintptr_t>(mvh));
+    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(mvh));
 }
 
 __device__ __forceinline__  ProxyDeviceContext *
