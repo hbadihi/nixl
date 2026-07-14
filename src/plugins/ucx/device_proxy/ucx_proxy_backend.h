@@ -17,21 +17,40 @@
 #ifndef NIXL_SRC_PLUGINS_UCX_DEVICE_PROXY_UCX_PROXY_BACKEND_H
 #define NIXL_SRC_PLUGINS_UCX_DEVICE_PROXY_UCX_PROXY_BACKEND_H
 
+#include <cstddef>
 #include <cstdint>
+#include <optional>
 
 #include "backend/backend_aux.h"
 #include "../../../core/device_proxy/backend_adapter.h"
 
 class nixlUcxEngine;
 
+struct nixlUcxProxyRankMapping {
+    uint32_t local_rank;
+    uint32_t channels_per_rank;
+};
+
+std::optional<size_t>
+nixlUcxProxyWorkerIdForChannel(uint32_t channel_id,
+                               size_t num_workers,
+                               uint32_t channel_count,
+                               const nixlUcxProxyRankMapping &mapping) noexcept;
+
 class nixlUcxProxyBackendAdapter : public nixlDeviceProxyBackendAdapter {
     public:
         explicit nixlUcxProxyBackendAdapter(nixlUcxEngine *engine = nullptr,
-                                            bool progress_thread_enabled = false) noexcept
+                                            bool progress_thread_enabled = false,
+                                            std::optional<nixlUcxProxyRankMapping> rank_mapping =
+                                                std::nullopt) noexcept
             : engine_(engine),
-              progress_thread_enabled_(progress_thread_enabled) {}
+              progress_thread_enabled_(progress_thread_enabled),
+              rank_mapping_(rank_mapping) {}
 
         ~nixlUcxProxyBackendAdapter() override = default;
+
+        nixl_status_t
+        init(uint32_t worker_count, uint32_t channel_count) override;
 
         nixl_status_t
         submit(const nixlBackendProxySubmission &submission, uint64_t &request_token) override;
@@ -46,15 +65,16 @@ class nixlUcxProxyBackendAdapter : public nixlDeviceProxyBackendAdapter {
         progress() override;
 
         nixl_status_t
+        progress(uint32_t channel_id) override;
+
+        nixl_status_t
         shutdown() override;
 
     private:
-        // Deterministically map a proxy channel to a UCX worker so each channel uses
-        // its own worker/EP/QP per peer. (The single proxy drain thread would otherwise
-        // bind to one worker via getWorkerId()'s thread-local round-robin, collapsing
-        // every channel onto a single QP.) channels_per_rank == num_workers, so for the
-        // rank-encoded ring this recovers the lane.
-        size_t
+        // Rank-encoded ring IDs include an unused local-rank band. Compact that hole
+        // before selecting a UCX worker so each active (destination, lane) ring owns a
+        // distinct worker. Proxy users without rank mapping retain the legacy modulo map.
+        std::optional<size_t>
         workerIdForChannel(uint32_t channel_id) const;
 
         nixl_status_t
@@ -65,6 +85,8 @@ class nixlUcxProxyBackendAdapter : public nixlDeviceProxyBackendAdapter {
 
         nixlUcxEngine *engine_ = nullptr;
         bool progress_thread_enabled_ = false;
+        std::optional<nixlUcxProxyRankMapping> rank_mapping_;
+        uint32_t channel_count_ = 0;
 };
 
 #endif // NIXL_SRC_PLUGINS_UCX_DEVICE_PROXY_UCX_PROXY_BACKEND_H

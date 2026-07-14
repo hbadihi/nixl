@@ -80,6 +80,11 @@ class nixlDeviceProxyBackendAdapter {
         }
 
         virtual nixl_status_t
+        progress(uint32_t) {
+            return NIXL_ERR_NOT_SUPPORTED;
+        }
+
+        virtual nixl_status_t
         shutdown() {
             return NIXL_ERR_NOT_SUPPORTED;
         }

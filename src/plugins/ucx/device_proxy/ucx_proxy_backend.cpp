@@ -44,6 +44,71 @@ tokenWorkerId(uint64_t token) noexcept {
 }
 } // namespace
 
+std::optional<size_t>
+nixlUcxProxyWorkerIdForChannel(uint32_t channel_id,
+                               size_t num_workers,
+                               uint32_t channel_count,
+                               const nixlUcxProxyRankMapping &mapping) noexcept {
+    const size_t channels_per_rank = mapping.channels_per_rank;
+    if (channels_per_rank == 0 || channel_count < channels_per_rank ||
+        (channel_count % channels_per_rank) != 0) {
+        return std::nullopt;
+    }
+
+    const size_t rank_count = channel_count / channels_per_rank;
+    const size_t expected_workers =
+        (rank_count == 1) ? 1 : (channel_count - channels_per_rank);
+    if (num_workers != expected_workers || mapping.local_rank >= rank_count) {
+        return std::nullopt;
+    }
+
+    const size_t dst_rank = channel_id / channels_per_rank;
+    const size_t lane = channel_id % channels_per_rank;
+    if (dst_rank >= rank_count || dst_rank == mapping.local_rank) {
+        return std::nullopt;
+    }
+
+    const size_t compact_dst_rank = dst_rank - (dst_rank > mapping.local_rank);
+    const size_t worker_id = compact_dst_rank * channels_per_rank + lane;
+    return (worker_id < num_workers) ? std::optional<size_t>(worker_id) : std::nullopt;
+}
+
+nixl_status_t
+nixlUcxProxyBackendAdapter::init(uint32_t, uint32_t channel_count) {
+    if (engine_ == nullptr) {
+        return NIXL_ERR_INVALID_PARAM;
+    }
+
+    if (!rank_mapping_) {
+        channel_count_ = channel_count;
+        return NIXL_SUCCESS;
+    }
+
+    const size_t channels_per_rank = rank_mapping_->channels_per_rank;
+    const size_t num_workers = engine_->getSharedWorkersSize();
+    const bool valid_layout =
+        channels_per_rank > 0 && channel_count >= channels_per_rank &&
+        (channel_count % channels_per_rank) == 0;
+    const size_t rank_count =
+        valid_layout ? (channel_count / channels_per_rank) : 0;
+    const size_t expected_workers =
+        !valid_layout ? 0 :
+        ((rank_count == 1) ? 1 : (channel_count - channels_per_rank));
+    if (!valid_layout ||
+        rank_mapping_->local_rank >= rank_count ||
+        num_workers != expected_workers) {
+        NIXL_ERROR << "nixlUcxProxyBackendAdapter::init: invalid compact rank mapping"
+                   << " local_rank=" << rank_mapping_->local_rank
+                   << " channels_per_rank=" << channels_per_rank
+                   << " channel_count=" << channel_count
+                   << " ucx_worker_count=" << num_workers;
+        return NIXL_ERR_INVALID_PARAM;
+    }
+
+    channel_count_ = channel_count;
+    return NIXL_SUCCESS;
+}
+
 nixl_status_t
 nixlUcxProxyBackendAdapter::submit(const nixlBackendProxySubmission &submission,
                                    uint64_t &request_token) {
@@ -62,24 +127,39 @@ nixlUcxProxyBackendAdapter::submit(const nixlBackendProxySubmission &submission,
     }
 }
 
-size_t
+std::optional<size_t>
 nixlUcxProxyBackendAdapter::workerIdForChannel(uint32_t channel_id) const {
+    if (engine_ == nullptr) {
+        return std::nullopt;
+    }
+
     const size_t num_workers = engine_->getSharedWorkersSize();
-    return num_workers ? (channel_id % num_workers) : 0;
+    if (rank_mapping_) {
+        return nixlUcxProxyWorkerIdForChannel(
+            channel_id, num_workers, channel_count_, *rank_mapping_);
+    }
+
+    return num_workers ? std::optional<size_t>(channel_id % num_workers) : std::nullopt;
 }
 
 nixl_status_t
 nixlUcxProxyBackendAdapter::submitPut(const nixlBackendProxySubmission &submission,
                                       uint64_t &request_token) {
-    const size_t worker_id = workerIdForChannel(submission.channel_id);
+    const std::optional<size_t> worker_id = workerIdForChannel(submission.channel_id);
+    if (!worker_id) {
+        NIXL_ERROR << "nixlUcxProxyBackendAdapter::submitPut: no UCX worker for channel "
+                   << submission.channel_id;
+        return NIXL_ERR_INVALID_PARAM;
+    }
+
     nixlUcxReq req = nullptr;
     const nixl_status_t status = engine_->submitProxyRmaWrite(submission.local.desc,
                                                               submission.remote.desc,
                                                               submission.size,
-                                                              worker_id,
+                                                              *worker_id,
                                                               req);
     if (status == NIXL_IN_PROG) {
-        request_token = encodeToken(worker_id, req);
+        request_token = encodeToken(*worker_id, req);
     } else if (status != NIXL_SUCCESS) {
         NIXL_DEBUG << "nixlUcxProxyBackendAdapter::submitPut: submitProxyRmaWrite failed "
                       "status="
@@ -102,14 +182,20 @@ nixlUcxProxyBackendAdapter::submitAtomicAdd(const nixlBackendProxySubmission &su
                                             uint64_t &request_token) {
     // Same channel -> worker mapping as submitPut so a channel's put and its follow-up
     // atomic flag travel the same worker/EP/QP, preserving IB write-before-atomic order.
-    const size_t worker_id = workerIdForChannel(submission.channel_id);
+    const std::optional<size_t> worker_id = workerIdForChannel(submission.channel_id);
+    if (!worker_id) {
+        NIXL_ERROR << "nixlUcxProxyBackendAdapter::submitAtomicAdd: no UCX worker for channel "
+                   << submission.channel_id;
+        return NIXL_ERR_INVALID_PARAM;
+    }
+
     nixlUcxReq req = nullptr;
     const nixl_status_t status = engine_->submitProxyAtomicAdd(submission.remote.desc,
                                                                submission.value,
-                                                               worker_id,
+                                                               *worker_id,
                                                                req);
     if (status == NIXL_IN_PROG) {
-        request_token = encodeToken(worker_id, req);
+        request_token = encodeToken(*worker_id, req);
     } else if (status != NIXL_SUCCESS) {
         NIXL_DEBUG << "nixlUcxProxyBackendAdapter::submitAtomicAdd: submitProxyAtomicAdd "
                       "failed status="
@@ -157,6 +243,18 @@ nixl_status_t
 nixlUcxProxyBackendAdapter::progress() {
     if (engine_ != nullptr && !progress_thread_enabled_) {
         engine_->progress();
+    }
+
+    return NIXL_SUCCESS;
+}
+
+nixl_status_t
+nixlUcxProxyBackendAdapter::progress(uint32_t channel_id) {
+    if (engine_ != nullptr && !progress_thread_enabled_) {
+        const std::optional<size_t> worker_id = workerIdForChannel(channel_id);
+        if (worker_id) {
+            engine_->progress(*worker_id);
+        }
     }
 
     return NIXL_SUCCESS;

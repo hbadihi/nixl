@@ -873,7 +873,39 @@ nixl_status_t
 nixlUcxEngine::createDeviceProxyBackendAdapter(
     const nixlBackendInitParams &init_params,
     std::unique_ptr<nixlDeviceProxyBackendAdapter> &adapter) {
-    adapter = std::make_unique<nixlUcxProxyBackendAdapter>(this, init_params.enableProgTh);
+    std::optional<nixlUcxProxyRankMapping> rank_mapping;
+    const nixl_b_params_t *custom_params = init_params.customParams;
+    if (custom_params != nullptr) {
+        const auto local_rank_it = custom_params->find("proxy_local_rank");
+        const auto channels_per_rank_it =
+            custom_params->find("proxy_channels_per_rank");
+        const bool has_local_rank = local_rank_it != custom_params->end();
+        const bool has_channels_per_rank =
+            channels_per_rank_it != custom_params->end();
+        if (has_local_rank != has_channels_per_rank) {
+            NIXL_ERROR << "UCX proxy compact mapping requires both proxy_local_rank and "
+                          "proxy_channels_per_rank";
+            return NIXL_ERR_INVALID_PARAM;
+        }
+
+        if (has_local_rank) {
+            uint32_t local_rank;
+            uint32_t channels_per_rank;
+            if (!absl::SimpleAtoi(local_rank_it->second, &local_rank) ||
+                !absl::SimpleAtoi(channels_per_rank_it->second,
+                                  &channels_per_rank) ||
+                channels_per_rank == 0) {
+                NIXL_ERROR << "Invalid UCX proxy compact mapping parameters: local_rank='"
+                           << local_rank_it->second << "' channels_per_rank='"
+                           << channels_per_rank_it->second << "'";
+                return NIXL_ERR_INVALID_PARAM;
+            }
+            rank_mapping = nixlUcxProxyRankMapping{local_rank, channels_per_rank};
+        }
+    }
+
+    adapter = std::make_unique<nixlUcxProxyBackendAdapter>(
+        this, init_params.enableProgTh, rank_mapping);
     return NIXL_SUCCESS;
 }
 
@@ -1430,6 +1462,11 @@ nixlUcxEngine::progress() {
         ret += uw->progress();
     }
     return ret;
+}
+
+unsigned
+nixlUcxEngine::progress(size_t worker_id) {
+    return getWorker(worker_id)->progress();
 }
 
 void

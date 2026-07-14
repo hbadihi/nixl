@@ -1606,9 +1606,9 @@ void Buffer::_nixl_agent_init() {
     init_params["num_workers"] = std::to_string(1);
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
     // Each UCX host worker owns one EP/QP/rkey per peer. Size the global worker pool from the
-    // configured lanes and the maximum number of remote ranks; the proxy adapter routes each
-    // submission to worker (channel_id % num_workers). Keep at least one worker for a
-    // single-rank run, where there are no remote ranks.
+    // configured lanes and the maximum number of remote ranks; the proxy adapter compacts
+    // the unused local-rank ring band when routing a submission. Keep at least one worker
+    // for a single-rank run, where there are no remote ranks.
     //
     // QP-model note: UCX-direct (GDA) exposes multiple device QPs inside one EP selected by a
     // kernel-side channel index; the host proxy path (ucp_put_nbx) has no such index, so QP
@@ -1617,6 +1617,9 @@ void Buffer::_nixl_agent_init() {
     const uint32_t proxy_ucx_workers =
         std::max<uint32_t>(1, cfg.proxyChannelsPerRank * remote_rank_count);
     init_params["num_workers"] = std::to_string(proxy_ucx_workers);
+    init_params["proxy_local_rank"] = std::to_string(rank);
+    init_params["proxy_channels_per_rank"] =
+        std::to_string(cfg.proxyChannelsPerRank);
 
     printf("NIXL EP proxy config: rank=%d max_ranks=%d remote_ranks=%u "
            "NIXL_EP_PROXY_CHANNELS=%d NIXL_EP_PROXY_WORKER_COUNT=%d "

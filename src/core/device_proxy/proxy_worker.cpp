@@ -195,7 +195,10 @@ ProxyWorker::submitToBackend(nixlProxyChannelState &channel,
 
 void
 ProxyWorker::driveBackendProgress() {
-    backend_->progress();
+    for (uint32_t i = 0; i < assigned_channel_count_; ++i) {
+        const uint32_t channel_id = assigned_channels_[i].device_view.channel_id;
+        backend_->progress(channel_id);
+    }
 }
 
 void
