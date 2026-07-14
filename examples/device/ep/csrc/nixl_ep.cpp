@@ -24,15 +24,21 @@
 #include <ATen/cuda/CUDADataType.h>
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <limits>
 #include <cuda_runtime.h>
 #include <memory>
 #include <optional>
 #include <pybind11/functional.h>
+#include <stdexcept>
+#include <string>
+#include <string_view>
 #include <torch/python.h>
+#include <vector>
 
 #include "nixl_ep.hpp"
 #include "kernels/api.cuh"
@@ -75,6 +81,103 @@ uint64_t milliseconds_to_cycles(uint64_t milliseconds, int device_clock_rate_khz
 uint64_t next_proxy_context_owner_id() {
     static std::atomic<uint64_t> next_owner_id{1};
     return next_owner_id.fetch_add(1, std::memory_order_relaxed);
+}
+
+std::string_view trim(std::string_view value) {
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front()))) {
+        value.remove_prefix(1);
+    }
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back()))) {
+        value.remove_suffix(1);
+    }
+    return value;
+}
+
+std::vector<std::string_view> split_comma_list(std::string_view value) {
+    std::vector<std::string_view> result;
+    while (true) {
+        const size_t comma = value.find(',');
+        result.push_back(trim(value.substr(0, comma)));
+        if (comma == std::string_view::npos) {
+            return result;
+        }
+        value.remove_prefix(comma + 1);
+    }
+}
+
+unsigned parse_unsigned(std::string_view value, const char* variable) {
+    value = trim(value);
+    if (value.empty()) {
+        throw std::runtime_error(std::string(variable) + " contains an empty GPU ordinal");
+    }
+
+    size_t parsed = 0;
+    unsigned long ordinal;
+    try {
+        ordinal = std::stoul(std::string(value), &parsed);
+    } catch (const std::exception&) {
+        throw std::runtime_error(std::string(variable) + " contains non-numeric GPU ordinal '" +
+                                 std::string(value) + "'");
+    }
+
+    if (parsed != value.size() || ordinal > std::numeric_limits<unsigned>::max()) {
+        throw std::runtime_error(std::string(variable) + " contains invalid GPU ordinal '" +
+                                 std::string(value) + "'");
+    }
+    return static_cast<unsigned>(ordinal);
+}
+
+unsigned get_proxy_physical_gpu_ordinal(int logical_device) {
+    const char* visible_devices_env = std::getenv("CUDA_VISIBLE_DEVICES");
+    if (visible_devices_env == nullptr || visible_devices_env[0] == '\0') {
+        return static_cast<unsigned>(logical_device);
+    }
+
+    const auto visible_devices = split_comma_list(visible_devices_env);
+    if (logical_device < 0 || static_cast<size_t>(logical_device) >= visible_devices.size()) {
+        throw std::runtime_error("logical CUDA device " + std::to_string(logical_device) +
+                                 " is outside CUDA_VISIBLE_DEVICES='" +
+                                 std::string(visible_devices_env) + "'");
+    }
+
+    return parse_unsigned(visible_devices[logical_device], "CUDA_VISIBLE_DEVICES");
+}
+
+std::string get_proxy_nic_for_gpu(unsigned physical_gpu) {
+    const char* nic_map_env = std::getenv("NIXL_GPU_NIC_MAP");
+    if (nic_map_env == nullptr || nic_map_env[0] == '\0') {
+        throw std::runtime_error(
+            "NIXL_GPU_NIC_MAP is required for the proxy backend; set a comma-separated "
+            "physical-GPU-indexed NIC list such as 'mlx5_0,mlx5_1,...'");
+    }
+
+    const auto nic_map = split_comma_list(nic_map_env);
+    if (physical_gpu >= nic_map.size()) {
+        throw std::runtime_error("physical GPU " + std::to_string(physical_gpu) +
+                                 " has no entry in NIXL_GPU_NIC_MAP='" +
+                                 std::string(nic_map_env) + "'");
+    }
+
+    const std::string_view nic = nic_map[physical_gpu];
+    if (nic.empty()) {
+        throw std::runtime_error("physical GPU " + std::to_string(physical_gpu) +
+                                 " maps to an empty NIC in NIXL_GPU_NIC_MAP");
+    }
+    if (nic.find(':') != std::string_view::npos) {
+        throw std::runtime_error("NIXL_GPU_NIC_MAP entries must be base NIC names without a port; "
+                                 "use '" + std::string(nic.substr(0, nic.find(':'))) +
+                                 "' instead of '" + std::string(nic) + "'");
+    }
+
+    return std::string(nic);
+}
+
+void append_engine_config(nixl_b_params_t& init_params, std::string_view config) {
+    std::string& engine_config = init_params["engine_config"];
+    if (!engine_config.empty()) {
+        engine_config += ',';
+    }
+    engine_config += config;
 }
 #endif
 
@@ -1479,31 +1582,47 @@ void Buffer::_nixl_agent_init() {
                                 ", status: " + std::to_string(status));
     }
 
-    const char* num_channels_env = std::getenv("NIXL_EP_NUM_CHANNELS");
+#ifndef NIXL_GPU_DEVICE_BACKEND_PROXY
+    const char *num_channels_env = std::getenv("NIXL_EP_NUM_CHANNELS");
     init_params["ucx_num_device_channels"] = num_channels_env ? num_channels_env : "4";
+#else
+    // Proxy submissions use host UCX workers rather than device QP channels. Keep one device
+    // channel per worker so the derived host-worker count is also the QP count per peer.
+    init_params["ucx_num_device_channels"] = "1";
+
+    int logical_device;
+    CUDA_CHECK(cudaGetDevice(&logical_device));
+    const unsigned physical_gpu = get_proxy_physical_gpu_ordinal(logical_device);
+    const std::string selected_nic = get_proxy_nic_for_gpu(physical_gpu);
+    init_params["device_list"] = selected_nic;
+    append_engine_config(init_params, "TLS=rc_mlx5,MAX_RMA_RAILS=1");
+    printf("NIXL EP proxy affinity: logical_gpu=%d physical_gpu=%u nic=%s "
+           "UCX_TLS=rc_mlx5 UCX_MAX_RMA_RAILS=1\n",
+           logical_device, physical_gpu, selected_nic.c_str());
+#endif
     // NONE is REQUIRED: UCP RMA atomics (ucp_atomic_op_nbx, used for the LL count-signal
     // nixlAtomicAdd) are unsupported under PEER error-handling mode. Do not change to PEER.
     init_params["ucx_error_handling_mode"] = "none";
     init_params["num_workers"] = std::to_string(1);
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-    // UCX host worker count. Each UCX worker owns one EP/QP/rkey per peer; the proxy adapter
-    // routes a submission to worker (channel_id % num_workers), so this sets QP-level
-    // parallelism per peer. It does NOT need to equal channels_per_rank for correctness: the
-    // destination peer comes from the submission's memview, and any worker_id < num_workers
-    // reaches it on a distinct QP, while a fixed channel always maps to the same worker so
-    // per-channel put-before-flag ordering holds. num_workers == channels_per_rank gives one
-    // QP per (rank, lane); fewer collapses lanes onto shared QPs; more leaves some QPs unused.
-    // Env-overridable (NIXL_EP_PROXY_UCX_WORKERS) for sweeps; default = configured_proxy_channels.
+    // Each UCX host worker owns one EP/QP/rkey per peer. Size the global worker pool from the
+    // configured lanes and the maximum number of remote ranks; the proxy adapter routes each
+    // submission to worker (channel_id % num_workers). Keep at least one worker for a
+    // single-rank run, where there are no remote ranks.
     //
     // QP-model note: UCX-direct (GDA) exposes multiple device QPs inside one EP selected by a
     // kernel-side channel index; the host proxy path (ucp_put_nbx) has no such index, so QP
-    // parallelism comes only from multiple UCX workers/EPs. ucx_num_device_channels is inert
-    // for proxy submits but still provisions RC_GDA_NUM_CHANNELS QPs on every worker EP; force
-    // it to 1 so QPs/peer == num_workers and we don't multiply unused GDA QPs.
-    const char* ucx_workers_env = std::getenv("NIXL_EP_PROXY_UCX_WORKERS");
-    init_params["num_workers"] = ucx_workers_env
-        ? std::string(ucx_workers_env)
-        : std::to_string(cfg.proxyChannelsPerRank);
+    // parallelism comes only from multiple UCX workers/EPs.
+    const uint32_t remote_rank_count = static_cast<uint32_t>(std::max(max_num_ranks - 1, 0));
+    const uint32_t proxy_ucx_workers =
+        std::max<uint32_t>(1, cfg.proxyChannelsPerRank * remote_rank_count);
+    init_params["num_workers"] = std::to_string(proxy_ucx_workers);
+
+    printf("NIXL EP proxy config: rank=%d max_ranks=%d remote_ranks=%u "
+           "NIXL_EP_PROXY_CHANNELS=%d NIXL_EP_PROXY_WORKER_COUNT=%d "
+           "NIXL_EP_NUM_CHANNELS=1 NIXL_EP_PROXY_UCX_WORKERS=%u proxy_ring_count=%u\n",
+           rank, max_num_ranks, remote_rank_count, configured_proxy_channels,
+           proxy_worker_count, proxy_ucx_workers, cfg.proxyChannelCount);
 #endif
 
     nixlBackendH* ucx_backend = nullptr;
