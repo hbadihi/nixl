@@ -93,55 +93,54 @@ ProxyWorker::runOnce() {
 
 void
 ProxyWorker::submitReady(nixlProxyChannelState &channel) {
-    // Post every newly-produced record to the backend, advancing only the
-    // host-side submit cursor. CI (consumer_idx_host_) is deliberately NOT
-    // advanced here — it advances solely on completion in publishCompletions(),
-    // so each op lives in its ring slot until its network completion arrives.
-    for (;;) {
-        // consumer_idx is the completion cursor (also read by the GPU for
-        // enqueue backpressure); submit_idx_ is host-only (worker is sole
-        // accessor). Relaxed loads suffice: the worker is the sole writer of both.
-        const uint64_t consumer_idx =
-            __atomic_load_n(channel.consumer_idx_host_, __ATOMIC_RELAXED);
-        const uint64_t submit_idx = channel.submit_idx_;
-        // Never submit more than one ring's worth ahead of completions. This is
-        // redundant with the op_idx zeroing below (a full ring reads op_idx == 0
-        // at the submit slot) but is a cheap, explicit guard against runaway
-        // submission and keeps the in-flight set provably bounded by ring depth.
-        if (submit_idx - consumer_idx >= channel.ring_depth_) {
-            break;
-        }
-        const uint32_t slot = static_cast<uint32_t>(submit_idx % channel.ring_depth_);
-        // op_idx is the GPU-to-CPU signal that the record is written (pairs with
-        // the release store in device enqueue). No producer index read on host.
-        const uint64_t op_idx =
-            __atomic_load_n(&channel.records_host_[slot].op_idx, __ATOMIC_ACQUIRE);
-        if (op_idx == 0) {
-            break;  // nothing new produced at the submit frontier
-        }
-
-        nixlProxySubmission submission = channel.records_host_[slot];
-        submission.op_idx = op_idx;
-
-        // Zero op_idx now, before advancing submit_idx_. This is load-bearing,
-        // not tidiness: the record stays resident in its slot (CI has not moved),
-        // so when submit_idx_ later wraps back to this slot at submit_idx +
-        // ring_depth — reachable only when the ring is full of in-flight ops
-        // (consumer_idx == submit_idx) — the stale op_idx == ticket+1 would read
-        // as "ready" and duplicate-submit this ticket. Zeroing makes the slot read
-        // 0 so the scan stops. Race-free: the GPU cannot rewrite this slot until
-        // CI passes this ticket, which only happens at completion, strictly later.
-        __atomic_store_n(&channel.records_host_[slot].op_idx, 0, __ATOMIC_RELAXED);
-        channel.submit_idx_ = submit_idx + 1;
-
-        NIXL_DEBUG << "ProxyWorker::submitReady: channel=" << channel.device_view.channel_id
-                   << " submit_idx=" << submit_idx
-                   << " opcode=" << static_cast<int>(submission.opcode)
-                   << " op_idx=" << submission.op_idx
-                   << " size=" << submission.size;
-
-        submitToBackend(channel, slot, submission);
+    // Post at most one newly-produced record per worker pass so the worker
+    // advances to the next assigned channel instead of draining this one.
+    // CI (consumer_idx_host_) is deliberately NOT advanced here — it advances
+    // solely on completion in publishCompletions(), so each op lives in its
+    // ring slot until its network completion arrives.
+    // consumer_idx is the completion cursor (also read by the GPU for enqueue
+    // backpressure); submit_idx_ is host-only (worker is sole accessor). Relaxed
+    // loads suffice: the worker is the sole writer of both.
+    const uint64_t consumer_idx =
+        __atomic_load_n(channel.consumer_idx_host_, __ATOMIC_RELAXED);
+    const uint64_t submit_idx = channel.submit_idx_;
+    // Never submit more than one ring's worth ahead of completions. This is
+    // redundant with the op_idx zeroing below (a full ring reads op_idx == 0
+    // at the submit slot) but is a cheap, explicit guard against runaway
+    // submission and keeps the in-flight set provably bounded by ring depth.
+    if (submit_idx - consumer_idx >= channel.ring_depth_) {
+        return;
     }
+    const uint32_t slot = static_cast<uint32_t>(submit_idx % channel.ring_depth_);
+    // op_idx is the GPU-to-CPU signal that the record is written (pairs with
+    // the release store in device enqueue). No producer index read on host.
+    const uint64_t op_idx =
+        __atomic_load_n(&channel.records_host_[slot].op_idx, __ATOMIC_ACQUIRE);
+    if (op_idx == 0) {
+        return;  // nothing new produced at the submit frontier
+    }
+
+    nixlProxySubmission submission = channel.records_host_[slot];
+    submission.op_idx = op_idx;
+
+    // Zero op_idx now, before advancing submit_idx_. This is load-bearing,
+    // not tidiness: the record stays resident in its slot (CI has not moved),
+    // so when submit_idx_ later wraps back to this slot at submit_idx +
+    // ring_depth — reachable only when the ring is full of in-flight ops
+    // (consumer_idx == submit_idx) — the stale op_idx == ticket+1 would read
+    // as "ready" and duplicate-submit this ticket. Zeroing makes the slot read
+    // 0 so the scan stops. Race-free: the GPU cannot rewrite this slot until
+    // CI passes this ticket, which only happens at completion, strictly later.
+    __atomic_store_n(&channel.records_host_[slot].op_idx, 0, __ATOMIC_RELAXED);
+    channel.submit_idx_ = submit_idx + 1;
+
+    NIXL_DEBUG << "ProxyWorker::submitReady: channel=" << channel.device_view.channel_id
+               << " submit_idx=" << submit_idx
+               << " opcode=" << static_cast<int>(submission.opcode)
+               << " op_idx=" << submission.op_idx
+               << " size=" << submission.size;
+
+    submitToBackend(channel, slot, submission);
 }
 
 void
