@@ -109,10 +109,9 @@ struct ProxyDeviceContext : nixlProxyDeviceContextData {
     // channel, spinning if the ring is full.  Optionally records a completion
     // token in *xfer_status for later polling via pollXferStatus().
     //
-    // producer_idx lives in device memory and only needs device-scope atomicity.
-    // consumer_idx lives in pinned host memory (accessible from device via
-    // UVA mapped pointer). The device cache keeps the non-full path from
-    // repeatedly touching host memory.
+    // producer_idx and consumer_idx live in HBM. The CPU publishes consumer_idx
+    // through GDRCopy, so its refresh remains system-scope; the device cache
+    // keeps the non-full path on a plain HBM load.
     __device__ inline nixl_status_t
     enqueue(nixlProxySubmission submission, nixlGpuXferStatusH *xfer_status = nullptr) {
         if (submission.channel_id >= num_channels) {
@@ -130,17 +129,17 @@ struct ProxyDeviceContext : nixlProxyDeviceContextData {
         // Atomically claim a unique slot in the ring.
         const uint64_t ticket = producer_idx.fetch_add(1, cuda::memory_order_relaxed);
 
-        // Fast path: use the device cache. Refresh from host only if the ring
-        // appears full, since mapped-host loads are much slower than HBM loads.
+        // Fast path: use the device cache. Refresh from authoritative HBM only
+        // if the ring appears full.
         uint64_t cached_consumer_idx = *ring->consumer_idx_cache;
         while (ticket - cached_consumer_idx >= ring->depth) {
             cached_consumer_idx = cons.load(cuda::memory_order_acquire);
             *ring->consumer_idx_cache = cached_consumer_idx;
 
-            if (shut.load(cuda::memory_order_relaxed)
-                == static_cast<uint32_t>(nixl_proxy_control_state_t::SHUTDOWN)) {
-                return NIXL_ERR_BACKEND;
-            }
+            // if (shut.load(cuda::memory_order_relaxed)
+            //     == static_cast<uint32_t>(nixl_proxy_control_state_t::SHUTDOWN)) {
+            //     return NIXL_ERR_BACKEND;
+            // }
         }
 
         const uint64_t submission_op_idx = ticket + 1;

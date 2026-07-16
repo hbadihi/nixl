@@ -18,10 +18,15 @@
 #define NIXL_SRC_CORE_DEVICE_PROXY_PROXY_RUNTIME_H
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
+
+#ifdef HAVE_GDRCOPY
+#include <gdrapi.h>
+#endif
 
 #include "backend_aux.h"
 #include "proxy_protocol.h"
@@ -38,6 +43,43 @@ struct nixlProxyRequestState {
     nixl_proxy_opcode_t opcode = nixl_proxy_opcode_t::PUT;
 };
 
+class nixlGdrConsumerIndexBuffer {
+    public:
+        nixlGdrConsumerIndexBuffer() = default;
+        ~nixlGdrConsumerIndexBuffer();
+
+        nixlGdrConsumerIndexBuffer(const nixlGdrConsumerIndexBuffer &) = delete;
+        nixlGdrConsumerIndexBuffer &operator=(const nixlGdrConsumerIndexBuffer &) = delete;
+
+        nixl_status_t
+        allocate(uint32_t count);
+
+        void
+        deallocate() noexcept;
+
+        uint64_t *
+        devicePtr(uint32_t index) const noexcept;
+
+        nixl_status_t
+        publish(uint32_t index, uint64_t value) noexcept;
+
+    private:
+        uint64_t *allocation_dev_ = nullptr;
+        uint64_t *indices_dev_ = nullptr;
+        uint64_t *indices_map_ = nullptr;
+        void *mapping_base_ = nullptr;
+        size_t allocation_size_ = 0;
+        size_t mapping_size_ = 0;
+        uint32_t count_ = 0;
+        int device_id_ = 0;
+#ifdef HAVE_GDRCOPY
+        gdr_t gdr_ = nullptr;
+        gdr_mh_t mapping_handle_{};
+        bool pinned_ = false;
+        bool mapped_ = false;
+#endif
+};
+
 struct alignas(64) nixlProxyChannelState {
     nixlProxyChannelView device_view{};
     // Per-slot in-flight request state (backend token + submit-time status),
@@ -47,20 +89,23 @@ struct alignas(64) nixlProxyChannelState {
     // in-flight set is bounded by ring depth.
     std::vector<nixlProxyRequestState> inflight_slots_;
     // Host-only submit cursor: how far the worker has posted to the backend.
-    // Advances at submit time; consumer_idx_host_ (CI) now advances only on
+    // Advances at submit time; consumer_idx_shadow_ (CI) now advances only on
     // completion. Invariant: consumer_idx <= submit_idx_. The window
     // [consumer_idx, submit_idx_) is exactly the submitted-but-not-completed set.
     uint64_t submit_idx_ = 0;
+    uint64_t consumer_idx_shadow_ = 0;
     bool error_latched = false;
 
     nixlProxyWorkRing *work_ring_dev_ = nullptr;
     nixlProxySubmission *records_host_ = nullptr;
     /** Device-resident producer index; only the GPU updates it. */
     uint64_t        *producer_idx_dev_ = nullptr;
-    /** Consumer count: host pinned; proxy uses __atomic_* on consumer_idx_host_. */
-    uint64_t        *consumer_idx_host_  = nullptr;
-    /** Device-resident cache of consumer_idx_host_ used by GPU enqueue backpressure. */
+    /** Authoritative HBM consumer count; CPU publishes through GDRCopy. */
+    uint64_t        *consumer_idx_dev_ = nullptr;
+    /** Device-resident cache of consumer_idx_dev_ used by GPU enqueue backpressure. */
     uint64_t        *consumer_idx_cache_dev_ = nullptr;
+    nixlGdrConsumerIndexBuffer *consumer_indices_ = nullptr;
+    uint32_t consumer_idx_slot_ = 0;
     /** Host-side ring depth for the CPU worker; nixlProxyWorkRing itself is device-only. */
     uint32_t         ring_depth_         = 0;
     /** Mapped pinned host memory; proxy worker writes directly via host alias. */
@@ -76,7 +121,12 @@ struct alignas(64) nixlProxyChannelState {
     nixlProxyChannelState &operator=(const nixlProxyChannelState &) = delete;
 
     nixl_status_t
-    allocate(uint32_t channel_id, uint32_t depth);
+    allocate(uint32_t channel_id,
+             uint32_t depth,
+             nixlGdrConsumerIndexBuffer *consumer_indices);
+
+    nixl_status_t
+    publishConsumerIdx(uint64_t value) noexcept;
 
     void
     deallocate() noexcept;
@@ -317,6 +367,7 @@ class nixlProxyRuntime {
         activateRemoteBands(const nixl_remote_meta_dlist_t &dlist);
 
         std::vector<nixlProxyChannelState> channels_;
+        nixlGdrConsumerIndexBuffer consumer_indices_;
         std::vector<nixlProxyChannelView> device_channel_views_;
         nixlProxyChannelView *device_channel_views_dev_ = nullptr;
         nixlProxyDeviceContextData *device_context_ = nullptr;

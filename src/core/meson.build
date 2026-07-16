@@ -21,6 +21,10 @@ if cuda_dep.found()
     nixl_lib_deps += [ cuda_dep ]
 endif
 
+if have_gdrcopy
+    nixl_lib_deps += [ gdrcopy_dep ]
+endif
+
 if etcd_dep.found()
     nixl_lib_deps += [ etcd_dep ]
 endif

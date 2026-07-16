@@ -93,16 +93,17 @@ ProxyWorker::runOnce() {
 
 void
 ProxyWorker::submitReady(nixlProxyChannelState &channel) {
+    if (channel.error_latched) {
+        return;
+    }
     // Post at most one newly-produced record per worker pass so the worker
     // advances to the next assigned channel instead of draining this one.
-    // CI (consumer_idx_host_) is deliberately NOT advanced here — it advances
+    // CI (consumer_idx_shadow_) is deliberately NOT advanced here — it advances
     // solely on completion in publishCompletions(), so each op lives in its
     // ring slot until its network completion arrives.
     // consumer_idx is the completion cursor (also read by the GPU for enqueue
-    // backpressure); submit_idx_ is host-only (worker is sole accessor). Relaxed
-    // loads suffice: the worker is the sole writer of both.
-    const uint64_t consumer_idx =
-        __atomic_load_n(channel.consumer_idx_host_, __ATOMIC_RELAXED);
+    // backpressure); both host shadows are worker-owned.
+    const uint64_t consumer_idx = channel.consumer_idx_shadow_;
     const uint64_t submit_idx = channel.submit_idx_;
     // Never submit more than one ring's worth ahead of completions. This is
     // redundant with the op_idx zeroing below (a full ring reads op_idx == 0
@@ -209,9 +210,7 @@ ProxyWorker::publishCompletions(nixlProxyChannelState &channel) {
     // [consumer_idx, submit_idx_). Each completed op advances CI by one, freeing
     // its ring slot for the GPU producer's backpressure check.
     for (;;) {
-        // Worker is the sole writer of both cursors — relaxed load suffices.
-        const uint64_t consumer_idx =
-            __atomic_load_n(channel.consumer_idx_host_, __ATOMIC_RELAXED);
+        const uint64_t consumer_idx = channel.consumer_idx_shadow_;
         if (consumer_idx >= channel.submit_idx_) {
             break;  // no submitted-but-uncompleted ops
         }
@@ -236,7 +235,13 @@ ProxyWorker::publishCompletions(nixlProxyChannelState &channel) {
         channel.completion_slot_host_->next_status = st;
         __atomic_store_n(&channel.completion_slot_host_->completed_idx,
                          front.op_idx, __ATOMIC_RELEASE);
-        __atomic_store_n(channel.consumer_idx_host_, consumer_idx + 1, __ATOMIC_RELEASE);
+        if (channel.publishConsumerIdx(consumer_idx + 1) != NIXL_SUCCESS) {
+            NIXL_ERROR << "ProxyWorker::publishCompletions: failed to publish CI via GDRCopy"
+                       << " channel=" << channel.device_view.channel_id
+                       << " consumer_idx=" << consumer_idx + 1;
+            channel.error_latched = true;
+            break;
+        }
         if (st != NIXL_SUCCESS) {
             channel.error_latched = true;
             break;
@@ -249,7 +254,7 @@ ProxyWorker::resetChannel(nixlProxyChannelState &channel) {
     // Release any backend requests still in flight for this channel (cancel+free).
     // The in-flight set is the window [consumer_idx, submit_idx_): those records
     // were submitted (op_idx already zeroed) but never completed.
-    const uint64_t consumer = __atomic_load_n(channel.consumer_idx_host_, __ATOMIC_RELAXED);
+    const uint64_t consumer = channel.consumer_idx_shadow_;
     for (uint64_t idx = consumer; idx < channel.submit_idx_; ++idx) {
         const uint32_t slot = static_cast<uint32_t>(idx % channel.ring_depth_);
         nixlProxyRequestState &inflight = channel.inflight_slots_[slot];
@@ -279,7 +284,13 @@ ProxyWorker::resetChannel(nixlProxyChannelState &channel) {
     // Collapse both cursors to the drained frontier and free every slot to the
     // GPU. Monotonic indices (producer/consumer/completed_idx) advance, never rewind.
     channel.submit_idx_ = frontier;
-    __atomic_store_n(channel.consumer_idx_host_, frontier, __ATOMIC_RELEASE);
+    if (channel.publishConsumerIdx(frontier) != NIXL_SUCCESS) {
+        NIXL_ERROR << "ProxyWorker::resetChannel: failed to publish CI via GDRCopy"
+                   << " channel=" << channel.device_view.channel_id
+                   << " consumer_idx=" << frontier;
+        channel.error_latched = true;
+        return;
+    }
 
     // Clear the latch and the terminal status so the rank can use the lane again.
     channel.error_latched = false;
