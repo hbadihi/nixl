@@ -26,6 +26,8 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <exception>
 #include <limits>
 #include <cuda_runtime.h>
 #include <memory>
@@ -56,8 +58,22 @@ namespace nixl_ep {
 
 namespace {
 
+constexpr size_t PUT_LATENCY_DEFAULT_MAX_SAMPLES = 4ull * 1024 * 1024;
+constexpr double PUT_LATENCY_CYCLES_PER_US = 2000.0;
+
 void sleep_ms(int milliseconds) {
     std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
+}
+
+size_t get_put_latency_capacity() {
+    const char* value = std::getenv("NIXL_EP_PUT_LATENCY_MAX_SAMPLES");
+    if (value == nullptr) {
+        return PUT_LATENCY_DEFAULT_MAX_SAMPLES;
+    }
+
+    const auto capacity = std::stoull(value);
+    EP_HOST_ASSERT(capacity <= std::numeric_limits<size_t>::max());
+    return static_cast<size_t>(capacity);
 }
 
 uint64_t milliseconds_to_cycles(uint64_t milliseconds, int device_clock_rate_khz) {
@@ -165,6 +181,19 @@ void Buffer::init(int num_ranks, int num_experts_per_rank, int64_t num_nvl_bytes
     workspace = m_workspace_alloc->ptr();
     CUDA_CHECK(cudaMemsetAsync(workspace, 0, NUM_WORKSPACE_BYTES, comm_stream));
 
+    if (low_latency_mode) {
+        put_latency_capacity = get_put_latency_capacity();
+        EP_HOST_ASSERT(put_latency_capacity <=
+                       std::numeric_limits<size_t>::max() / sizeof(uint64_t));
+        if (put_latency_capacity > 0) {
+            const size_t put_latency_bytes = put_latency_capacity *
+                                             sizeof(uint64_t);
+            CUDA_CHECK(cudaMalloc(&put_latency_samples, put_latency_bytes));
+            CUDA_CHECK(cudaMemsetAsync(put_latency_samples, 0xff,
+                                       put_latency_bytes, comm_stream));
+        }
+    }
+
     if (!low_latency_mode) {
         // MoE counter
         CUDA_CHECK(cudaMallocHost(&moe_recv_counter, sizeof(int), cudaHostAllocMapped));
@@ -245,6 +274,73 @@ bool Buffer::is_ht_available() const {
     return is_available() and max_num_ranks > NUM_MAX_NVL_PEERS;
 }
 
+void Buffer::_report_put_latency() noexcept {
+    if (put_latency_samples == nullptr) {
+        return;
+    }
+
+    try {
+        std::vector<uint64_t> samples(put_latency_reserved);
+        if (!samples.empty()) {
+            const cudaError_t status = cudaMemcpy(
+                    samples.data(), put_latency_samples,
+                    samples.size() * sizeof(uint64_t), cudaMemcpyDeviceToHost);
+            if (status != cudaSuccess) {
+                std::fprintf(stderr,
+                             "[rank %d] failed to copy nixlPut latency samples: "
+                             "%s\n",
+                             rank, cudaGetErrorString(status));
+                return;
+            }
+        }
+
+        const auto untouched = std::numeric_limits<uint64_t>::max();
+        samples.erase(std::remove(samples.begin(), samples.end(), untouched),
+                      samples.end());
+
+        if (samples.empty()) {
+            std::printf("[rank %d] nixlPut latency: samples=0, "
+                        "overflow_slots=%zu\n",
+                        rank, put_latency_overflow_slots);
+            std::fflush(stdout);
+            return;
+        }
+
+        std::sort(samples.begin(), samples.end());
+        long double total_cycles = 0;
+        for (uint64_t sample : samples) {
+            total_cycles += sample;
+        }
+
+        auto percentile_cycles = [&samples](size_t percentile) {
+            const size_t index =
+                    (samples.size() * percentile + 99) / 100 - 1;
+            return samples[index];
+        };
+
+        const double p50_us =
+                percentile_cycles(50) / PUT_LATENCY_CYCLES_PER_US;
+        const double p90_us =
+                percentile_cycles(90) / PUT_LATENCY_CYCLES_PER_US;
+        const double p99_us =
+                percentile_cycles(99) / PUT_LATENCY_CYCLES_PER_US;
+        const double average_us =
+                static_cast<double>(total_cycles / samples.size()) /
+                PUT_LATENCY_CYCLES_PER_US;
+
+        std::printf("[rank %d] nixlPut latency: samples=%zu, p50=%.6f us, "
+                    "p90=%.6f us, p99=%.6f us, average=%.6f us, "
+                    "overflow_slots=%zu\n",
+                    rank, samples.size(), p50_us, p90_us, p99_us, average_us,
+                    put_latency_overflow_slots);
+        std::fflush(stdout);
+    } catch (const std::exception& error) {
+        std::fprintf(stderr,
+                     "[rank %d] failed to report nixlPut latency samples: %s\n",
+                     rank, error.what());
+    }
+}
+
 int Buffer::get_num_rdma_ranks() const {
     return num_rdma_ranks;
 }
@@ -299,7 +395,15 @@ void Buffer::destroy() {
     // Synchronize
     warn_cuda(cudaDeviceSynchronize(), "synchronize device");
 
+    _report_put_latency();
+
     _nixl_ep_destroy();
+
+    if (put_latency_samples != nullptr) {
+        warn_cuda(cudaFree(put_latency_samples),
+                  "free nixlPut latency samples");
+        put_latency_samples = nullptr;
+    }
 
     if (num_nvl_bytes > 0) {
         intranode::barrier(barrier_signal_ptrs_gpu, nvl_rank, num_nvl_ranks, timeout_cycles, comm_stream);
@@ -1031,6 +1135,21 @@ Buffer::ht_combine(const torch::Tensor& x, const std::optional<torch::Tensor>& t
     return {combined_x, combined_topk_weights, event};
 }
 
+uint64_t* Buffer::_reserve_put_latency_samples(size_t count) {
+    if (put_latency_samples == nullptr) {
+        return nullptr;
+    }
+
+    if (count > put_latency_capacity - put_latency_reserved) {
+        put_latency_overflow_slots += count;
+        return nullptr;
+    }
+
+    uint64_t* samples = put_latency_samples + put_latency_reserved;
+    put_latency_reserved += count;
+    return samples;
+}
+
 std::tuple<torch::Tensor, std::optional<torch::Tensor>, torch::Tensor, torch::Tensor, torch::Tensor, std::optional<EventHandle>, std::optional<std::function<void()>>>
 Buffer::dispatch(const torch::Tensor& x, const torch::Tensor& topk_idx,
                              const std::optional<torch::Tensor>& cumulative_local_expert_recv_stats,
@@ -1061,6 +1180,8 @@ Buffer::dispatch(const torch::Tensor& x, const torch::Tensor& topk_idx,
 
     auto num_tokens = static_cast<int>(x.size(0)), hidden = static_cast<int>(x.size(1));
     auto num_topk = static_cast<int>(topk_idx.size(1));
+    uint64_t* put_latency_samples_base = _reserve_put_latency_samples(
+            static_cast<size_t>(num_tokens) * num_topk);
 
     // Buffer control
     int max_num_experts = max_num_ranks * num_experts_per_rank;
@@ -1115,7 +1236,8 @@ Buffer::dispatch(const torch::Tensor& x, const torch::Tensor& topk_idx,
                                dispatch_wait_recv_cost_stats.has_value() ? dispatch_wait_recv_cost_stats->data_ptr<int64_t>() : nullptr,
                                buffer.dispatch_rdma_recv_data_buffer, buffer.dispatch_rdma_recv_count_buffer,
                                buffer.dispatch_rdma_send_buffer,
-                              x.data_ptr(), topk_idx.data_ptr<topk_idx_t>(),
+                               x.data_ptr(), topk_idx.data_ptr<topk_idx_t>(),
+                               put_latency_samples_base,
                                next_clean_meta.first, next_clean_meta.second,
                                num_tokens, hidden, num_max_dispatch_tokens_per_rank,
                                num_topk, active_rank_bound, num_experts_per_rank, rank,

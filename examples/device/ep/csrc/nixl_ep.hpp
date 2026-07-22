@@ -141,6 +141,12 @@ private:
     // Workspace
     void* workspace = nullptr;
 
+    // Low-latency nixlPut timing samples
+    uint64_t* put_latency_samples = nullptr;
+    size_t put_latency_capacity = 0;
+    size_t put_latency_reserved = 0;
+    size_t put_latency_overflow_slots = 0;
+
     // Host-side MoE info
     volatile int* moe_recv_counter = nullptr;
     int* moe_recv_counter_mapped = nullptr;
@@ -172,6 +178,8 @@ private:
     void _nixl_ep_memory_views_create(void);
     void _nixl_ep_memory_views_destroy(void);
     void _nixl_ep_destroy(void);
+    uint64_t* _reserve_put_latency_samples(size_t count);
+    void _report_put_latency() noexcept;
     bool _is_rank_connected(int rank_id) const;
     void set_active_rank_bound(int bound);
     void _refresh_active_rank_bound();

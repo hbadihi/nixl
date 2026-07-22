@@ -78,6 +78,7 @@ dispatch(void* packed_recv_x, void* packed_recv_x_scales,
          int64_t* dispatch_wait_recv_cost_stats,
          void* rdma_recv_x, uint64_t* rdma_recv_count, void* rdma_x,
          const void* x, const topk_idx_t* topk_idx,
+         uint64_t* put_latency_samples,
          int* atomic_counter_per_expert, int* atomic_finish_counter_per_expert,
          uint64_t* next_clean, int num_next_clean_int,
          int num_tokens, int num_max_dispatch_tokens_per_rank,
@@ -199,8 +200,19 @@ dispatch(void* packed_recv_x, void* packed_recv_x_scales,
                     if (dst_p2p_ptr == 0) {
                         nixlMemViewElem src_mdesc{nixl_ctx.local_mvh, 0, nixl_ctx.offset_get(src_ptr)};
                         nixlMemViewElem dst_mdesc{nixl_ctx.remote_mvh, (size_t) dst_rank, nixl_ctx.offset_get(dst_ptr)};
-                        EP_DEVICE_ASSERT(nixlPut<nixl_gpu_level_t::WARP>(src_mdesc, dst_mdesc, num_bytes_per_msg,
-                                dst_expert_local_idx, doorbell_flag(slot_idx)) == NIXL_IN_PROG);
+                        uint64_t put_start = 0;
+                        if (put_latency_samples != nullptr)
+                            put_start = clock64();
+                        const auto put_status = nixlPut<nixl_gpu_level_t::WARP>(
+                                src_mdesc, dst_mdesc, num_bytes_per_msg,
+                                dst_expert_local_idx, doorbell_flag(slot_idx));
+                        uint64_t put_cycles = 0;
+                        if (put_latency_samples != nullptr)
+                            put_cycles = clock64() - put_start;
+                        if (put_latency_samples != nullptr && lane_id == 0)
+                            put_latency_samples[token_idx * num_topk + warp_id] =
+                                    put_cycles;
+                        EP_DEVICE_ASSERT(put_status == NIXL_IN_PROG);
                     } else {
                         // NOTES: only 2 load iterations for 7K hidden with 8 unrolls
                         const auto* src_int4_ptr = reinterpret_cast<const int4*>(src_ptr);
@@ -402,6 +414,7 @@ void dispatch(void* packed_recv_x, void* packed_recv_x_scales,
               int64_t* dispatch_wait_recv_cost_stats,
               void* rdma_recv_x, uint64_t* rdma_recv_count, void* rdma_x,
               const void* x, const topk_idx_t* topk_idx,
+              uint64_t* put_latency_samples,
               uint64_t* next_clean, int num_next_clean_int,
               int num_tokens, int hidden, int num_max_dispatch_tokens_per_rank,
               int num_topk, int active_rank_bound, int num_experts_per_rank, int rank,
@@ -443,7 +456,7 @@ LAUNCH_KERNEL(&cfg, dispatch_func, \
               cumulative_local_expert_recv_stats, \
               dispatch_wait_recv_cost_stats, \
               rdma_recv_x, rdma_recv_count, rdma_x, \
-              x, topk_idx, \
+              x, topk_idx, put_latency_samples, \
               atomic_counter_per_expert, atomic_finish_counter_per_expert, \
               next_clean, num_next_clean_int, \
               num_tokens, num_max_dispatch_tokens_per_rank, \
