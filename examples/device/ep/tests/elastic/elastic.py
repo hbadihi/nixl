@@ -100,6 +100,7 @@ def test_main(
     use_logfmt: bool = False,
     seed: int = 0,
     kineto: bool = False,
+    dispatch_only: bool = False,
     fault_tolerance_test: bool = False,
 ):
     torch.manual_seed(seed + rank)
@@ -150,11 +151,11 @@ def test_main(
         (num_tokens, num_topk), dtype=torch.float32, device="cuda"
     ).abs()
 
-    # Randomly mask some positions
-    for i in range(10):
-        topk_idx[random.randint(0, num_tokens - 1), random.randint(0, num_topk - 1)] = (
-            -1
-        )
+    # Randomly mask some positions (disabled: no more masking)
+    # for i in range(10):
+    #     topk_idx[random.randint(0, num_tokens - 1), random.randint(0, num_topk - 1)] = (
+    #         -1
+    #     )
 
     all_topk_idx = torch.full(
         (max_num_ranks, num_tokens, num_topk), -1, dtype=topk_idx.dtype, device="cuda"
@@ -163,7 +164,7 @@ def test_main(
         # Use same deterministic reset as above (seed + r + 1000)
         torch.manual_seed(seed + r + 1000)
         torch.cuda.manual_seed(seed + r + 1000)
-        r_random = random.Random(seed + r)
+        # r_random = random.Random(seed + r)  # disabled: no more masking
         r_scores = (
             torch.randn(
                 (num_tokens, num_experts), dtype=torch.float32, device="cuda"
@@ -174,11 +175,11 @@ def test_main(
             1
         ]
         r_topk_idx = r_topk_idx.to(nixl_ep.topk_idx_t)
-        # Apply same random masking
-        for i in range(10):
-            r_topk_idx[
-                r_random.randint(0, num_tokens - 1), r_random.randint(0, num_topk - 1)
-            ] = -1
+        # Apply same random masking (disabled: no more masking)
+        # for i in range(10):
+        #     r_topk_idx[
+        #         r_random.randint(0, num_tokens - 1), r_random.randint(0, num_topk - 1)
+        #     ] = -1
         all_topk_idx[r] = r_topk_idx
 
     # Check dispatch correctness
@@ -397,6 +398,8 @@ def test_main(
             return_recv_hook=return_recv_hook,
         )
         return_recv_hook and large_gemm_with_hook(hook)
+        if dispatch_only:
+            return
         combined_x, event, hook = buffer.combine(
             simulated_gemm_x,
             topk_idx,
@@ -423,11 +426,18 @@ def test_main(
 
     # Dispatch + combine testing
     avg_t, min_t, max_t = bench(partial(test_func, return_recv_hook=False))
-    print(
-        f"[rank {rank}] Dispatch + combine bandwidth: {(num_dispatch_comm_bytes + num_combine_comm_bytes) / 1e9 / avg_t:.2f} GB/s, "
-        f"avg_t={avg_t * 1e6:.2f} us, min_t={min_t * 1e6:.2f} us, max_t={max_t * 1e6:.2f} us",
-        flush=True,
-    )
+    if dispatch_only:
+        print(
+            f"[rank {rank}] Dispatch bandwidth: {num_dispatch_comm_bytes / 1e9 / avg_t:.2f} GB/s, "
+            f"avg_t={avg_t * 1e6:.2f} us, min_t={min_t * 1e6:.2f} us, max_t={max_t * 1e6:.2f} us",
+            flush=True,
+        )
+    else:
+        print(
+            f"[rank {rank}] Dispatch + combine bandwidth: {(num_dispatch_comm_bytes + num_combine_comm_bytes) / 1e9 / avg_t:.2f} GB/s, "
+            f"avg_t={avg_t * 1e6:.2f} us, min_t={min_t * 1e6:.2f} us, max_t={max_t * 1e6:.2f} us",
+            flush=True,
+        )
 
     # Separate profiling
     if not kineto:
@@ -435,6 +445,26 @@ def test_main(
 
     for return_recv_hook in (False, True):
         buffer.barrier()
+        if dispatch_only:
+            (dispatch_t,) = bench_kineto(
+                partial(test_func, return_recv_hook=return_recv_hook),
+                kernel_names=("dispatch",),
+                barrier_comm_profiling=True,
+                suppress_kineto_output=False,
+                num_kernels_per_period=2 if return_recv_hook else 1,
+                barrier_fn=test_barrier,
+            )
+            if not return_recv_hook:
+                print(
+                    f"[rank {rank}] Dispatch bandwidth: {num_dispatch_comm_bytes / 1e9 / dispatch_t:.2f} GB/s, avg_t={dispatch_t * 1e6:.2f} us",
+                    flush=True,
+                )
+            else:
+                print(
+                    f"[rank {rank}] Dispatch send/recv time: {dispatch_t[0] * 1e6:.2f} + {dispatch_t[1] * 1e6:.2f} us",
+                    flush=True,
+                )
+            continue
         dispatch_t, combine_t = bench_kineto(
             partial(test_func, return_recv_hook=return_recv_hook),
             kernel_names=("dispatch", "combine"),
@@ -481,6 +511,14 @@ def worker(torch_rank: int, args: argparse.Namespace):
 
     # Initialize torch
     os.environ["CUDA_VISIBLE_DEVICES"] = str(local_rank % 8)
+    _nics = {
+    0: "mlx5_0:1,mlx5_1:1,cuda0-mlx5_0:1,cuda0-mlx5_1:1",
+    1: "mlx5_6:1,mlx5_7:1,cuda0-mlx5_6:1,cuda0-mlx5_7:1",
+    2: "mlx5_10:1,mlx5_11:1,cuda0-mlx5_10:1,cuda0-mlx5_11:1",
+    3: "mlx5_12:1,mlx5_13:1,cuda0-mlx5_12:1,cuda0-mlx5_13:1",
+    }
+    os.environ["UCX_NET_DEVICES"] = _nics[local_rank % 8]
+
     torch.set_default_dtype(torch.bfloat16)
     torch.set_default_device("cuda")
     torch.cuda.set_device(0)
@@ -575,6 +613,7 @@ def worker(torch_rank: int, args: argparse.Namespace):
             max_num_ranks,
             buffer,
             kineto=args.kineto,
+            dispatch_only=args.dispatch_only,
             fault_tolerance_test=kill_rank,
         )
         # Query mask buffer to detect rank failures and clean them up
@@ -645,6 +684,12 @@ def main():
         help="TCP server address (for both TCPStore and rank server). If not set, both will be started locally.",
     )
     parser.add_argument("--kineto", action="store_true", help="Enable kineto profiling")
+    parser.add_argument(
+        "--dispatch-only",
+        action="store_true",
+        help="Low-latency benchmark: skip running and measuring the combine kernel "
+        "(applies to both the regular and --kineto runs)",
+    )
     parser.add_argument(
         "--disable-ll-nvlink",
         action="store_true",
