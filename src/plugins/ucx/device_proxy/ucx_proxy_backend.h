@@ -37,6 +37,10 @@ class nixlUcxProxyBackendAdapter : public nixlDeviceProxyBackendAdapter {
         ~nixlUcxProxyBackendAdapter() override = default;
 
         nixl_status_t
+        resolveDirectPointers(const nixl_remote_meta_dlist_t &dlist,
+                              std::vector<void *> &direct_ptrs) override;
+
+        nixl_status_t
         submit(const nixlBackendProxySubmission &submission, uint64_t &request_token) override;
 
         nixl_status_t
