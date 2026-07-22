@@ -24,19 +24,61 @@
 #include <utility>
 #include <cuda_runtime.h>
 
+nixlProxyMemViewRegistry::~nixlProxyMemViewRegistry() {
+    clear();
+}
+
 nixl_status_t
 nixlProxyMemViewRegistry::registerProxyMemView(nixlMemViewH backend_memview,
-                                           nixlMemViewH *proxy_memview) {
+                                                nixlMemViewH *proxy_memview) {
+    return registerProxyMemView(backend_memview, {}, proxy_memview);
+}
+
+nixl_status_t
+nixlProxyMemViewRegistry::registerProxyMemView(
+    nixlMemViewH backend_memview,
+    const std::vector<void *> &direct_ptrs,
+    nixlMemViewH *proxy_memview) {
     if (proxy_memview == nullptr) {
         return NIXL_ERR_INVALID_PARAM;
     }
-
     RegistryEntry entry;
     entry.proxy_memview_id = next_proxy_memview_id_;
     entry.backend_memview = backend_memview;
-    entries_.push_back(entry);
+    const size_t direct_ptr_bytes = direct_ptrs.size() * sizeof(void *);
+    const size_t allocation_size = sizeof(nixlProxyDeviceMemView) + direct_ptr_bytes;
 
-    *proxy_memview = reinterpret_cast<nixlMemViewH>(entry.proxy_memview_id);
+    nixlProxyDeviceMemView *device_memview = nullptr;
+    if (cudaMalloc(reinterpret_cast<void **>(&device_memview), allocation_size) != cudaSuccess) {
+        NIXL_ERROR << "nixlProxyMemViewRegistry::register: failed to allocate device memview";
+        return NIXL_ERR_BACKEND;
+    }
+
+    const nixlProxyDeviceMemView host_memview{
+        entry.proxy_memview_id,
+        static_cast<uint32_t>(direct_ptrs.size())
+    };
+    cudaError_t cuda_status = cudaMemcpy(device_memview,
+                                        &host_memview,
+                                        sizeof(host_memview),
+                                        cudaMemcpyHostToDevice);
+    if ((cuda_status == cudaSuccess) && !direct_ptrs.empty()) {
+        cuda_status = cudaMemcpy(device_memview + 1,
+                                 direct_ptrs.data(),
+                                 direct_ptr_bytes,
+                                 cudaMemcpyHostToDevice);
+    }
+    if (cuda_status != cudaSuccess) {
+        NIXL_ERROR << "nixlProxyMemViewRegistry::register: failed to initialize device memview";
+        cudaFree(device_memview);
+        return NIXL_ERR_BACKEND;
+    }
+
+    entry.proxy_memview = device_memview;
+    entries_.push_back(entry);
+    handle_to_id_.emplace(entry.proxy_memview, entry.proxy_memview_id);
+
+    *proxy_memview = entry.proxy_memview;
     ++next_proxy_memview_id_;
     NIXL_DEBUG << "nixlProxyMemViewRegistry::register: backend_mvh="
                << backend_memview << " -> proxy_id="
@@ -54,7 +96,33 @@ nixl_status_t
 nixlProxyMemViewRegistry::prepMemView(
     const nixl_remote_meta_dlist_t &dlist,
     nixlMemViewH *proxy_memview) {
-    return prepMemView(nullptr, dlist, proxy_memview);
+    return prepMemView(dlist, {}, proxy_memview);
+}
+
+nixl_status_t
+nixlProxyMemViewRegistry::prepMemView(
+    const nixl_remote_meta_dlist_t &dlist,
+    const std::vector<void *> &direct_ptrs,
+    nixlMemViewH *proxy_memview) {
+    if (proxy_memview == nullptr) {
+        return NIXL_ERR_INVALID_PARAM;
+    }
+
+    nixlMemViewH registered_proxy_memview = nullptr;
+    nixl_status_t status =
+        registerProxyMemView(nullptr, direct_ptrs, &registered_proxy_memview);
+    if (status != NIXL_SUCCESS) {
+        return status;
+    }
+
+    status = storeMetadata(registered_proxy_memview, dlist);
+    if (status != NIXL_SUCCESS) {
+        unregisterProxyMemView(registered_proxy_memview);
+        return status;
+    }
+
+    *proxy_memview = registered_proxy_memview;
+    return NIXL_SUCCESS;
 }
 
 nixl_status_t
@@ -113,6 +181,8 @@ nixlProxyMemViewRegistry::unregisterProxyMemView(nixlMemViewH proxy_memview) {
         return NIXL_ERR_INVALID_PARAM;
     }
     entry->state = ProxyMemViewRegEntryState::ENTRY_RETIRED;
+    handle_to_id_.erase(proxy_memview);
+    releaseDeviceMemView(*entry);
     NIXL_DEBUG << "nixlProxyMemViewRegistry::unregister: proxy_id="
                << entry->proxy_memview_id;
     return NIXL_SUCCESS;
@@ -253,17 +323,29 @@ void
 nixlProxyMemViewRegistry::clear() noexcept {
     for (auto &entry : entries_) {
         entry.state = ProxyMemViewRegEntryState::ENTRY_RETIRED;
+        releaseDeviceMemView(entry);
+    }
+    handle_to_id_.clear();
+}
+
+void
+nixlProxyMemViewRegistry::releaseDeviceMemView(RegistryEntry &entry) noexcept {
+    if (entry.proxy_memview != nullptr) {
+        cudaFree(entry.proxy_memview);
+        entry.proxy_memview = nullptr;
     }
 }
 
 nixlProxyMemViewRegistry::RegistryEntry *
 nixlProxyMemViewRegistry::getEntryForHandle(nixlMemViewH proxy_memview) {
-    return getEntryForId(reinterpret_cast<uint64_t>(proxy_memview));
+    const auto it = handle_to_id_.find(proxy_memview);
+    return (it == handle_to_id_.end()) ? nullptr : getEntryForId(it->second);
 }
 
 const nixlProxyMemViewRegistry::RegistryEntry *
 nixlProxyMemViewRegistry::getEntryForHandle(nixlMemViewH proxy_memview) const {
-    return getEntryForId(reinterpret_cast<uint64_t>(proxy_memview));
+    const auto it = handle_to_id_.find(proxy_memview);
+    return (it == handle_to_id_.end()) ? nullptr : getEntryForId(it->second);
 }
 
 nixlProxyMemViewRegistry::RegistryEntry *
@@ -727,7 +809,16 @@ nixlProxyRuntime::prepMemView(const nixl_meta_dlist_t &dlist,
 nixl_status_t
 nixlProxyRuntime::prepMemView(const nixl_remote_meta_dlist_t &dlist,
                               nixlMemViewH *proxy_memview) {
-    return memview_registry_.prepMemView(dlist, proxy_memview);
+    std::vector<void *> direct_ptrs;
+    const nixl_status_t resolve_status =
+        backend_->resolveDirectPointers(dlist, direct_ptrs);
+    if (resolve_status == NIXL_ERR_NOT_SUPPORTED) {
+        direct_ptrs.clear();
+    } else if (resolve_status != NIXL_SUCCESS) {
+        return resolve_status;
+    }
+
+    return memview_registry_.prepMemView(dlist, direct_ptrs, proxy_memview);
 }
 
 nixl_status_t

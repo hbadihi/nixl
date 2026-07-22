@@ -21,6 +21,7 @@
 #include <deque>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "backend_aux.h"
@@ -73,6 +74,13 @@ struct alignas(64) nixlProxyChannelState {
 
 class nixlProxyMemViewRegistry {
     public:
+        nixlProxyMemViewRegistry() = default;
+        ~nixlProxyMemViewRegistry();
+
+        nixlProxyMemViewRegistry(const nixlProxyMemViewRegistry &) = delete;
+        nixlProxyMemViewRegistry &
+        operator=(const nixlProxyMemViewRegistry &) = delete;
+
         nixl_status_t
         registerProxyMemView(nixlMemViewH backend_memview,
                              nixlMemViewH *proxy_memview);
@@ -83,6 +91,11 @@ class nixlProxyMemViewRegistry {
 
         nixl_status_t
         prepMemView(const nixl_remote_meta_dlist_t &dlist,
+                    nixlMemViewH *proxy_memview);
+
+        nixl_status_t
+        prepMemView(const nixl_remote_meta_dlist_t &dlist,
+                    const std::vector<void *> &direct_ptrs,
                     nixlMemViewH *proxy_memview);
 
         nixl_status_t
@@ -154,12 +167,21 @@ class nixlProxyMemViewRegistry {
 
         struct RegistryEntry {
             uint64_t proxy_memview_id = 0;
+            nixlMemViewH proxy_memview = nullptr;
             nixlMemViewH backend_memview = nullptr;
             ProxyMemViewRegEntryState state = ProxyMemViewRegEntryState::ENTRY_ALLOCATED;
             ProxyMemViewRegMetadataKind metadata_kind = ProxyMemViewRegMetadataKind::METADATA_KIND_NONE;
             LocalMetadata local_metadata{};
             RemoteMetadata remote_metadata{};
         };
+
+        nixl_status_t
+        registerProxyMemView(nixlMemViewH backend_memview,
+                             const std::vector<void *> &direct_ptrs,
+                             nixlMemViewH *proxy_memview);
+
+        static void
+        releaseDeviceMemView(RegistryEntry &entry) noexcept;
 
         RegistryEntry *
         getEntryForHandle(nixlMemViewH proxy_memview);
@@ -199,6 +221,7 @@ class nixlProxyMemViewRegistry {
         fillRemoteMetadata(const nixl_remote_meta_dlist_t &dlist, RemoteMetadata &out);
 
         std::vector<RegistryEntry> entries_;
+        std::unordered_map<nixlMemViewH, uint64_t> handle_to_id_;
         uint64_t next_proxy_memview_id_ = 1;
 };
 
