@@ -512,10 +512,10 @@ def worker(torch_rank: int, args: argparse.Namespace):
     # Initialize torch
     os.environ["CUDA_VISIBLE_DEVICES"] = str(local_rank % 8)
     _nics = {
-    0: "mlx5_0:1,mlx5_1:1,cuda0-mlx5_0:1,cuda0-mlx5_1:1",
-    1: "mlx5_6:1,mlx5_7:1,cuda0-mlx5_6:1,cuda0-mlx5_7:1",
-    2: "mlx5_10:1,mlx5_11:1,cuda0-mlx5_10:1,cuda0-mlx5_11:1",
-    3: "mlx5_12:1,mlx5_13:1,cuda0-mlx5_12:1,cuda0-mlx5_13:1",
+    0: "mlx5_0:1,cuda0-mlx5_0:1",
+    1: "mlx5_1:1,cuda0-mlx5_1:1",
+    2: "mlx5_2:1,cuda0-mlx5_2:1",
+    3: "mlx5_3,cuda0-mlx5_3:1",
     }
     os.environ["UCX_NET_DEVICES"] = _nics[local_rank % 8]
 
