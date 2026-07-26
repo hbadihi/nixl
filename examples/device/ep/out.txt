@@ -1,0 +1,30 @@
+Starting TCPStore and rank server locally
+Process 3 -> global_rank=0, local_rank=0
+Process 2 -> global_rank=1, local_rank=1
+Process 0 -> global_rank=2, local_rank=2
+Process 1 -> global_rank=3, local_rank=3
+Allocating buffer size: 1908.412544 MB ...
+global_rank=1, local_rank=1 -> start phase 0
+global_rank=1, local_rank=1 -> adding connections to [0, 2, 3]
+global_rank=3, local_rank=3 -> start phase 0
+global_rank=3, local_rank=3 -> adding connections to [0, 1, 2]
+global_rank=0, local_rank=0 -> start phase 0
+global_rank=0, local_rank=0 -> adding connections to [1, 2, 3]
+global_rank=2, local_rank=2 -> start phase 0
+global_rank=2, local_rank=2 -> adding connections to [0, 1, 3]
+[rank 1] Dispatch bandwidth: 36.91 GB/s, avg_t=205.49 us, min_t=137.02 us, max_t=316.26 us
+[rank 0] Dispatch bandwidth: 37.15 GB/s, avg_t=204.18 us, min_t=132.99 us, max_t=326.53 us
+[rank 3] Dispatch bandwidth: 37.05 GB/s, avg_t=204.77 us, min_t=116.00 us, max_t=325.02 us
+[rank 2] Dispatch bandwidth: 37.13 GB/s, avg_t=204.30 us, min_t=117.89 us, max_t=386.66 us
+global_rank=1, local_rank=1 -> end phase 0
+global_rank=0, local_rank=0 -> end phase 0
+global_rank=3, local_rank=3 -> end phase 0
+global_rank=2, local_rank=2 -> end phase 0
+[rank 1] nixlPut latency: samples=94240, p50=1.467500 us, p90=2.006500 us, p99=2.396500 us, average=1.574214 us, overflow_slots=0
+[rank 0] nixlPut latency: samples=92752, p50=1.561500 us, p90=2.069000 us, p99=2.431000 us, average=1.655861 us, overflow_slots=0
+[rank 3] nixlPut latency: samples=96472, p50=1.440500 us, p90=1.983000 us, p99=2.414500 us, average=1.546409 us, overflow_slots=0
+[rank 2] nixlPut latency: samples=94116, p50=1.457000 us, p90=2.008000 us, p99=2.471000 us, average=1.552233 us, overflow_slots=0
+global_rank=1, local_rank=1 -> done
+global_rank=0, local_rank=0 -> done
+global_rank=2, local_rank=2 -> done
+global_rank=3, local_rank=3 -> done

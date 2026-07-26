@@ -1,0 +1,3273 @@
+{
+  "backend": "rc_gda",
+  "channels": [
+    1,
+    2,
+    4,
+    8,
+    16,
+    32
+  ],
+  "created_at": "2026-07-26T05:11:15",
+  "ep_dir": "/workspace/external/nixl/examples/device/ep",
+  "experts": [
+    2,
+    4,
+    8,
+    16,
+    32,
+    64
+  ],
+  "fixed_args": {
+    "dispatch_only": true,
+    "num_processes": 4,
+    "num_tokens": 128,
+    "plan": "tests/elastic/no_expansion.json"
+  },
+  "plugin_path": null,
+  "python": "python3",
+  "pythonpath": "/workspace/external/nixl/install/lib/python3/dist-packages",
+  "repeats": 3,
+  "runs": [
+    {
+      "backend": "rc_gda",
+      "channels": 1,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "2",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:11:23",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "1",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 2,
+      "log_file": "ep2/channels1_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:11:15",
+      "status_file": "ep2/channels1_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 1,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "2",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:11:31",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "1",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 2,
+      "log_file": "ep2/channels1_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:11:23",
+      "status_file": "ep2/channels1_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 1,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "2",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:11:39",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "1",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 2,
+      "log_file": "ep2/channels1_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:11:31",
+      "status_file": "ep2/channels1_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 2,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "2",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:11:47",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "2",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 2,
+      "log_file": "ep2/channels2_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:11:39",
+      "status_file": "ep2/channels2_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 2,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "2",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:11:55",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "2",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 2,
+      "log_file": "ep2/channels2_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:11:47",
+      "status_file": "ep2/channels2_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 2,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "2",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:12:04",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "2",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 2,
+      "log_file": "ep2/channels2_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:11:55",
+      "status_file": "ep2/channels2_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 4,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "2",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:12:12",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "4",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 2,
+      "log_file": "ep2/channels4_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:12:04",
+      "status_file": "ep2/channels4_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 4,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "2",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:12:20",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "4",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 2,
+      "log_file": "ep2/channels4_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:12:12",
+      "status_file": "ep2/channels4_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 4,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "2",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:12:28",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "4",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 2,
+      "log_file": "ep2/channels4_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:12:20",
+      "status_file": "ep2/channels4_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 8,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "2",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:12:36",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "8",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 2,
+      "log_file": "ep2/channels8_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:12:28",
+      "status_file": "ep2/channels8_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 8,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "2",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:12:44",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "8",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 2,
+      "log_file": "ep2/channels8_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:12:36",
+      "status_file": "ep2/channels8_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 8,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "2",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:12:53",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "8",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 2,
+      "log_file": "ep2/channels8_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:12:44",
+      "status_file": "ep2/channels8_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 16,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "2",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:13:01",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "16",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 2,
+      "log_file": "ep2/channels16_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:12:53",
+      "status_file": "ep2/channels16_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 16,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "2",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:13:10",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "16",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 2,
+      "log_file": "ep2/channels16_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:13:01",
+      "status_file": "ep2/channels16_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 16,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "2",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:13:19",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "16",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 2,
+      "log_file": "ep2/channels16_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:13:10",
+      "status_file": "ep2/channels16_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 32,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "2",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:13:28",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "32",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 2,
+      "log_file": "ep2/channels32_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:13:19",
+      "status_file": "ep2/channels32_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 32,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "2",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:13:37",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "32",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 2,
+      "log_file": "ep2/channels32_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:13:28",
+      "status_file": "ep2/channels32_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 32,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "2",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:13:46",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "32",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 2,
+      "log_file": "ep2/channels32_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:13:37",
+      "status_file": "ep2/channels32_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 1,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "4",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:13:54",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "1",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 4,
+      "log_file": "ep4/channels1_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:13:46",
+      "status_file": "ep4/channels1_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 1,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "4",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:14:02",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "1",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 4,
+      "log_file": "ep4/channels1_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:13:54",
+      "status_file": "ep4/channels1_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 1,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "4",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:14:10",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "1",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 4,
+      "log_file": "ep4/channels1_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:14:02",
+      "status_file": "ep4/channels1_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 2,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "4",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:14:18",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "2",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 4,
+      "log_file": "ep4/channels2_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:14:10",
+      "status_file": "ep4/channels2_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 2,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "4",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:14:26",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "2",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 4,
+      "log_file": "ep4/channels2_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:14:18",
+      "status_file": "ep4/channels2_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 2,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "4",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:14:34",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "2",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 4,
+      "log_file": "ep4/channels2_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:14:26",
+      "status_file": "ep4/channels2_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 4,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "4",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:14:42",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "4",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 4,
+      "log_file": "ep4/channels4_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:14:34",
+      "status_file": "ep4/channels4_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 4,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "4",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:14:50",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "4",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 4,
+      "log_file": "ep4/channels4_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:14:42",
+      "status_file": "ep4/channels4_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 4,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "4",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:14:59",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "4",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 4,
+      "log_file": "ep4/channels4_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:14:50",
+      "status_file": "ep4/channels4_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 8,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "4",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:15:07",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "8",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 4,
+      "log_file": "ep4/channels8_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:14:59",
+      "status_file": "ep4/channels8_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 8,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "4",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:15:15",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "8",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 4,
+      "log_file": "ep4/channels8_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:15:07",
+      "status_file": "ep4/channels8_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 8,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "4",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:15:24",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "8",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 4,
+      "log_file": "ep4/channels8_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:15:15",
+      "status_file": "ep4/channels8_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 16,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "4",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:15:32",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "16",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 4,
+      "log_file": "ep4/channels16_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:15:24",
+      "status_file": "ep4/channels16_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 16,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "4",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:15:41",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "16",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 4,
+      "log_file": "ep4/channels16_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:15:32",
+      "status_file": "ep4/channels16_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 16,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "4",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:15:49",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "16",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 4,
+      "log_file": "ep4/channels16_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:15:41",
+      "status_file": "ep4/channels16_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 32,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "4",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:15:59",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "32",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 4,
+      "log_file": "ep4/channels32_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:15:49",
+      "status_file": "ep4/channels32_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 32,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "4",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:16:08",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "32",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 4,
+      "log_file": "ep4/channels32_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:15:59",
+      "status_file": "ep4/channels32_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 32,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "4",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:16:17",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "32",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 4,
+      "log_file": "ep4/channels32_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:16:08",
+      "status_file": "ep4/channels32_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 1,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "8",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:16:25",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "1",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 8,
+      "log_file": "ep8/channels1_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:16:17",
+      "status_file": "ep8/channels1_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 1,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "8",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:16:33",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "1",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 8,
+      "log_file": "ep8/channels1_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:16:25",
+      "status_file": "ep8/channels1_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 1,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "8",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:16:41",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "1",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 8,
+      "log_file": "ep8/channels1_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:16:33",
+      "status_file": "ep8/channels1_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 2,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "8",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:16:49",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "2",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 8,
+      "log_file": "ep8/channels2_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:16:41",
+      "status_file": "ep8/channels2_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 2,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "8",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:16:58",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "2",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 8,
+      "log_file": "ep8/channels2_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:16:50",
+      "status_file": "ep8/channels2_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 2,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "8",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:17:06",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "2",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 8,
+      "log_file": "ep8/channels2_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:16:58",
+      "status_file": "ep8/channels2_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 4,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "8",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:17:14",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "4",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 8,
+      "log_file": "ep8/channels4_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:17:06",
+      "status_file": "ep8/channels4_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 4,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "8",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:17:22",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "4",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 8,
+      "log_file": "ep8/channels4_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:17:14",
+      "status_file": "ep8/channels4_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 4,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "8",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:17:31",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "4",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 8,
+      "log_file": "ep8/channels4_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:17:22",
+      "status_file": "ep8/channels4_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 8,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "8",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:17:39",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "8",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 8,
+      "log_file": "ep8/channels8_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:17:31",
+      "status_file": "ep8/channels8_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 8,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "8",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:17:47",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "8",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 8,
+      "log_file": "ep8/channels8_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:17:39",
+      "status_file": "ep8/channels8_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 8,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "8",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:17:56",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "8",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 8,
+      "log_file": "ep8/channels8_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:17:47",
+      "status_file": "ep8/channels8_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 16,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "8",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:18:04",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "16",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 8,
+      "log_file": "ep8/channels16_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:17:56",
+      "status_file": "ep8/channels16_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 16,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "8",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:18:13",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "16",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 8,
+      "log_file": "ep8/channels16_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:18:04",
+      "status_file": "ep8/channels16_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 16,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "8",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:18:21",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "16",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 8,
+      "log_file": "ep8/channels16_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:18:13",
+      "status_file": "ep8/channels16_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 32,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "8",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:18:31",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "32",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 8,
+      "log_file": "ep8/channels32_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:18:21",
+      "status_file": "ep8/channels32_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 32,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "8",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:18:40",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "32",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 8,
+      "log_file": "ep8/channels32_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:18:31",
+      "status_file": "ep8/channels32_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 32,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "8",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:18:49",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "32",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 8,
+      "log_file": "ep8/channels32_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:18:40",
+      "status_file": "ep8/channels32_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 1,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "16",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:18:57",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "1",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 16,
+      "log_file": "ep16/channels1_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:18:49",
+      "status_file": "ep16/channels1_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 1,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "16",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:19:05",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "1",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 16,
+      "log_file": "ep16/channels1_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:18:57",
+      "status_file": "ep16/channels1_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 1,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "16",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:19:14",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "1",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 16,
+      "log_file": "ep16/channels1_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:19:05",
+      "status_file": "ep16/channels1_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 2,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "16",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:19:22",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "2",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 16,
+      "log_file": "ep16/channels2_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:19:14",
+      "status_file": "ep16/channels2_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 2,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "16",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:19:31",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "2",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 16,
+      "log_file": "ep16/channels2_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:19:22",
+      "status_file": "ep16/channels2_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 2,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "16",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:19:39",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "2",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 16,
+      "log_file": "ep16/channels2_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:19:31",
+      "status_file": "ep16/channels2_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 4,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "16",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:19:47",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "4",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 16,
+      "log_file": "ep16/channels4_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:19:39",
+      "status_file": "ep16/channels4_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 4,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "16",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:19:56",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "4",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 16,
+      "log_file": "ep16/channels4_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:19:47",
+      "status_file": "ep16/channels4_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 4,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "16",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:20:04",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "4",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 16,
+      "log_file": "ep16/channels4_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:19:56",
+      "status_file": "ep16/channels4_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 8,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "16",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:20:12",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "8",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 16,
+      "log_file": "ep16/channels8_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:20:04",
+      "status_file": "ep16/channels8_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 8,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "16",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:20:21",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "8",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 16,
+      "log_file": "ep16/channels8_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:20:12",
+      "status_file": "ep16/channels8_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 8,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "16",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:20:30",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "8",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 16,
+      "log_file": "ep16/channels8_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:20:21",
+      "status_file": "ep16/channels8_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 16,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "16",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:20:38",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "16",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 16,
+      "log_file": "ep16/channels16_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:20:30",
+      "status_file": "ep16/channels16_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 16,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "16",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:20:47",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "16",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 16,
+      "log_file": "ep16/channels16_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:20:38",
+      "status_file": "ep16/channels16_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 16,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "16",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:20:56",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "16",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 16,
+      "log_file": "ep16/channels16_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:20:47",
+      "status_file": "ep16/channels16_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 32,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "16",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:21:05",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "32",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 16,
+      "log_file": "ep16/channels32_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:20:56",
+      "status_file": "ep16/channels32_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 32,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "16",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:21:14",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "32",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 16,
+      "log_file": "ep16/channels32_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:21:05",
+      "status_file": "ep16/channels32_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 32,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "16",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:21:24",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "32",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 16,
+      "log_file": "ep16/channels32_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:21:14",
+      "status_file": "ep16/channels32_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 1,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "32",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:21:32",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "1",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 32,
+      "log_file": "ep32/channels1_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:21:24",
+      "status_file": "ep32/channels1_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 1,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "32",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:21:41",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "1",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 32,
+      "log_file": "ep32/channels1_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:21:32",
+      "status_file": "ep32/channels1_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 1,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "32",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:21:50",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "1",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 32,
+      "log_file": "ep32/channels1_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:21:41",
+      "status_file": "ep32/channels1_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 2,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "32",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:21:58",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "2",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 32,
+      "log_file": "ep32/channels2_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:21:50",
+      "status_file": "ep32/channels2_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 2,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "32",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:22:07",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "2",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 32,
+      "log_file": "ep32/channels2_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:21:58",
+      "status_file": "ep32/channels2_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 2,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "32",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:22:16",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "2",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 32,
+      "log_file": "ep32/channels2_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:22:07",
+      "status_file": "ep32/channels2_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 4,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "32",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:22:24",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "4",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 32,
+      "log_file": "ep32/channels4_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:22:16",
+      "status_file": "ep32/channels4_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 4,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "32",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:22:33",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "4",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 32,
+      "log_file": "ep32/channels4_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:22:24",
+      "status_file": "ep32/channels4_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 4,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "32",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:22:42",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "4",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 32,
+      "log_file": "ep32/channels4_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:22:33",
+      "status_file": "ep32/channels4_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 8,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "32",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:22:50",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "8",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 32,
+      "log_file": "ep32/channels8_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:22:42",
+      "status_file": "ep32/channels8_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 8,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "32",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:22:59",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "8",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 32,
+      "log_file": "ep32/channels8_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:22:50",
+      "status_file": "ep32/channels8_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 8,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "32",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:23:08",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "8",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 32,
+      "log_file": "ep32/channels8_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:22:59",
+      "status_file": "ep32/channels8_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 16,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "32",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:23:17",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "16",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 32,
+      "log_file": "ep32/channels16_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:23:08",
+      "status_file": "ep32/channels16_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 16,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "32",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:23:26",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "16",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 32,
+      "log_file": "ep32/channels16_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:23:17",
+      "status_file": "ep32/channels16_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 16,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "32",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:23:35",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "16",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 32,
+      "log_file": "ep32/channels16_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:23:26",
+      "status_file": "ep32/channels16_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 32,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "32",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:23:45",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "32",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 32,
+      "log_file": "ep32/channels32_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:23:35",
+      "status_file": "ep32/channels32_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 32,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "32",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:23:54",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "32",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 32,
+      "log_file": "ep32/channels32_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:23:45",
+      "status_file": "ep32/channels32_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 32,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "32",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:24:04",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "32",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 32,
+      "log_file": "ep32/channels32_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:23:54",
+      "status_file": "ep32/channels32_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 1,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "64",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:24:13",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "1",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 64,
+      "log_file": "ep64/channels1_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:24:04",
+      "status_file": "ep64/channels1_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 1,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "64",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:24:22",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "1",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 64,
+      "log_file": "ep64/channels1_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:24:13",
+      "status_file": "ep64/channels1_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 1,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "64",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:24:31",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "1",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 64,
+      "log_file": "ep64/channels1_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:24:22",
+      "status_file": "ep64/channels1_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 2,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "64",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:24:40",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "2",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 64,
+      "log_file": "ep64/channels2_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:24:31",
+      "status_file": "ep64/channels2_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 2,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "64",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:24:50",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "2",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 64,
+      "log_file": "ep64/channels2_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:24:40",
+      "status_file": "ep64/channels2_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 2,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "64",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:24:59",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "2",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 64,
+      "log_file": "ep64/channels2_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:24:50",
+      "status_file": "ep64/channels2_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 4,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "64",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:25:08",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "4",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 64,
+      "log_file": "ep64/channels4_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:24:59",
+      "status_file": "ep64/channels4_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 4,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "64",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:25:17",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "4",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 64,
+      "log_file": "ep64/channels4_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:25:08",
+      "status_file": "ep64/channels4_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 4,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "64",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:25:26",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "4",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 64,
+      "log_file": "ep64/channels4_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:25:17",
+      "status_file": "ep64/channels4_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 8,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "64",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:25:36",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "8",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 64,
+      "log_file": "ep64/channels8_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:25:26",
+      "status_file": "ep64/channels8_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 8,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "64",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:25:45",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "8",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 64,
+      "log_file": "ep64/channels8_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:25:36",
+      "status_file": "ep64/channels8_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 8,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "64",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:25:55",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "8",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 64,
+      "log_file": "ep64/channels8_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:25:45",
+      "status_file": "ep64/channels8_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 16,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "64",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:26:04",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "16",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 64,
+      "log_file": "ep64/channels16_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:25:55",
+      "status_file": "ep64/channels16_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 16,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "64",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:26:14",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "16",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 64,
+      "log_file": "ep64/channels16_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:26:04",
+      "status_file": "ep64/channels16_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 16,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "64",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:26:23",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "16",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 64,
+      "log_file": "ep64/channels16_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:26:14",
+      "status_file": "ep64/channels16_repeat2.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 32,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "64",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:26:34",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "32",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 64,
+      "log_file": "ep64/channels32_repeat0.log",
+      "repeat": 0,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:26:23",
+      "status_file": "ep64/channels32_repeat0.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 32,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "64",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:26:44",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "32",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 64,
+      "log_file": "ep64/channels32_repeat1.log",
+      "repeat": 1,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:26:34",
+      "status_file": "ep64/channels32_repeat1.json"
+    },
+    {
+      "backend": "rc_gda",
+      "channels": 32,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "64",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T05:26:54",
+      "env": {
+        "NIXL_EP_NUM_CHANNELS": "32",
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 64,
+      "log_file": "ep64/channels32_repeat2.log",
+      "repeat": 2,
+      "returncode": 0,
+      "started_at": "2026-07-26T05:26:44",
+      "status_file": "ep64/channels32_repeat2.json"
+    }
+  ]
+}

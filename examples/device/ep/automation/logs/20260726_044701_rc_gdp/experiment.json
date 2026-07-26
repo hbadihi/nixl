@@ -1,0 +1,66 @@
+{
+  "backend": "rc_gdp",
+  "channels": [
+    1,
+    2,
+    4,
+    8,
+    16,
+    32
+  ],
+  "created_at": "2026-07-26T04:47:01",
+  "ep_dir": "/workspace/external/nixl/examples/device/ep",
+  "experts": [
+    1,
+    2,
+    4,
+    8,
+    16,
+    32,
+    64
+  ],
+  "fixed_args": {
+    "dispatch_only": true,
+    "num_processes": 4,
+    "num_tokens": 128,
+    "plan": "tests/elastic/no_expansion.json"
+  },
+  "plugin_path": "/workspace/external/ucx-spcx-plugin/install/lib/ucx",
+  "python": "python3",
+  "pythonpath": "/workspace/external/nixl/install/lib/python3/dist-packages",
+  "repeats": 1,
+  "runs": [
+    {
+      "backend": "rc_gdp",
+      "channels": 1,
+      "command": [
+        "python3",
+        "tests/elastic/elastic.py",
+        "--plan",
+        "tests/elastic/no_expansion.json",
+        "--num-processes",
+        "4",
+        "--num-tokens",
+        "128",
+        "--num-experts-per-rank",
+        "1",
+        "--dispatch-only"
+      ],
+      "cwd": "/workspace/external/nixl/examples/device/ep",
+      "ended_at": "2026-07-26T04:47:10",
+      "env": {
+        "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+        "UCX_GDP_ENABLE": "y",
+        "UCX_PLUGIN_PATH": "/workspace/external/ucx-spcx-plugin/install/lib/ucx",
+        "UCX_RC_GDP_NUM_CHANNELS": "1",
+        "UCX_TLS": "rc,rc_gdp,tcp,self,sm,cuda_copy"
+      },
+      "experts_per_rank": 1,
+      "log_file": "ep1_channels1_repeat0.log",
+      "repeat": 0,
+      "returncode": 1,
+      "started_at": "2026-07-26T04:47:01",
+      "status_file": "ep1_channels1_repeat0.json"
+    }
+  ]
+}

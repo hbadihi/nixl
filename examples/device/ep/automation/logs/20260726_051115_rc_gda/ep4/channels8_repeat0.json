@@ -1,0 +1,30 @@
+{
+  "backend": "rc_gda",
+  "channels": 8,
+  "command": [
+    "python3",
+    "tests/elastic/elastic.py",
+    "--plan",
+    "tests/elastic/no_expansion.json",
+    "--num-processes",
+    "4",
+    "--num-tokens",
+    "128",
+    "--num-experts-per-rank",
+    "4",
+    "--dispatch-only"
+  ],
+  "cwd": "/workspace/external/nixl/examples/device/ep",
+  "ended_at": "2026-07-26T05:15:07",
+  "env": {
+    "NIXL_EP_NUM_CHANNELS": "8",
+    "PYTHONPATH": "/workspace/external/nixl/install/lib/python3/dist-packages",
+    "UCX_TLS": "rc,rc_gda,tcp,self,sm,cuda_copy"
+  },
+  "experts_per_rank": 4,
+  "log_file": "ep4/channels8_repeat0.log",
+  "repeat": 0,
+  "returncode": 0,
+  "started_at": "2026-07-26T05:14:59",
+  "status_file": "ep4/channels8_repeat0.json"
+}

@@ -99,4 +99,61 @@ Finally, configure PYTHONPATH to use NIXL EP:
 export PYTHONPATH=<path to NIXL build directory>/examples/device/ep
 ```
 
+## EP LL Experiment Automation
+
+The `automation/benchmark_ep_ll.py` CLI runs the low-latency dispatch benchmark
+over a Cartesian product of experts-per-rank and UCX device channel counts. It
+always uses `tests/elastic/no_expansion.json`, 4 worker processes, 128 tokens,
+and `--dispatch-only`.
+
+Run a complete sweep, summarize it, and generate a PNG:
+
+```bash
+python3 automation/benchmark_ep_ll.py all \
+    --backend rc_gdp \
+    --experts 32 64 \
+    --channels 1 2 4 8 16 32 \
+    --repeats 3
+```
+
+Each sweep creates a timestamped experiment directory under
+`automation/logs/`, for example `automation/logs/20260726_144000_rc_gdp/`.
+That directory contains:
+
+- `experiment.json`: command, environment, fixed arguments, and per-run status.
+- `ep<EP>/channels<N>_repeat<R>.log`: raw stdout/stderr for each matrix run.
+- `ep<EP>/channels<N>_repeat<R>.json`: status metadata for each matrix run.
+- `measurements.csv`: rank-level dispatch bandwidth measurements.
+- `summary.csv`: repeat-level averages grouped by backend, EP, and channels.
+- `skipped_runs.csv`: failed or incomplete runs that were omitted from summary.
+- `dispatch_bandwidth.png`: channel count on the x-axis and dispatch bandwidth
+  on the y-axis, with one series per EP value and error bars showing one sample
+  standard deviation across repeats.
+
+The three stages can also be run separately:
+
+```bash
+python3 automation/benchmark_ep_ll.py run \
+    --backend rc_gda \
+    --experts 64 \
+    --channels 1 2 4 8 16 32 \
+    --repeats 5
+
+python3 automation/benchmark_ep_ll.py summarize automation/logs/<experiment>
+python3 automation/benchmark_ep_ll.py plot automation/logs/<experiment>
+```
+
+Backend selection controls both `UCX_TLS` and the channel environment variable:
+
+- `rc_gda` sets `UCX_TLS=rc,rc_gda,tcp,self,sm,cuda_copy` and
+  `NIXL_EP_NUM_CHANNELS=<channels>`.
+- `rc_gdp` sets `UCX_TLS=rc,rc_gdp,tcp,self,sm,cuda_copy`,
+  `UCX_GDP_ENABLE=y`, `UCX_RC_GDP_NUM_CHANNELS=<channels>`, and
+  `UCX_PLUGIN_PATH`. Override the plugin location with `--plugin-path`.
+
+Channel counts must be exact powers of two in `[1, 256]`. The default
+`PYTHONPATH` is inherited when set, otherwise it uses
+`/workspace/external/nixl/install/lib/python3/dist-packages`; override it with
+`--pythonpath`. Plotting requires Matplotlib.
+
 Refer to [tests/elastic/README.md](tests/elastic/README.md) for detailed instructions on how to run the elastic test suite.

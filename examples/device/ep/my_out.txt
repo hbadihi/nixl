@@ -1,0 +1,848 @@
+Starting TCPStore and rank server locally
+Process 1 -> global_rank=0, local_rank=0
+Process 3 -> global_rank=1, local_rank=1
+Process 0 -> global_rank=2, local_rank=2
+Process 2 -> global_rank=3, local_rank=3
+Allocating buffer size: 477.103232 MB ...
+/8000/GDP: poster channel 0 started state 0xc0008540
+/8000/GDP: poster channel 0 polling queue 0x8000000000000040
+/8001/GDP: completer channel 0 started state 0xc00086c0
+/8001/GDP: completer channel 0 polling cq 0xc000b000
+/8002/GDP: poster channel 1 started state 0xc002b080
+/8002/GDP: poster channel 1 polling queue 0x8000000000002040
+/8003/GDP: completer channel 1 started state 0xc002b200
+/8003/GDP: completer channel 1 polling cq 0xc001b000
+/8004/GDP: poster channel 2 started state 0xc002b3c0
+/8004/GDP: poster channel 2 polling queue 0x8000000000004040
+/8005/GDP: completer channel 2 started state 0xc002b540
+/8005/GDP: completer channel 2 polling cq 0xc002c000
+/8006/GDP: poster channel 3 started state 0xc002b700
+/8006/GDP: poster channel 3 polling queue 0x8000000000006040
+/8007/GDP: completer channel 3 started state 0xc003c880
+/8007/GDP: completer channel 3 polling cq 0xc003d000
+/8008/GDP: poster channel 4 started state 0xc003ca40
+/8008/GDP: poster channel 4 polling queue 0x8000000000008040
+/8009/GDP: completer channel 4 started state 0xc003cbc0
+/8009/GDP: completer channel 4 polling cq 0xc004e000
+/800a/GDP: poster channel 5 started state 0xc003cd80
+/800a/GDP: poster channel 5 polling queue 0x800000000000a040
+/800b/GDP: completer channel 5 started state 0xc003cf00
+/800b/GDP: completer channel 5 polling cq 0xc005e000
+/800c/GDP: poster channel 6 started state 0xc006e8c0
+/800c/GDP: poster channel 6 polling queue 0x800000000000c040
+/800d/GDP: completer channel 6 started state 0xc006ea40
+/800d/GDP: completer channel 6 polling cq 0xc006f000
+/800e/GDP: poster channel 7 started state 0xc006ec00
+/800e/GDP: poster channel 7 polling queue 0x800000000000e040
+/800f/GDP: completer channel 7 started state 0xc006ed80
+/800f/GDP: completer channel 7 polling cq 0xc0080000
+/8000/GDP: poster channel 0 started state 0xc0008540
+/8000/GDP: poster channel 0 polling queue 0x8000000000000040
+/8000/GDP: poster channel 0 started state 0xc0008540
+/8000/GDP: poster channel 0 polling queue 0x8000000000000040
+/8001/GDP: completer channel 0 started state 0xc00086c0
+/8001/GDP: completer channel 0 polling cq 0xc000b000
+/8001/GDP: completer channel 0 started state 0xc00086c0
+/8001/GDP: completer channel 0 polling cq 0xc000b000
+/8010/GDP: poster channel 8 started state 0xc006ef40
+/8010/GDP: poster channel 8 polling queue 0x8000000000010040
+/8011/GDP: completer channel 8 started state 0xc00a00c0
+/8011/GDP: completer channel 8 polling cq 0xc0090000
+/8002/GDP: poster channel 1 started state 0xc002b080
+/8002/GDP: poster channel 1 polling queue 0x8000000000002040
+/8002/GDP: poster channel 1 started state 0xc002b080
+/8002/GDP: poster channel 1 polling queue 0x8000000000002040
+/8003/GDP: completer channel 1 started state 0xc002b200
+/8003/GDP: completer channel 1 polling cq 0xc001b000
+/8003/GDP: completer channel 1 started state 0xc002b200
+/8003/GDP: completer channel 1 polling cq 0xc001b000
+/8012/GDP: poster channel 9 started state 0xc00a0280
+/8012/GDP: poster channel 9 polling queue 0x8000000000012040
+/8013/GDP: completer channel 9 started state 0xc00a0400
+/8013/GDP: completer channel 9 polling cq 0xc00a1000
+/8004/GDP: poster channel 2 started state 0xc002b3c0
+/8004/GDP: poster channel 2 polling queue 0x8000000000004040
+/8004/GDP: poster channel 2 started state 0xc002b3c0
+/8004/GDP: poster channel 2 polling queue 0x8000000000004040
+/8005/GDP: completer channel 2 started state 0xc002b540
+/8005/GDP: completer channel 2 polling cq 0xc002c000
+/8005/GDP: completer channel 2 started state 0xc002b540
+/8005/GDP: completer channel 2 polling cq 0xc002c000
+/8014/GDP: poster channel 10 started state 0xc00a05c0
+/8014/GDP: poster channel 10 polling queue 0x8000000000014040
+/8015/GDP: completer channel 10 started state 0xc00a0740
+/8015/GDP: completer channel 10 polling cq 0xc00b2000
+/8006/GDP: poster channel 3 started state 0xc002b700
+/8006/GDP: poster channel 3 polling queue 0x8000000000006040
+/8006/GDP: poster channel 3 started state 0xc002b700
+/8006/GDP: poster channel 3 polling queue 0x8000000000006040
+/8007/GDP: completer channel 3 started state 0xc003c880
+/8007/GDP: completer channel 3 polling cq 0xc003d000
+/8007/GDP: completer channel 3 started state 0xc003c880
+/8007/GDP: completer channel 3 polling cq 0xc003d000
+/8016/GDP: poster channel 11 started state 0xc00d2100
+/8016/GDP: poster channel 11 polling queue 0x8000000000016040
+/8017/GDP: completer channel 11 started state 0xc00d2280
+/8017/GDP: completer channel 11 polling cq 0xc00c2000
+/8008/GDP: poster channel 4 started state 0xc003ca40
+/8008/GDP: poster channel 4 polling queue 0x8000000000008040
+/8008/GDP: poster channel 4 started state 0xc003ca40
+/8008/GDP: poster channel 4 polling queue 0x8000000000008040
+/8009/GDP: completer channel 4 started state 0xc003cbc0
+/8009/GDP: completer channel 4 polling cq 0xc004e000
+/8009/GDP: completer channel 4 started state 0xc003cbc0
+/8009/GDP: completer channel 4 polling cq 0xc004e000
+/8018/GDP: poster channel 12 started state 0xc00d2440
+/8018/GDP: poster channel 12 polling queue 0x8000000000018040
+/8019/GDP: completer channel 12 started state 0xc00d25c0
+/8019/GDP: completer channel 12 polling cq 0xc00d3000
+/800a/GDP: poster channel 5 started state 0xc003cd80
+/800a/GDP: poster channel 5 polling queue 0x800000000000a040
+/800a/GDP: poster channel 5 started state 0xc003cd80
+/800a/GDP: poster channel 5 polling queue 0x800000000000a040
+/8000/GDP: poster channel 0 started state 0xc0008540
+/8000/GDP: poster channel 0 polling queue 0x8000000000000040
+/800b/GDP: completer channel 5 started state 0xc003cf00
+/800b/GDP: completer channel 5 polling cq 0xc005e000
+/800b/GDP: completer channel 5 started state 0xc003cf00
+/800b/GDP: completer channel 5 polling cq 0xc005e000
+/8001/GDP: completer channel 0 started state 0xc00086c0
+/8001/GDP: completer channel 0 polling cq 0xc000b000
+/801a/GDP: poster channel 13 started state 0xc00d2780
+/801a/GDP: poster channel 13 polling queue 0x800000000001a040
+/801b/GDP: completer channel 13 started state 0xc00e3900
+/801b/GDP: completer channel 13 polling cq 0xc00e4000
+/800c/GDP: poster channel 6 started state 0xc006e8c0
+/800c/GDP: poster channel 6 polling queue 0x800000000000c040
+/8002/GDP: poster channel 1 started state 0xc002b080
+/8002/GDP: poster channel 1 polling queue 0x8000000000002040
+/800c/GDP: poster channel 6 started state 0xc006e8c0
+/800c/GDP: poster channel 6 polling queue 0x800000000000c040
+/800d/GDP: completer channel 6 started state 0xc006ea40
+/800d/GDP: completer channel 6 polling cq 0xc006f000
+/8003/GDP: completer channel 1 started state 0xc002b200
+/8003/GDP: completer channel 1 polling cq 0xc001b000
+/800d/GDP: completer channel 6 started state 0xc006ea40
+/800d/GDP: completer channel 6 polling cq 0xc006f000
+/801c/GDP: poster channel 14 started state 0xc00e3ac0
+/801c/GDP: poster channel 14 polling queue 0x800000000001c040
+/801d/GDP: completer channel 14 started state 0xc00e3c40
+/801d/GDP: completer channel 14 polling cq 0xc00f5000
+/800e/GDP: poster channel 7 started state 0xc006ec00
+/800e/GDP: poster channel 7 polling queue 0x800000000000e040
+/8004/GDP: poster channel 2 started state 0xc002b3c0
+/8004/GDP: poster channel 2 polling queue 0x8000000000004040
+/800e/GDP: poster channel 7 started state 0xc006ec00
+/800e/GDP: poster channel 7 polling queue 0x800000000000e040
+/800f/GDP: completer channel 7 started state 0xc006ed80
+/800f/GDP: completer channel 7 polling cq 0xc0080000
+/8005/GDP: completer channel 2 started state 0xc002b540
+/8005/GDP: completer channel 2 polling cq 0xc002c000
+/800f/GDP: completer channel 7 started state 0xc006ed80
+/800f/GDP: completer channel 7 polling cq 0xc0080000
+/801e/GDP: poster channel 15 started state 0xc00e3e00
+/801e/GDP: poster channel 15 polling queue 0x800000000001e040
+/801f/GDP: completer channel 15 started state 0xc00e3f80
+/801f/GDP: completer channel 15 polling cq 0xc0105000
+/8006/GDP: poster channel 3 started state 0xc002b700
+/8010/GDP: poster channel 8 started state 0xc006ef40
+/8006/GDP: poster channel 3 polling queue 0x8000000000006040
+/8010/GDP: poster channel 8 polling queue 0x8000000000010040
+/8010/GDP: poster channel 8 started state 0xc006ef40
+/8010/GDP: poster channel 8 polling queue 0x8000000000010040
+/8007/GDP: completer channel 3 started state 0xc003c880
+/8007/GDP: completer channel 3 polling cq 0xc003d000
+/8011/GDP: completer channel 8 started state 0xc00a00c0
+/8011/GDP: completer channel 8 polling cq 0xc0090000
+/8011/GDP: completer channel 8 started state 0xc00a00c0
+/8011/GDP: completer channel 8 polling cq 0xc0090000
+/8008/GDP: poster channel 4 started state 0xc003ca40
+/8008/GDP: poster channel 4 polling queue 0x8000000000008040
+/8012/GDP: poster channel 9 started state 0xc00a0280
+/8012/GDP: poster channel 9 polling queue 0x8000000000012040
+/8012/GDP: poster channel 9 started state 0xc00a0280
+/8012/GDP: poster channel 9 polling queue 0x8000000000012040
+/8009/GDP: completer channel 4 started state 0xc003cbc0
+/8009/GDP: completer channel 4 polling cq 0xc004e000
+/8013/GDP: completer channel 9 started state 0xc00a0400
+/8013/GDP: completer channel 9 polling cq 0xc00a1000
+/8013/GDP: completer channel 9 started state 0xc00a0400
+/8013/GDP: completer channel 9 polling cq 0xc00a1000
+/800a/GDP: poster channel 5 started state 0xc003cd80
+/800a/GDP: poster channel 5 polling queue 0x800000000000a040
+/8014/GDP: poster channel 10 started state 0xc00a05c0
+/8014/GDP: poster channel 10 polling queue 0x8000000000014040
+/8014/GDP: poster channel 10 started state 0xc00a05c0
+/8014/GDP: poster channel 10 polling queue 0x8000000000014040
+/800b/GDP: completer channel 5 started state 0xc003cf00
+/800b/GDP: completer channel 5 polling cq 0xc005e000
+/8015/GDP: completer channel 10 started state 0xc00a0740
+/8015/GDP: completer channel 10 polling cq 0xc00b2000
+/8015/GDP: completer channel 10 started state 0xc00a0740
+/8015/GDP: completer channel 10 polling cq 0xc00b2000
+/800c/GDP: poster channel 6 started state 0xc006e8c0
+/800c/GDP: poster channel 6 polling queue 0x800000000000c040
+/8016/GDP: poster channel 11 started state 0xc00d2100
+/8016/GDP: poster channel 11 polling queue 0x8000000000016040
+/8016/GDP: poster channel 11 started state 0xc00d2100
+/8016/GDP: poster channel 11 polling queue 0x8000000000016040
+/800d/GDP: completer channel 6 started state 0xc006ea40
+/800d/GDP: completer channel 6 polling cq 0xc006f000
+/8017/GDP: completer channel 11 started state 0xc00d2280
+/8017/GDP: completer channel 11 polling cq 0xc00c2000
+/8017/GDP: completer channel 11 started state 0xc00d2280
+/8017/GDP: completer channel 11 polling cq 0xc00c2000
+/800e/GDP: poster channel 7 started state 0xc006ec00
+/800e/GDP: poster channel 7 polling queue 0x800000000000e040
+/8018/GDP: poster channel 12 started state 0xc00d2440
+/8018/GDP: poster channel 12 polling queue 0x8000000000018040
+/8018/GDP: poster channel 12 started state 0xc00d2440
+/8018/GDP: poster channel 12 polling queue 0x8000000000018040
+/800f/GDP: completer channel 7 started state 0xc006ed80
+/800f/GDP: completer channel 7 polling cq 0xc0080000
+/8019/GDP: completer channel 12 started state 0xc00d25c0
+/8019/GDP: completer channel 12 polling cq 0xc00d3000
+/8019/GDP: completer channel 12 started state 0xc00d25c0
+/8019/GDP: completer channel 12 polling cq 0xc00d3000
+/8010/GDP: poster channel 8 started state 0xc006ef40
+/8010/GDP: poster channel 8 polling queue 0x8000000000010040
+/801a/GDP: poster channel 13 started state 0xc00d2780
+/801a/GDP: poster channel 13 polling queue 0x800000000001a040
+/801a/GDP: poster channel 13 started state 0xc00d2780
+/801a/GDP: poster channel 13 polling queue 0x800000000001a040
+/801b/GDP: completer channel 13 started state 0xc00e3900
+/801b/GDP: completer channel 13 polling cq 0xc00e4000
+/8011/GDP: completer channel 8 started state 0xc00a00c0
+/8011/GDP: completer channel 8 polling cq 0xc0090000
+/801b/GDP: completer channel 13 started state 0xc00e3900
+/801b/GDP: completer channel 13 polling cq 0xc00e4000
+/8012/GDP: poster channel 9 started state 0xc00a0280
+/8012/GDP: poster channel 9 polling queue 0x8000000000012040
+/801c/GDP: poster channel 14 started state 0xc00e3ac0
+/801c/GDP: poster channel 14 polling queue 0x800000000001c040
+/801c/GDP: poster channel 14 started state 0xc00e3ac0
+/801c/GDP: poster channel 14 polling queue 0x800000000001c040
+/8013/GDP: completer channel 9 started state 0xc00a0400
+/8013/GDP: completer channel 9 polling cq 0xc00a1000
+/801d/GDP: completer channel 14 started state 0xc00e3c40
+/801d/GDP: completer channel 14 polling cq 0xc00f5000
+/801d/GDP: completer channel 14 started state 0xc00e3c40
+/801d/GDP: completer channel 14 polling cq 0xc00f5000
+/8014/GDP: poster channel 10 started state 0xc00a05c0
+/8014/GDP: poster channel 10 polling queue 0x8000000000014040
+/801e/GDP: poster channel 15 started state 0xc00e3e00
+/801e/GDP: poster channel 15 polling queue 0x800000000001e040
+/801e/GDP: poster channel 15 started state 0xc00e3e00
+/801e/GDP: poster channel 15 polling queue 0x800000000001e040
+/8015/GDP: completer channel 10 started state 0xc00a0740
+/8015/GDP: completer channel 10 polling cq 0xc00b2000
+/801f/GDP: completer channel 15 started state 0xc00e3f80
+/801f/GDP: completer channel 15 polling cq 0xc0105000
+/801f/GDP: completer channel 15 started state 0xc00e3f80
+/801f/GDP: completer channel 15 polling cq 0xc0105000
+/8016/GDP: poster channel 11 started state 0xc00d2100
+/8016/GDP: poster channel 11 polling queue 0x8000000000016040
+/8017/GDP: completer channel 11 started state 0xc00d2280
+/8017/GDP: completer channel 11 polling cq 0xc00c2000
+/8018/GDP: poster channel 12 started state 0xc00d2440
+/8018/GDP: poster channel 12 polling queue 0x8000000000018040
+/8019/GDP: completer channel 12 started state 0xc00d25c0
+/8019/GDP: completer channel 12 polling cq 0xc00d3000
+/801a/GDP: poster channel 13 started state 0xc00d2780
+/801a/GDP: poster channel 13 polling queue 0x800000000001a040
+global_rank=0, local_rank=0 -> start phase 0
+global_rank=0, local_rank=0 -> adding connections to [1, 2, 3]
+/801b/GDP: completer channel 13 started state 0xc00e3900
+/801b/GDP: completer channel 13 polling cq 0xc00e4000
+/801c/GDP: poster channel 14 started state 0xc00e3ac0
+/801c/GDP: poster channel 14 polling queue 0x800000000001c040
+/801d/GDP: completer channel 14 started state 0xc00e3c40
+/801d/GDP: completer channel 14 polling cq 0xc00f5000
+/801e/GDP: poster channel 15 started state 0xc00e3e00
+/801e/GDP: poster channel 15 polling queue 0x800000000001e040
+/801f/GDP: completer channel 15 started state 0xc00e3f80
+/801f/GDP: completer channel 15 polling cq 0xc0105000
+global_rank=3, local_rank=3 -> start phase 0
+global_rank=3, local_rank=3 -> adding connections to [0, 1, 2]
+global_rank=2, local_rank=2 -> start phase 0
+global_rank=2, local_rank=2 -> adding connections to [0, 1, 3]
+global_rank=1, local_rank=1 -> start phase 0
+global_rank=1, local_rank=1 -> adding connections to [0, 2, 3]
+/800a/GDP: poster channel 5 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8012/GDP: poster channel 9 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8002/GDP: poster channel 1 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/800e/GDP: poster channel 7 progress desc=1 pi=0 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0450000
+/8010/GDP: poster channel 8 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8016/GDP: poster channel 11 progress desc=1 pi=0 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0340000
+/801e/GDP: poster channel 15 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8002/GDP: poster channel 1 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8010/GDP: poster channel 8 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8004/GDP: poster channel 2 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8008/GDP: poster channel 4 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/801e/GDP: poster channel 15 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/800a/GDP: poster channel 5 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/801f/GDP: completer channel 15 progress cqe=1 ci=0 qpn=0x147a4 uidx=63 wqe=0 opcode=0x0
+/8016/GDP: poster channel 11 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/800f/GDP: completer channel 7 progress cqe=1 ci=0 qpn=0x1479c uidx=55 wqe=0 opcode=0x0
+/8002/GDP: poster channel 1 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/800a/GDP: poster channel 5 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8010/GDP: poster channel 8 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/800c/GDP: poster channel 6 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8018/GDP: poster channel 12 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/800c/GDP: poster channel 6 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8012/GDP: poster channel 9 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/801a/GDP: poster channel 13 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8018/GDP: poster channel 12 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8004/GDP: poster channel 2 progress desc=2 pi=1 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0340000
+/8017/GDP: completer channel 11 progress cqe=1 ci=0 qpn=0x1478e uidx=43 wqe=0 opcode=0x0
+/8012/GDP: poster channel 9 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/800e/GDP: poster channel 7 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8008/GDP: poster channel 4 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8014/GDP: poster channel 10 progress desc=1 pi=0 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/8004/GDP: poster channel 2 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/801e/GDP: poster channel 15 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8004/GDP: poster channel 2 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8016/GDP: poster channel 11 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8002/GDP: poster channel 1 progress desc=8 pi=7 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0450000
+/801c/GDP: poster channel 14 progress desc=1 pi=0 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/8014/GDP: poster channel 10 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/800b/GDP: completer channel 5 progress cqe=1 ci=0 qpn=0x14788 uidx=37 wqe=0 opcode=0x0
+/801d/GDP: completer channel 14 progress cqe=1 ci=0 qpn=0x1477f uidx=30 wqe=0 opcode=0x0
+/8005/GDP: completer channel 2 progress cqe=1 ci=0 qpn=0x14785 uidx=34 wqe=0 opcode=0x0
+/8000/GDP: poster channel 0 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8012/GDP: poster channel 9 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/801e/GDP: poster channel 15 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8003/GDP: completer channel 1 progress cqe=1 ci=0 qpn=0x14796 uidx=49 wqe=0 opcode=0x0
+/8012/GDP: poster channel 9 progress desc=16 pi=15 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0450000
+/801e/GDP: poster channel 15 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8012/GDP: poster channel 9 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8000/GDP: poster channel 0 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8016/GDP: poster channel 11 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8003/GDP: completer channel 1 progress cqe=2 ci=1 qpn=0x14784 uidx=33 wqe=0 opcode=0x0
+/8018/GDP: poster channel 12 progress desc=4 pi=3 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0450000
+/8004/GDP: poster channel 2 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8014/GDP: poster channel 10 progress desc=4 pi=3 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/801e/GDP: poster channel 15 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8006/GDP: poster channel 3 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8015/GDP: completer channel 10 progress cqe=1 ci=0 qpn=0x1477b uidx=26 wqe=0 opcode=0x0
+/8013/GDP: completer channel 9 progress cqe=1 ci=0 qpn=0x1478c uidx=41 wqe=0 opcode=0x0
+/8002/GDP: poster channel 1 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8006/GDP: poster channel 3 progress desc=2 pi=1 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/8002/GDP: poster channel 1 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/800e/GDP: poster channel 7 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/800c/GDP: poster channel 6 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/801c/GDP: poster channel 14 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8008/GDP: poster channel 4 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8007/GDP: completer channel 3 progress cqe=1 ci=0 qpn=0x14774 uidx=19 wqe=0 opcode=0x0
+/801f/GDP: completer channel 15 progress cqe=2 ci=1 qpn=0x14780 uidx=31 wqe=0 opcode=0x0
+/8014/GDP: poster channel 10 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/800c/GDP: poster channel 6 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8019/GDP: completer channel 12 progress cqe=1 ci=0 qpn=0x147a1 uidx=60 wqe=0 opcode=0x0
+/801c/GDP: poster channel 14 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8019/GDP: completer channel 12 progress cqe=2 ci=1 qpn=0x1478f uidx=44 wqe=0 opcode=0x0
+/8018/GDP: poster channel 12 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8013/GDP: completer channel 9 progress cqe=2 ci=1 qpn=0x1479e uidx=57 wqe=0 opcode=0x0
+/800a/GDP: poster channel 5 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/800c/GDP: poster channel 6 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/800e/GDP: poster channel 7 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8016/GDP: poster channel 11 progress desc=16 pi=15 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/8006/GDP: poster channel 3 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/800c/GDP: poster channel 6 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8006/GDP: poster channel 3 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/800b/GDP: completer channel 5 progress cqe=2 ci=1 qpn=0x14776 uidx=21 wqe=0 opcode=0x0
+/8008/GDP: poster channel 4 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8009/GDP: completer channel 4 progress cqe=1 ci=0 qpn=0x14787 uidx=36 wqe=0 opcode=0x0
+/8014/GDP: poster channel 10 progress desc=16 pi=15 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0340000
+/801a/GDP: poster channel 13 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8004/GDP: poster channel 2 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8006/GDP: poster channel 3 progress desc=16 pi=15 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0450000
+/801a/GDP: poster channel 13 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/800a/GDP: poster channel 5 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8006/GDP: poster channel 3 progress desc=32 pi=31 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/8005/GDP: completer channel 2 progress cqe=2 ci=1 qpn=0x14773 uidx=18 wqe=0 opcode=0x0
+/801b/GDP: completer channel 13 progress cqe=1 ci=0 qpn=0x14790 uidx=45 wqe=0 opcode=0x0
+/8007/GDP: completer channel 3 progress cqe=2 ci=1 qpn=0x14786 uidx=35 wqe=0 opcode=0x0
+/8018/GDP: poster channel 12 progress desc=16 pi=15 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0450000
+/800e/GDP: poster channel 7 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/801a/GDP: poster channel 13 progress desc=8 pi=7 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/800f/GDP: completer channel 7 progress cqe=2 ci=1 qpn=0x14778 uidx=23 wqe=0 opcode=0x0
+/800a/GDP: poster channel 5 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8010/GDP: poster channel 8 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/800d/GDP: completer channel 6 progress cqe=1 ci=0 qpn=0x1479b uidx=54 wqe=0 opcode=0x0
+/801c/GDP: poster channel 14 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/801b/GDP: completer channel 13 progress cqe=2 ci=1 qpn=0x1477e uidx=29 wqe=0 opcode=0x0
+/801a/GDP: poster channel 13 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8015/GDP: completer channel 10 progress cqe=2 ci=1 qpn=0x1478d uidx=42 wqe=0 opcode=0x0
+/8010/GDP: poster channel 8 progress desc=16 pi=15 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0340000
+/8009/GDP: completer channel 4 progress cqe=2 ci=1 qpn=0x14775 uidx=20 wqe=0 opcode=0x0
+/8017/GDP: completer channel 11 progress cqe=2 ci=1 qpn=0x1477c uidx=27 wqe=0 opcode=0x0
+/8014/GDP: poster channel 10 progress desc=32 pi=31 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0450000
+/8008/GDP: poster channel 4 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8000/GDP: poster channel 0 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/801a/GDP: poster channel 13 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8016/GDP: poster channel 11 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8010/GDP: poster channel 8 progress desc=32 pi=31 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0340000
+/800d/GDP: completer channel 6 progress cqe=2 ci=1 qpn=0x14789 uidx=38 wqe=0 opcode=0x0
+/8000/GDP: poster channel 0 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/800e/GDP: poster channel 7 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8002/GDP: poster channel 1 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8012/GDP: poster channel 9 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8000/GDP: poster channel 0 progress desc=8 pi=7 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/8018/GDP: poster channel 12 progress desc=1 pi=0 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0450000
+/8006/GDP: poster channel 3 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8008/GDP: poster channel 4 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8008/GDP: poster channel 4 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8004/GDP: poster channel 2 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8014/GDP: poster channel 10 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8000/GDP: poster channel 0 progress desc=16 pi=15 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/800a/GDP: poster channel 5 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/800a/GDP: poster channel 5 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8002/GDP: poster channel 1 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8001/GDP: completer channel 0 progress cqe=1 ci=0 qpn=0x14795 uidx=48 wqe=0 opcode=0x0
+/8018/GDP: poster channel 12 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8014/GDP: poster channel 10 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8011/GDP: completer channel 8 progress cqe=1 ci=0 qpn=0x14779 uidx=24 wqe=0 opcode=0x0
+/8000/GDP: poster channel 0 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/801a/GDP: poster channel 13 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8000/GDP: poster channel 0 progress desc=32 pi=31 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/8000/GDP: poster channel 0 progress desc=1 pi=0 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/8004/GDP: poster channel 2 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8011/GDP: completer channel 8 progress cqe=2 ci=1 qpn=0x1479d uidx=56 wqe=0 opcode=0x0
+/8018/GDP: poster channel 12 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8006/GDP: poster channel 3 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/800c/GDP: poster channel 6 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8018/GDP: poster channel 12 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/800e/GDP: poster channel 7 progress desc=1 pi=0 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/801a/GDP: poster channel 13 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8001/GDP: completer channel 0 progress cqe=2 ci=1 qpn=0x14771 uidx=16 wqe=0 opcode=0x0
+/801c/GDP: poster channel 14 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/801c/GDP: poster channel 14 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8006/GDP: poster channel 3 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8000/GDP: poster channel 0 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/800a/GDP: poster channel 5 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/801c/GDP: poster channel 14 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8004/GDP: poster channel 2 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8002/GDP: poster channel 1 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8012/GDP: poster channel 9 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/801d/GDP: completer channel 14 progress cqe=2 ci=1 qpn=0x147a3 uidx=62 wqe=0 opcode=0x0
+/8010/GDP: poster channel 8 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8000/GDP: poster channel 0 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8004/GDP: poster channel 2 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/801e/GDP: poster channel 15 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8008/GDP: poster channel 4 progress desc=1 pi=0 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0340000
+/801c/GDP: poster channel 14 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/800c/GDP: poster channel 6 progress desc=1 pi=0 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0340000
+/801a/GDP: poster channel 13 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8012/GDP: poster channel 9 progress desc=2 pi=1 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/8018/GDP: poster channel 12 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/801e/GDP: poster channel 15 progress desc=1 pi=0 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/8018/GDP: poster channel 12 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8000/GDP: poster channel 0 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8009/GDP: completer channel 4 progress cqe=1 ci=0 qpn=0x1260e uidx=36 wqe=0 opcode=0x0
+/8002/GDP: poster channel 1 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/801c/GDP: poster channel 14 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8016/GDP: poster channel 11 progress desc=1 pi=0 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/8004/GDP: poster channel 2 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8004/GDP: poster channel 2 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/800a/GDP: poster channel 5 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8000/GDP: poster channel 0 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8014/GDP: poster channel 10 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8006/GDP: poster channel 3 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8016/GDP: poster channel 11 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8002/GDP: poster channel 1 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8000/GDP: poster channel 0 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/801c/GDP: poster channel 14 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8004/GDP: poster channel 2 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8002/GDP: poster channel 1 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/800a/GDP: poster channel 5 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8019/GDP: completer channel 12 progress cqe=1 ci=0 qpn=0x12c1d uidx=44 wqe=0 opcode=0x0
+/8004/GDP: poster channel 2 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8014/GDP: poster channel 10 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8004/GDP: poster channel 2 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8000/GDP: poster channel 0 progress desc=16 pi=15 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0340000
+/801c/GDP: poster channel 14 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8010/GDP: poster channel 8 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/801e/GDP: poster channel 15 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8003/GDP: completer channel 1 progress cqe=1 ci=0 qpn=0x10b97 uidx=49 wqe=0 opcode=0x0
+/8006/GDP: poster channel 3 progress desc=2 pi=1 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0340000
+/801f/GDP: completer channel 15 progress cqe=1 ci=0 qpn=0x12607 uidx=31 wqe=0 opcode=0x0
+/801d/GDP: completer channel 14 progress cqe=1 ci=0 qpn=0x10b80 uidx=30 wqe=0 opcode=0x0
+/8014/GDP: poster channel 10 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8014/GDP: poster channel 10 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8000/GDP: poster channel 0 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8008/GDP: poster channel 4 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8001/GDP: completer channel 0 progress cqe=1 ci=0 qpn=0x125f8 uidx=16 wqe=0 opcode=0x0
+/801e/GDP: poster channel 15 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/801c/GDP: poster channel 14 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8008/GDP: poster channel 4 progress desc=2 pi=1 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0340000
+/800c/GDP: poster channel 6 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/800d/GDP: completer channel 6 progress cqe=1 ci=0 qpn=0x12c17 uidx=38 wqe=0 opcode=0x0
+/8014/GDP: poster channel 10 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/800e/GDP: poster channel 7 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8016/GDP: poster channel 11 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8007/GDP: completer channel 3 progress cqe=1 ci=0 qpn=0x1261f uidx=51 wqe=0 opcode=0x0
+/8013/GDP: completer channel 9 progress cqe=1 ci=0 qpn=0x10b7b uidx=25 wqe=0 opcode=0x0
+/800c/GDP: poster channel 6 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8004/GDP: poster channel 2 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/801a/GDP: poster channel 13 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/801c/GDP: poster channel 14 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8008/GDP: poster channel 4 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/801c/GDP: poster channel 14 progress desc=16 pi=15 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0340000
+/8000/GDP: poster channel 0 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8004/GDP: poster channel 2 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/801e/GDP: poster channel 15 progress desc=2 pi=1 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/800a/GDP: poster channel 5 progress desc=2 pi=1 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0450000
+/8001/GDP: completer channel 0 progress cqe=2 ci=1 qpn=0x1260a uidx=32 wqe=0 opcode=0x0
+/801c/GDP: poster channel 14 progress desc=32 pi=31 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0340000
+/8000/GDP: poster channel 0 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/800c/GDP: poster channel 6 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8005/GDP: completer channel 2 progress cqe=1 ci=0 qpn=0x10b98 uidx=50 wqe=0 opcode=0x0
+/800b/GDP: completer channel 5 progress cqe=1 ci=0 qpn=0x12c29 uidx=53 wqe=0 opcode=0x0
+/8017/GDP: completer channel 11 progress cqe=1 ci=0 qpn=0x12603 uidx=27 wqe=0 opcode=0x0
+/8004/GDP: poster channel 2 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8006/GDP: poster channel 3 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8016/GDP: poster channel 11 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/801a/GDP: poster channel 13 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8018/GDP: poster channel 12 progress desc=8 pi=7 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/8008/GDP: poster channel 4 progress desc=8 pi=7 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/801f/GDP: completer channel 15 progress cqe=1 ci=0 qpn=0x10b81 uidx=31 wqe=0 opcode=0x0
+/8012/GDP: poster channel 9 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8005/GDP: completer channel 2 progress cqe=1 ci=0 qpn=0x125fa uidx=18 wqe=0 opcode=0x0
+/8010/GDP: poster channel 8 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8005/GDP: completer channel 2 progress cqe=1 ci=0 qpn=0x12c25 uidx=50 wqe=0 opcode=0x0
+/8000/GDP: poster channel 0 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8008/GDP: poster channel 4 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/800f/GDP: completer channel 7 progress cqe=1 ci=0 qpn=0x12be0 uidx=23 wqe=0 opcode=0x0
+/800c/GDP: poster channel 6 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/800c/GDP: poster channel 6 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8008/GDP: poster channel 4 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8018/GDP: poster channel 12 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8016/GDP: poster channel 11 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/800a/GDP: poster channel 5 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/800a/GDP: poster channel 5 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8000/GDP: poster channel 0 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/801a/GDP: poster channel 13 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8010/GDP: poster channel 8 progress desc=1 pi=0 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/801d/GDP: completer channel 14 progress cqe=2 ci=1 qpn=0x10b92 uidx=46 wqe=0 opcode=0x0
+/8002/GDP: poster channel 1 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8002/GDP: poster channel 1 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8019/GDP: completer channel 12 progress cqe=1 ci=0 qpn=0x10ba2 uidx=60 wqe=0 opcode=0x0
+/800b/GDP: completer channel 5 progress cqe=2 ci=1 qpn=0x12c16 uidx=37 wqe=0 opcode=0x0
+/8006/GDP: poster channel 3 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8012/GDP: poster channel 9 progress desc=1 pi=0 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0340000
+/801a/GDP: poster channel 13 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8002/GDP: poster channel 1 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8014/GDP: poster channel 10 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8014/GDP: poster channel 10 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8006/GDP: poster channel 3 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8009/GDP: completer channel 4 progress cqe=2 ci=1 qpn=0x125fc uidx=20 wqe=0 opcode=0x0
+/8012/GDP: poster channel 9 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/801b/GDP: completer channel 13 progress cqe=1 ci=0 qpn=0x12c1e uidx=45 wqe=0 opcode=0x0
+/800e/GDP: poster channel 7 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/800e/GDP: poster channel 7 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8002/GDP: poster channel 1 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/800c/GDP: poster channel 6 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/800a/GDP: poster channel 5 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8000/GDP: poster channel 0 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8012/GDP: poster channel 9 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/800c/GDP: poster channel 6 progress desc=8 pi=7 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0340000
+/8008/GDP: poster channel 4 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8016/GDP: poster channel 11 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8005/GDP: completer channel 2 progress cqe=2 ci=1 qpn=0x10b74 uidx=18 wqe=0 opcode=0x0
+/801e/GDP: poster channel 15 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/800b/GDP: completer channel 5 progress cqe=1 ci=0 qpn=0x125fd uidx=21 wqe=0 opcode=0x0
+/8004/GDP: poster channel 2 progress desc=16 pi=15 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0340000
+/8000/GDP: poster channel 0 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/801a/GDP: poster channel 13 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8008/GDP: poster channel 4 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/800a/GDP: poster channel 5 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/800a/GDP: poster channel 5 progress desc=8 pi=7 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0450000
+/8001/GDP: completer channel 0 progress cqe=1 ci=0 qpn=0x10b96 uidx=48 wqe=0 opcode=0x0
+/8016/GDP: poster channel 11 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8010/GDP: poster channel 8 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8013/GDP: completer channel 9 progress cqe=1 ci=0 qpn=0x12613 uidx=41 wqe=0 opcode=0x0
+/8008/GDP: poster channel 4 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/800a/GDP: poster channel 5 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8008/GDP: poster channel 4 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/800a/GDP: poster channel 5 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8004/GDP: poster channel 2 progress desc=32 pi=31 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0340000
+/8005/GDP: completer channel 2 progress cqe=2 ci=1 qpn=0x1261e uidx=50 wqe=0 opcode=0x0
+/801e/GDP: poster channel 15 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8008/GDP: poster channel 4 progress desc=32 pi=31 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0450000
+/8007/GDP: completer channel 3 progress cqe=2 ci=1 qpn=0x1260d uidx=35 wqe=0 opcode=0x0
+/8012/GDP: poster channel 9 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/800c/GDP: poster channel 6 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8003/GDP: completer channel 1 progress cqe=1 ci=0 qpn=0x1260b uidx=33 wqe=0 opcode=0x0
+/800c/GDP: poster channel 6 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8014/GDP: poster channel 10 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/800e/GDP: poster channel 7 progress desc=2 pi=1 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0340000
+/8018/GDP: poster channel 12 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8019/GDP: completer channel 12 progress cqe=2 ci=1 qpn=0x12be5 uidx=28 wqe=0 opcode=0x0
+/8015/GDP: completer channel 10 progress cqe=1 ci=0 qpn=0x12602 uidx=26 wqe=0 opcode=0x0
+/8012/GDP: poster channel 9 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8005/GDP: completer channel 2 progress cqe=2 ci=1 qpn=0x12bdb uidx=18 wqe=0 opcode=0x0
+/8010/GDP: poster channel 8 progress desc=2 pi=1 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0340000
+/800d/GDP: completer channel 6 progress cqe=1 ci=0 qpn=0x10b8a uidx=38 wqe=0 opcode=0x0
+/800a/GDP: poster channel 5 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8002/GDP: poster channel 1 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/801a/GDP: poster channel 13 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8012/GDP: poster channel 9 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8006/GDP: poster channel 3 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/800c/GDP: poster channel 6 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/800a/GDP: poster channel 5 progress desc=64 pi=63 opcode=0x1 flags=0x2 ring_db=1 len=8 ep=0xc0450000
+/800b/GDP: completer channel 5 progress cqe=2 ci=1 qpn=0x12621 uidx=53 wqe=0 opcode=0x0
+/8003/GDP: completer channel 1 progress cqe=2 ci=1 qpn=0x10b73 uidx=17 wqe=0 opcode=0x0
+/800e/GDP: poster channel 7 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8018/GDP: poster channel 12 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/800b/GDP: completer channel 5 progress cqe=1 ci=0 qpn=0x10b77 uidx=21 wqe=0 opcode=0x0
+/8004/GDP: poster channel 2 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/800f/GDP: completer channel 7 progress cqe=1 ci=0 qpn=0x12611 uidx=39 wqe=0 opcode=0x0
+/801e/GDP: poster channel 15 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8002/GDP: poster channel 1 progress desc=8 pi=7 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0340000
+/8004/GDP: poster channel 2 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8002/GDP: poster channel 1 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8006/GDP: poster channel 3 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/801c/GDP: poster channel 14 progress desc=1 pi=0 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/800a/GDP: poster channel 5 progress desc=16 pi=15 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/800c/GDP: poster channel 6 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/801f/GDP: completer channel 15 progress cqe=2 ci=1 qpn=0x10b93 uidx=47 wqe=0 opcode=0x0
+/800a/GDP: poster channel 5 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8012/GDP: poster channel 9 progress desc=8 pi=7 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/8011/GDP: completer channel 8 progress cqe=1 ci=0 qpn=0x12600 uidx=24 wqe=0 opcode=0x0
+/8002/GDP: poster channel 1 progress desc=32 pi=31 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0450000
+/8007/GDP: completer channel 3 progress cqe=1 ci=0 qpn=0x12c14 uidx=35 wqe=0 opcode=0x0
+/800e/GDP: poster channel 7 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/801a/GDP: poster channel 13 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/801a/GDP: poster channel 13 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8014/GDP: poster channel 10 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/800c/GDP: poster channel 6 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8006/GDP: poster channel 3 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8006/GDP: poster channel 3 progress desc=16 pi=15 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/8010/GDP: poster channel 8 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/801e/GDP: poster channel 15 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8011/GDP: completer channel 8 progress cqe=2 ci=1 qpn=0x12612 uidx=40 wqe=0 opcode=0x0
+/8017/GDP: completer channel 11 progress cqe=1 ci=0 qpn=0x12c1c uidx=43 wqe=0 opcode=0x0
+/8001/GDP: completer channel 0 progress cqe=2 ci=1 qpn=0x10b72 uidx=16 wqe=0 opcode=0x0
+/8008/GDP: poster channel 4 progress desc=32 pi=31 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0340000
+/8006/GDP: poster channel 3 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/800e/GDP: poster channel 7 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8004/GDP: poster channel 2 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/800c/GDP: poster channel 6 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/800b/GDP: completer channel 5 progress cqe=2 ci=1 qpn=0x10b89 uidx=37 wqe=0 opcode=0x0
+/8010/GDP: poster channel 8 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/801c/GDP: poster channel 14 progress desc=8 pi=7 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0340000
+/800e/GDP: poster channel 7 progress desc=16 pi=15 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/8019/GDP: completer channel 12 progress cqe=1 ci=0 qpn=0x12604 uidx=28 wqe=0 opcode=0x0
+/8002/GDP: poster channel 1 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8018/GDP: poster channel 12 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8003/GDP: completer channel 1 progress cqe=2 ci=1 qpn=0x125f9 uidx=17 wqe=0 opcode=0x0
+/8014/GDP: poster channel 10 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8010/GDP: poster channel 8 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/800a/GDP: poster channel 5 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/800d/GDP: completer channel 6 progress cqe=2 ci=1 qpn=0x12bdf uidx=22 wqe=0 opcode=0x0
+/8019/GDP: completer channel 12 progress cqe=2 ci=1 qpn=0x10b90 uidx=44 wqe=0 opcode=0x0
+/8015/GDP: completer channel 10 progress cqe=2 ci=1 qpn=0x12626 uidx=58 wqe=0 opcode=0x0
+/8010/GDP: poster channel 8 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8010/GDP: poster channel 8 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/801b/GDP: completer channel 13 progress cqe=1 ci=0 qpn=0x12617 uidx=45 wqe=0 opcode=0x0
+/8013/GDP: completer channel 9 progress cqe=2 ci=1 qpn=0x10b8d uidx=41 wqe=0 opcode=0x0
+/800c/GDP: poster channel 6 progress desc=32 pi=31 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0340000
+/800d/GDP: completer channel 6 progress cqe=1 ci=0 qpn=0x12610 uidx=38 wqe=0 opcode=0x0
+/800f/GDP: completer channel 7 progress cqe=1 ci=0 qpn=0x10b8b uidx=39 wqe=0 opcode=0x0
+/8016/GDP: poster channel 11 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8002/GDP: poster channel 1 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/800d/GDP: completer channel 6 progress cqe=2 ci=1 qpn=0x12622 uidx=54 wqe=0 opcode=0x0
+/8000/GDP: poster channel 0 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8007/GDP: completer channel 3 progress cqe=2 ci=1 qpn=0x12bdc uidx=19 wqe=0 opcode=0x0
+/8006/GDP: poster channel 3 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8011/GDP: completer channel 8 progress cqe=1 ci=0 qpn=0x10b9e uidx=56 wqe=0 opcode=0x0
+/8003/GDP: completer channel 1 progress cqe=1 ci=0 qpn=0x12c24 uidx=49 wqe=0 opcode=0x0
+/801a/GDP: poster channel 13 progress desc=16 pi=15 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/801a/GDP: poster channel 13 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/801d/GDP: completer channel 14 progress cqe=1 ci=0 qpn=0x12c58 uidx=62 wqe=0 opcode=0x0
+/800c/GDP: poster channel 6 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/801b/GDP: completer channel 13 progress cqe=1 ci=0 qpn=0x10b7f uidx=29 wqe=0 opcode=0x0
+/8018/GDP: poster channel 12 progress desc=16 pi=15 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/8017/GDP: completer channel 11 progress cqe=2 ci=1 qpn=0x12627 uidx=59 wqe=0 opcode=0x0
+/800d/GDP: completer channel 6 progress cqe=2 ci=1 qpn=0x10b78 uidx=22 wqe=0 opcode=0x0
+/801d/GDP: completer channel 14 progress cqe=2 ci=1 qpn=0x12c1f uidx=46 wqe=0 opcode=0x0
+/801b/GDP: completer channel 13 progress cqe=2 ci=1 qpn=0x12605 uidx=29 wqe=0 opcode=0x0
+/801e/GDP: poster channel 15 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8012/GDP: poster channel 9 progress desc=16 pi=15 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/800c/GDP: poster channel 6 progress desc=32 pi=31 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0340000
+/8016/GDP: poster channel 11 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8003/GDP: completer channel 1 progress cqe=2 ci=1 qpn=0x12bf1 uidx=33 wqe=0 opcode=0x0
+/8006/GDP: poster channel 3 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8006/GDP: poster channel 3 progress desc=4 pi=3 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/800e/GDP: poster channel 7 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8010/GDP: poster channel 8 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8011/GDP: completer channel 8 progress cqe=2 ci=1 qpn=0x10b7a uidx=24 wqe=0 opcode=0x0
+/8010/GDP: poster channel 8 progress desc=16 pi=15 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0450000
+/8012/GDP: poster channel 9 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8016/GDP: poster channel 11 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8004/GDP: poster channel 2 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/800e/GDP: poster channel 7 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8012/GDP: poster channel 9 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8014/GDP: poster channel 10 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8012/GDP: poster channel 9 progress desc=32 pi=31 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/8007/GDP: completer channel 3 progress cqe=1 ci=0 qpn=0x10b75 uidx=19 wqe=0 opcode=0x0
+/801a/GDP: poster channel 13 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/801c/GDP: poster channel 14 progress desc=16 pi=15 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/8008/GDP: poster channel 4 progress desc=4 pi=3 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/8002/GDP: poster channel 1 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8014/GDP: poster channel 10 progress desc=32 pi=31 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0450000
+/8017/GDP: completer channel 11 progress cqe=1 ci=0 qpn=0x10b7d uidx=27 wqe=0 opcode=0x0
+/801e/GDP: poster channel 15 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8018/GDP: poster channel 12 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/800e/GDP: poster channel 7 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8008/GDP: poster channel 4 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8011/GDP: completer channel 8 progress cqe=1 ci=0 qpn=0x12be1 uidx=24 wqe=0 opcode=0x0
+/8010/GDP: poster channel 8 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8014/GDP: poster channel 10 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/801a/GDP: poster channel 13 progress desc=8 pi=7 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0450000
+/8012/GDP: poster channel 9 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8017/GDP: completer channel 11 progress cqe=2 ci=1 qpn=0x10ba1 uidx=59 wqe=0 opcode=0x0
+/8010/GDP: poster channel 8 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/801c/GDP: poster channel 14 progress desc=2 pi=1 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/801a/GDP: poster channel 13 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/801e/GDP: poster channel 15 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8014/GDP: poster channel 10 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/801c/GDP: poster channel 14 progress desc=32 pi=31 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/8015/GDP: completer channel 10 progress cqe=1 ci=0 qpn=0x10b8e uidx=42 wqe=0 opcode=0x0
+/801c/GDP: poster channel 14 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8015/GDP: completer channel 10 progress cqe=1 ci=0 qpn=0x12c1b uidx=42 wqe=0 opcode=0x0
+/8007/GDP: completer channel 3 progress cqe=2 ci=1 qpn=0x10b99 uidx=51 wqe=0 opcode=0x0
+/8010/GDP: poster channel 8 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/801a/GDP: poster channel 13 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8000/GDP: poster channel 0 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/801e/GDP: poster channel 15 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8009/GDP: completer channel 4 progress cqe=1 ci=0 qpn=0x12bdd uidx=20 wqe=0 opcode=0x0
+/8008/GDP: poster channel 4 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/800f/GDP: completer channel 7 progress cqe=2 ci=1 qpn=0x12623 uidx=55 wqe=0 opcode=0x0
+/801e/GDP: poster channel 15 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8016/GDP: poster channel 11 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8012/GDP: poster channel 9 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8015/GDP: completer channel 10 progress cqe=2 ci=1 qpn=0x12be3 uidx=26 wqe=0 opcode=0x0
+/800f/GDP: completer channel 7 progress cqe=2 ci=1 qpn=0x10b79 uidx=23 wqe=0 opcode=0x0
+/800e/GDP: poster channel 7 progress desc=16 pi=15 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/801f/GDP: completer channel 15 progress cqe=1 ci=0 qpn=0x12be8 uidx=31 wqe=0 opcode=0x0
+/800a/GDP: poster channel 5 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/801f/GDP: completer channel 15 progress cqe=2 ci=1 qpn=0x12619 uidx=47 wqe=0 opcode=0x0
+/801b/GDP: completer channel 13 progress cqe=2 ci=1 qpn=0x12c57 uidx=61 wqe=0 opcode=0x0
+/8014/GDP: poster channel 10 progress desc=16 pi=15 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0340000
+/8002/GDP: poster channel 1 progress desc=32 pi=31 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0450000
+/8013/GDP: completer channel 9 progress cqe=1 ci=0 qpn=0x12be2 uidx=25 wqe=0 opcode=0x0
+/801b/GDP: completer channel 13 progress cqe=2 ci=1 qpn=0x10b91 uidx=45 wqe=0 opcode=0x0
+/8018/GDP: poster channel 12 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8011/GDP: completer channel 8 progress cqe=2 ci=1 qpn=0x12c19 uidx=40 wqe=0 opcode=0x0
+/8009/GDP: completer channel 4 progress cqe=1 ci=0 qpn=0x10b76 uidx=20 wqe=0 opcode=0x0
+/801f/GDP: completer channel 15 progress cqe=2 ci=1 qpn=0x12c59 uidx=63 wqe=0 opcode=0x0
+/8012/GDP: poster channel 9 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8013/GDP: completer channel 9 progress cqe=2 ci=1 qpn=0x12c1a uidx=41 wqe=0 opcode=0x0
+/801d/GDP: completer channel 14 progress cqe=1 ci=0 qpn=0x12618 uidx=46 wqe=0 opcode=0x0
+/8015/GDP: completer channel 10 progress cqe=2 ci=1 qpn=0x10b7c uidx=26 wqe=0 opcode=0x0
+/8016/GDP: poster channel 11 progress desc=4 pi=3 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/800e/GDP: poster channel 7 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8018/GDP: poster channel 12 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/801e/GDP: poster channel 15 progress desc=16 pi=15 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/801e/GDP: poster channel 15 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8010/GDP: poster channel 8 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8009/GDP: completer channel 4 progress cqe=2 ci=1 qpn=0x12c15 uidx=36 wqe=0 opcode=0x0
+/801c/GDP: poster channel 14 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8016/GDP: poster channel 11 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/801e/GDP: poster channel 15 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/801e/GDP: poster channel 15 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8006/GDP: poster channel 3 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/801d/GDP: completer channel 14 progress cqe=2 ci=1 qpn=0x12606 uidx=30 wqe=0 opcode=0x0
+/8016/GDP: poster channel 11 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8009/GDP: completer channel 4 progress cqe=2 ci=1 qpn=0x10b88 uidx=36 wqe=0 opcode=0x0
+/8013/GDP: completer channel 9 progress cqe=2 ci=1 qpn=0x12601 uidx=25 wqe=0 opcode=0x0
+/800e/GDP: poster channel 7 progress desc=8 pi=7 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8008/GDP: poster channel 4 progress desc=32 pi=31 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0450000
+/8016/GDP: poster channel 11 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/801a/GDP: poster channel 13 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8006/GDP: poster channel 3 progress desc=16 pi=15 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0450000
+/801c/GDP: poster channel 14 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/800f/GDP: completer channel 7 progress cqe=2 ci=1 qpn=0x12c2c uidx=55 wqe=0 opcode=0x0
+/800e/GDP: poster channel 7 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8018/GDP: poster channel 12 progress desc=8 pi=7 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0450000
+/8017/GDP: completer channel 11 progress cqe=2 ci=1 qpn=0x12be4 uidx=27 wqe=0 opcode=0x0
+/8010/GDP: poster channel 8 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/801c/GDP: poster channel 14 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/800e/GDP: poster channel 7 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8014/GDP: poster channel 10 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8019/GDP: completer channel 12 progress cqe=2 ci=1 qpn=0x12628 uidx=60 wqe=0 opcode=0x0
+/8016/GDP: poster channel 11 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8006/GDP: poster channel 3 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8016/GDP: poster channel 11 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/800e/GDP: poster channel 7 progress desc=32 pi=31 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0340000
+/8018/GDP: poster channel 12 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8018/GDP: poster channel 12 progress desc=16 pi=15 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8016/GDP: poster channel 11 progress desc=32 pi=31 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8001/GDP: completer channel 0 progress cqe=1 ci=0 qpn=0x12c23 uidx=48 wqe=0 opcode=0x0
+/8018/GDP: poster channel 12 progress desc=32 pi=31 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/8001/GDP: completer channel 0 progress cqe=2 ci=1 qpn=0x12bd9 uidx=16 wqe=0 opcode=0x0
+/8012/GDP: poster channel 9 progress desc=64 pi=63 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0340000
+/800e/GDP: poster channel 7 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/801c/GDP: poster channel 14 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8004/GDP: poster channel 2 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/800a/GDP: poster channel 5 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8014/GDP: poster channel 10 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/801c/GDP: poster channel 14 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8012/GDP: poster channel 9 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/800a/GDP: poster channel 5 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/801a/GDP: poster channel 13 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8006/GDP: poster channel 3 progress desc=64 pi=63 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/8012/GDP: poster channel 9 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/801c/GDP: poster channel 14 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8010/GDP: poster channel 8 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8006/GDP: poster channel 3 progress desc=128 pi=127 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/800e/GDP: poster channel 7 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/800c/GDP: poster channel 6 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/801e/GDP: poster channel 15 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8008/GDP: poster channel 4 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8010/GDP: poster channel 8 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8014/GDP: poster channel 10 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8006/GDP: poster channel 3 progress desc=64 pi=63 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/801e/GDP: poster channel 15 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8000/GDP: poster channel 0 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8010/GDP: poster channel 8 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/801c/GDP: poster channel 14 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8016/GDP: poster channel 11 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8018/GDP: poster channel 12 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/801a/GDP: poster channel 13 progress desc=64 pi=63 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0340000
+/8004/GDP: poster channel 2 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8018/GDP: poster channel 12 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/800c/GDP: poster channel 6 progress desc=64 pi=63 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/800e/GDP: poster channel 7 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8008/GDP: poster channel 4 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/801a/GDP: poster channel 13 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8002/GDP: poster channel 1 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8016/GDP: poster channel 11 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/800a/GDP: poster channel 5 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8000/GDP: poster channel 0 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/801a/GDP: poster channel 13 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/800a/GDP: poster channel 5 progress desc=128 pi=127 opcode=0x1 flags=0x2 ring_db=1 len=8 ep=0xc0450000
+/8018/GDP: poster channel 12 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8016/GDP: poster channel 11 progress desc=64 pi=63 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/8004/GDP: poster channel 2 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8018/GDP: poster channel 12 progress desc=64 pi=63 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0230000
+/8012/GDP: poster channel 9 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8010/GDP: poster channel 8 progress desc=64 pi=63 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0340000
+/800c/GDP: poster channel 6 progress desc=64 pi=63 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0450000
+/8000/GDP: poster channel 0 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8002/GDP: poster channel 1 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/800e/GDP: poster channel 7 progress desc=64 pi=63 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0450000
+/801e/GDP: poster channel 15 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8008/GDP: poster channel 4 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/800c/GDP: poster channel 6 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0230000
+/8014/GDP: poster channel 10 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8014/GDP: poster channel 10 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/801e/GDP: poster channel 15 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8016/GDP: poster channel 11 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8002/GDP: poster channel 1 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8006/GDP: poster channel 3 progress desc=64 pi=63 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0340000
+/8004/GDP: poster channel 2 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8000/GDP: poster channel 0 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0340000
+/8008/GDP: poster channel 4 progress desc=64 pi=63 opcode=0x0 flags=0x0 ring_db=0 len=14352 ep=0xc0450000
+/8002/GDP: poster channel 1 progress desc=64 pi=63 opcode=0x0 flags=0x2 ring_db=1 len=14352 ep=0xc0450000

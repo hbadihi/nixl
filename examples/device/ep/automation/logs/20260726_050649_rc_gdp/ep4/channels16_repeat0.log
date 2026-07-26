@@ -1,0 +1,39 @@
+# started_at: 2026-07-26T05:10:52
+# cwd: /workspace/external/nixl/examples/device/ep
+# command: python3 tests/elastic/elastic.py --plan tests/elastic/no_expansion.json --num-processes 4 --num-tokens 128 --num-experts-per-rank 4 --dispatch-only
+# env PYTHONPATH=/workspace/external/nixl/install/lib/python3/dist-packages
+# env UCX_GDP_ENABLE=y
+# env UCX_PLUGIN_PATH=/workspace/external/ucx-spcx-plugin/install/lib/ucx
+# env UCX_RC_GDP_NUM_CHANNELS=16
+# env UCX_TLS=rc,rc_gdp,tcp,self,sm,cuda_copy
+
+Starting TCPStore and rank server locally
+Process 2 -> global_rank=0, local_rank=0
+Process 3 -> global_rank=1, local_rank=1
+Process 0 -> global_rank=2, local_rank=2
+Process 1 -> global_rank=3, local_rank=3
+Allocating buffer size: 119.275904 MB ...
+global_rank=0, local_rank=0 -> start phase 0
+global_rank=0, local_rank=0 -> adding connections to [1, 2, 3]
+global_rank=1, local_rank=1 -> start phase 0
+global_rank=1, local_rank=1 -> adding connections to [0, 2, 3]
+global_rank=3, local_rank=3 -> start phase 0
+global_rank=3, local_rank=3 -> adding connections to [0, 1, 2]
+global_rank=2, local_rank=2 -> start phase 0
+global_rank=2, local_rank=2 -> adding connections to [0, 1, 3]
+[rank 0] Dispatch bandwidth: 44.33 GB/s, avg_t=171.12 us, min_t=141.15 us, max_t=231.30 us
+[rank 2] Dispatch bandwidth: 44.42 GB/s, avg_t=170.78 us, min_t=142.75 us, max_t=234.88 us
+[rank 3] Dispatch bandwidth: 44.41 GB/s, avg_t=170.81 us, min_t=138.69 us, max_t=236.99 us
+[rank 1] Dispatch bandwidth: 44.26 GB/s, avg_t=171.38 us, min_t=145.28 us, max_t=237.47 us
+global_rank=0, local_rank=0 -> end phase 0
+global_rank=3, local_rank=3 -> end phase 0
+global_rank=1, local_rank=1 -> end phase 0
+global_rank=2, local_rank=2 -> end phase 0
+[rank 2] nixlPut latency: samples=94116, p50=1.499000 us, p90=9.719000 us, p99=22.004000 us, average=3.339053 us, overflow_slots=0
+[rank 3] nixlPut latency: samples=94860, p50=1.506500 us, p90=11.890500 us, p99=22.615500 us, average=4.204468 us, overflow_slots=0
+[rank 1] nixlPut latency: samples=94984, p50=1.476000 us, p90=10.808500 us, p99=22.932000 us, average=3.743608 us, overflow_slots=0
+[rank 0] nixlPut latency: samples=97464, p50=1.599000 us, p90=10.666000 us, p99=23.105500 us, average=3.799893 us, overflow_slots=0
+global_rank=1, local_rank=1 -> done
+global_rank=0, local_rank=0 -> done
+global_rank=3, local_rank=3 -> done
+global_rank=2, local_rank=2 -> done
