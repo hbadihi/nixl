@@ -33,7 +33,7 @@ PLAN_PATH = EP_DIR / "tests" / "elastic" / "no_expansion.json"
 
 CUDA_VISIBLE_DEVICES = "0,1,4,5"
 GPU_NIC_MAP = "mlx5_0,mlx5_1,mlx5_2,mlx5_4,mlx5_5,mlx5_6"
-PYTHONPATH = "/workspace/external/nixl/install/lib/python3/dist-packages"
+DEFAULT_BUILD_DIR = REPO_ROOT / "build-proxy-release"
 EXPECTED_RANKS = frozenset(range(4))
 DEFAULT_TIMEOUT_SECONDS = 40.0
 TERMINATION_GRACE_SECONDS = 1.0
@@ -43,7 +43,12 @@ SWEEP_ENVIRONMENT_VARIABLES = (
     "NIXL_EP_PROXY_CHANNELS",
     "NIXL_EP_PROXY_WORKER_COUNT",
     "NIXL_EP_NUM_CHANNELS",
+    "NIXL_PLUGIN_DIR",
+    "NIXL_LOG_LEVEL",
     "PYTHONPATH",
+    "PYTHONDONTWRITEBYTECODE",
+    "UCX_NET_DEVICES",
+    "UCX_TLS",
 )
 EXPECTED_NIXL_EP_BACKENDS = {
     "proxy": "proxy",
@@ -183,6 +188,7 @@ def build_parameter_points(
             for channels, proxy_workers, experts in product(
                 channel_counts, proxy_worker_counts, experts_per_rank
             )
+            if proxy_workers <= channels
         ]
 
     if backend == "direct":
@@ -200,9 +206,9 @@ def build_parameter_points(
     raise ValueError(f"unsupported backend: {backend}")
 
 
-def build_command(experts_per_rank: int) -> list[str]:
-    return [
-        "python3",
+def build_command(experts_per_rank: int, kineto: bool) -> list[str]:
+    command = [
+        sys.executable,
         str(ELASTIC_SCRIPT),
         "--plan",
         str(PLAN_PATH),
@@ -217,17 +223,37 @@ def build_command(experts_per_rank: int) -> list[str]:
         "--dispatch-only",
         "--disable-ll-nvlink",
     ]
+    if kineto:
+        command.append("--kineto")
+    return command
 
 
 def build_environment(
-    backend: str, channels: int, proxy_workers: int | None
+    backend: str,
+    channels: int,
+    proxy_workers: int | None,
+    build_dir: Path,
 ) -> dict[str, str]:
     environment = os.environ.copy()
     for name in SWEEP_ENVIRONMENT_VARIABLES:
         environment.pop(name, None)
 
-    environment["PYTHONPATH"] = PYTHONPATH
-    environment["CUDA_VISIBLE_DEVICES"] = CUDA_VISIBLE_DEVICES
+    environment.update(
+        {
+            "PYTHONPATH": os.pathsep.join(
+                (
+                    str(REPO_ROOT / "src" / "bindings" / "python" / "nixl-meta"),
+                    str(build_dir / "examples" / "device" / "ep"),
+                )
+            ),
+            "NIXL_PLUGIN_DIR": str(build_dir / "src" / "plugins" / "ucx"),
+            "NIXL_LOG_LEVEL": "WARN",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "CUDA_VISIBLE_DEVICES": CUDA_VISIBLE_DEVICES,
+            "UCX_NET_DEVICES": "all",
+            "UCX_TLS": "^cuda_ipc",
+        }
+    )
     if backend == "proxy":
         if proxy_workers is None:
             raise ValueError("proxy backend requires a proxy worker count")
@@ -247,55 +273,49 @@ def build_environment(
     return environment
 
 
-def verify_nixl_ep_backend(backend: str, environment: dict[str, str]) -> str:
+def verify_nixl_ep_backend(backend: str, build_dir: Path) -> str:
     expected_backend = EXPECTED_NIXL_EP_BACKENDS[backend]
-    probe_prefix = "NIXL_EP_BACKEND="
-    probe_command = [
-        "python3",
-        "-c",
-        (
-            "import nixl_ep; "
-            f"print('{probe_prefix}' + nixl_ep.get_gpu_device_api_backend())"
-        ),
-    ]
-
+    compile_commands_path = build_dir / "compile_commands.json"
     try:
-        probe = subprocess.run(
-            probe_command,
-            cwd="/",
-            env=environment,
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
+        compile_commands = json.loads(
+            compile_commands_path.read_text(encoding="utf-8")
         )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise RuntimeError(f"could not import and inspect nixl_ep: {error}") from error
-
-    if probe.returncode != 0:
-        details = probe.stderr.strip() or probe.stdout.strip() or "no output"
+    except (OSError, json.JSONDecodeError) as error:
         raise RuntimeError(
-            f"could not import and inspect nixl_ep (exit {probe.returncode}): "
-            f"{details}"
-        )
+            f"could not read Meson compile metadata {compile_commands_path}: "
+            f"{error}"
+        ) from error
 
-    backend_lines = [
-        line.removeprefix(probe_prefix)
-        for line in probe.stdout.splitlines()
-        if line.startswith(probe_prefix)
-    ]
-    if len(backend_lines) != 1:
+    backend_defines = {
+        "proxy": "-DNIXL_GPU_DEVICE_BACKEND_PROXY",
+        "ucx": "-DNIXL_GPU_DEVICE_BACKEND_UCX",
+    }
+    resolved_backends: set[str] = set()
+    for entry in compile_commands:
+        source_path = str(entry.get("file", "")).replace("\\", "/")
+        if not source_path.endswith("examples/device/ep/csrc/nixl_ep.cpp"):
+            continue
+        command = entry.get("command")
+        if command is None:
+            command = " ".join(entry.get("arguments", ()))
+        for candidate, define in backend_defines.items():
+            if define in command:
+                resolved_backends.add(candidate)
+
+    if len(resolved_backends) != 1:
+        detected = ", ".join(sorted(resolved_backends)) or "none"
         raise RuntimeError(
-            "nixl_ep backend probe did not return exactly one backend value"
+            "could not resolve exactly one NIXL EP backend from "
+            f"{compile_commands_path}; detected: {detected}"
         )
 
-    loaded_backend = backend_lines[0]
-    if loaded_backend != expected_backend:
+    resolved_backend = resolved_backends.pop()
+    if resolved_backend != expected_backend:
         raise RuntimeError(
             f"--backend {backend} requires nixl_ep backend '{expected_backend}', "
-            f"but the installed extension reports '{loaded_backend}'"
+            f"but {build_dir} was compiled for '{resolved_backend}'"
         )
-    return loaded_backend
+    return resolved_backend
 
 
 def terminate_process_group(process: subprocess.Popen[bytes]) -> None:
@@ -462,6 +482,8 @@ def run_experiment(
     repeat_index: int,
     repeat_count: int,
     timeout_seconds: float,
+    build_dir: Path,
+    kineto: bool,
 ) -> RunResult:
     channel_label = (
         f"channels-{channels}_workers-{proxy_workers}"
@@ -475,8 +497,8 @@ def run_experiment(
     )
     run_dir = create_unique_directory(sweep_dir, run_name)
     log_path = run_dir / "run.log"
-    command = build_command(experts_per_rank)
-    environment = build_environment(backend, channels, proxy_workers)
+    command = build_command(experts_per_rank, kineto)
+    environment = build_environment(backend, channels, proxy_workers, build_dir)
 
     exit_code, timed_out, elapsed_seconds = run_process(
         command, EP_DIR, environment, log_path, timeout_seconds
@@ -1003,6 +1025,20 @@ def parse_args(arguments: Sequence[str] | None = None) -> argparse.Namespace:
         help="wall-clock timeout in seconds for each experiment (default: 40)",
     )
     parser.add_argument(
+        "--build-dir",
+        type=Path,
+        default=DEFAULT_BUILD_DIR,
+        help=(
+            "configured NIXL build directory containing the EP Python module "
+            "and UCX plugin (default: build-proxy-release)"
+        ),
+    )
+    parser.add_argument(
+        "--kineto",
+        action="store_true",
+        help="enable Kineto profiling in elastic.py",
+    )
+    parser.add_argument(
         "--repeats",
         type=positive_int,
         default=1,
@@ -1060,6 +1096,7 @@ def parse_args(arguments: Sequence[str] | None = None) -> argparse.Namespace:
             )
         if parsed.channel_counts is None:
             parser.error("--backend direct requires --channel-counts")
+    parsed.build_dir = parsed.build_dir.resolve()
     return parsed
 
 
@@ -1071,21 +1108,30 @@ def main(arguments: Sequence[str] | None = None) -> int:
         args.proxy_worker_counts,
         args.experts_per_rank,
     )
-    for required_path in (ELASTIC_SCRIPT, PLAN_PATH):
+    required_files = (ELASTIC_SCRIPT, PLAN_PATH)
+    required_directories = (
+        args.build_dir / "examples" / "device" / "ep",
+        args.build_dir / "src" / "plugins" / "ucx",
+    )
+    for required_path in required_files:
         if not required_path.is_file():
             print(
                 f"error: required file does not exist: {required_path}",
                 file=sys.stderr,
             )
             return 2
+    for required_path in required_directories:
+        if not required_path.is_dir():
+            print(
+                f"error: required build directory does not exist: {required_path}",
+                file=sys.stderr,
+            )
+            return 2
 
-    first_channels, first_proxy_workers, _ = parameter_points[0]
     try:
         loaded_backend = verify_nixl_ep_backend(
             args.backend,
-            build_environment(
-                args.backend, first_channels, first_proxy_workers
-            ),
+            args.build_dir,
         )
     except RuntimeError as error:
         print(f"error: {error}", file=sys.stderr)
@@ -1097,6 +1143,8 @@ def main(arguments: Sequence[str] | None = None) -> int:
             if args.coupled_proxy_channel_worker is not None
             else ", independent worker sweep"
         )
+    if args.kineto:
+        selected_mode += ", Kineto enabled"
     print(
         f"Verified nixl_ep backend: {loaded_backend} "
         f"(selected mode: {selected_mode})",
@@ -1150,6 +1198,8 @@ def main(arguments: Sequence[str] | None = None) -> int:
             repeat_index,
             args.repeats,
             args.timeout,
+            args.build_dir,
+            args.kineto,
         )
         results.append(result)
         result_detail = (
