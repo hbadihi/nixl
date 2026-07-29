@@ -101,6 +101,7 @@ def test_main(
     seed: int = 0,
     kineto: bool = False,
     fault_tolerance_test: bool = False,
+    dispatch_only: bool = False,
 ):
     torch.manual_seed(seed + rank)
     torch.cuda.manual_seed(seed + rank)
@@ -322,6 +323,8 @@ def test_main(
 
                         # Check combine correctness
                         for zero_copy in (False,) if use_logfmt else (False, True):
+                            if dispatch_only:
+                                break
                             if zero_copy:
                                 buffer.get_next_combine_buffer(handle)[
                                     :, :, :
@@ -397,6 +400,8 @@ def test_main(
             return_recv_hook=return_recv_hook,
         )
         return_recv_hook and large_gemm_with_hook(hook)
+        if dispatch_only:
+            return
         combined_x, event, hook = buffer.combine(
             simulated_gemm_x,
             topk_idx,
@@ -421,13 +426,20 @@ def test_main(
             num_logfmt10_bytes if use_logfmt else num_bf16_bytes
         ) * num_selections
 
-    # Dispatch + combine testing
+    # Dispatch (+ combine) testing
     avg_t, min_t, max_t = bench(partial(test_func, return_recv_hook=False))
-    print(
-        f"[rank {rank}] Dispatch + combine bandwidth: {(num_dispatch_comm_bytes + num_combine_comm_bytes) / 1e9 / avg_t:.2f} GB/s, "
-        f"avg_t={avg_t * 1e6:.2f} us, min_t={min_t * 1e6:.2f} us, max_t={max_t * 1e6:.2f} us",
-        flush=True,
-    )
+    if dispatch_only:
+        print(
+            f"[rank {rank}] Dispatch bandwidth: {num_dispatch_comm_bytes / 1e9 / avg_t:.2f} GB/s, "
+            f"avg_t={avg_t * 1e6:.2f} us, min_t={min_t * 1e6:.2f} us, max_t={max_t * 1e6:.2f} us",
+            flush=True,
+        )
+    else:
+        print(
+            f"[rank {rank}] Dispatch + combine bandwidth: {(num_dispatch_comm_bytes + num_combine_comm_bytes) / 1e9 / avg_t:.2f} GB/s, "
+            f"avg_t={avg_t * 1e6:.2f} us, min_t={min_t * 1e6:.2f} us, max_t={max_t * 1e6:.2f} us",
+            flush=True,
+        )
 
     # Separate profiling
     if not kineto:
@@ -435,6 +447,26 @@ def test_main(
 
     for return_recv_hook in (False, True):
         buffer.barrier()
+        if dispatch_only:
+            dispatch_t = bench_kineto(
+                partial(test_func, return_recv_hook=return_recv_hook),
+                kernel_names="dispatch",
+                barrier_comm_profiling=True,
+                suppress_kineto_output=False,
+                num_kernels_per_period=2 if return_recv_hook else 1,
+                barrier_fn=test_barrier,
+            )
+            if not return_recv_hook:
+                print(
+                    f"[rank {rank}] Dispatch bandwidth: {num_dispatch_comm_bytes / 1e9 / dispatch_t:.2f} GB/s, avg_t={dispatch_t * 1e6:.2f} us",
+                    flush=True,
+                )
+            else:
+                print(
+                    f"[rank {rank}] Dispatch send/recv time: {dispatch_t[0] * 1e6:.2f} + {dispatch_t[1] * 1e6:.2f} us",
+                    flush=True,
+                )
+            continue
         dispatch_t, combine_t = bench_kineto(
             partial(test_func, return_recv_hook=return_recv_hook),
             kernel_names=("dispatch", "combine"),
@@ -576,6 +608,7 @@ def worker(torch_rank: int, args: argparse.Namespace):
             buffer,
             kineto=args.kineto,
             fault_tolerance_test=kill_rank,
+            dispatch_only=args.dispatch_only,
         )
         # Query mask buffer to detect rank failures and clean them up
         buffer.query_mask_buffer(mask_status)
@@ -645,6 +678,11 @@ def main():
         help="TCP server address (for both TCPStore and rank server). If not set, both will be started locally.",
     )
     parser.add_argument("--kineto", action="store_true", help="Enable kineto profiling")
+    parser.add_argument(
+        "--dispatch-only",
+        action="store_true",
+        help="Run dispatch validation and benchmarking without combine",
+    )
     parser.add_argument(
         "--disable-ll-nvlink",
         action="store_true",
