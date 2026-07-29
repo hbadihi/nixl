@@ -30,6 +30,8 @@
 
 #include <cuda_runtime.h>
 
+#include <nixl_device.cuh>
+
 namespace nixl_ep {
 
 namespace intranode {

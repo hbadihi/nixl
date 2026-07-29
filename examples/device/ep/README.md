@@ -43,6 +43,36 @@ buffer.disconnect_ranks(ranks)
 - `connect_ranks(remote_ranks, activate=True)`: Establish NIXL connections to new peers (can be called multiple times); in low-latency mode, use `activate=False` to keep new peers masked until explicitly unmasked.
 - `disconnect_ranks(remote_ranks)`: Clean up connections to departing peers
 
+## CPU Proxy Configuration
+
+NIXL EP is built once with both GPU Device API paths. Select the path when the
+agent starts:
+
+- `NIXL_DEVICE_PROXY=1` enables the CPU proxy.
+- `NIXL_DEVICE_PROXY=0` selects the direct UCX GPU Device API path (the EP
+  default when the variable is unset).
+
+Existing kernels and Device API calls do not change between modes.
+
+When the proxy is enabled:
+
+- A **channel** is the software ordering entity the NIXL device API uses with a
+  destination rank. Each channel contains one ring per dest peer/rank slot.
+- `NIXL_EP_PROXY_CHANNELS` is the logical channel count (default `4`).
+- `NIXL_EP_PROXY_WORKER_COUNT` is the requested CPU proxy-worker count (default:
+  the configured channel count). The runtime clamps it to the channel count.
+  Worker `W` owns channel ids where `channel_id % worker_count == W` and handles
+  **all dest-rank rings** of those channels.
+- `NIXL_GPU_NIC_MAP` is required. It is a comma-separated, physical-GPU-indexed
+  list of base NIC names, for example `mlx5_0,mlx5_1,mlx5_2,mlx5_4`.
+- Each `(channel, destination-rank)` pair owns an isolated UCX worker.
+- UCX device channels are set to `1` for the host-posting proxy path.
+
+The channel and worker variables must be positive integers. There is no inferred channel ceiling,
+and `update_memory_buffers()` has no proxy-channel parameter. Remote proxy views
+always contain exactly `num_ranks` global-rank slots; each slot is either null or
+the agent named by that numeric global rank.
+
 ## Testing
 
 The elastic test suite in `tests/elastic/` validates dynamic scaling capabilities:
