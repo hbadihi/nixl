@@ -73,6 +73,11 @@ public:
     }
 
     nixl_status_t
+    progress(uint32_t, uint32_t) override {
+        return progress();
+    }
+
+    nixl_status_t
     shutdown() override {
         return NIXL_SUCCESS;
     }
@@ -120,6 +125,11 @@ public:
     nixl_status_t
     progress() override {
         return NIXL_SUCCESS;
+    }
+
+    nixl_status_t
+    progress(uint32_t, uint32_t) override {
+        return progress();
     }
 
     nixl_status_t
@@ -228,6 +238,11 @@ public:
     }
 
     nixl_status_t
+    progress(uint32_t, uint32_t) override {
+        return progress();
+    }
+
+    nixl_status_t
     shutdown() override {
         return NIXL_SUCCESS;
     }
@@ -267,6 +282,11 @@ public:
     }
 
     nixl_status_t
+    progress(uint32_t, uint32_t) override {
+        return progress();
+    }
+
+    nixl_status_t
     shutdown() override {
         return NIXL_SUCCESS;
     }
@@ -286,7 +306,7 @@ struct DummyProxyMemViews {
 };
 
 static DummyProxyMemViews
-registerDummyMemViews(nixlProxyRuntime &runtime);
+registerDummyMemViews(nixlProxyRuntime &runtime, uint32_t peer_count = 1);
 
 // ---------------------------------------------------------------------------
 // Device kernels
@@ -303,6 +323,16 @@ __global__ void
 proxyPutKernel(nixlMemViewH src_mvh, nixlMemViewH dst_mvh, nixl_status_t *out_status) {
     nixlMemViewElem src{src_mvh, 0, 0}, dst{dst_mvh, 0, 0};
     *out_status = nixlPut(src, dst, /*size=*/0);
+}
+
+__global__ void
+proxyPutAtKernel(nixlMemViewH src_mvh,
+                 nixlMemViewH dst_mvh,
+                 uint32_t peer_index,
+                 uint32_t channel_id,
+                 nixl_status_t *out_status) {
+    nixlMemViewElem src{src_mvh, 0, 0}, dst{dst_mvh, peer_index, 0};
+    *out_status = nixlPut(src, dst, 0, channel_id);
 }
 
 __global__ void
@@ -327,6 +357,15 @@ publishProxyContext(nixlProxyRuntime &runtime) {
 static void
 clearProxyContext() {
     ASSERT_EQ(nixlProxyClearContext(), cudaSuccess);
+}
+
+template<typename T>
+static T *
+hostAliasOf(T *device_alias) {
+    cudaPointerAttributes attrs{};
+    EXPECT_EQ(cudaPointerGetAttributes(&attrs, device_alias), cudaSuccess);
+    EXPECT_NE(attrs.hostPointer, nullptr);
+    return static_cast<T *>(attrs.hostPointer);
 }
 
 // ---------------------------------------------------------------------------
@@ -384,7 +423,7 @@ TEST_F(ProxyDeviceApiTest, ContextPublishedAfterStartWorkers) {
     auto adapter = std::make_unique<StubProxyBackendAdapter>();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter), 1, 1, 1), NIXL_SUCCESS);
+    ASSERT_EQ(runtime.init(std::move(adapter), 4, 1, 1), NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
 
@@ -405,7 +444,7 @@ TEST_F(ProxyDeviceApiTest, ContextClearedAfterShutdown) {
     auto adapter = std::make_unique<StubProxyBackendAdapter>();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter), 1, 1, 1), NIXL_SUCCESS);
+    ASSERT_EQ(runtime.init(std::move(adapter), 4, 1, 1), NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
     ASSERT_EQ(runtime.shutdown(), NIXL_SUCCESS);
@@ -430,7 +469,7 @@ TEST_F(ProxyDeviceApiTest, PutReturnsInProgWhenEnqueued) {
     auto adapter = std::make_unique<StubProxyBackendAdapter>();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter), 1, 1, 1), NIXL_SUCCESS);
+    ASSERT_EQ(runtime.init(std::move(adapter), 4, 1, 1), NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
     const auto mvhs = registerDummyMemViews(runtime);
@@ -451,7 +490,7 @@ TEST_F(ProxyDeviceApiTest, AtomicAddReturnsInProgWhenEnqueued) {
     auto adapter = std::make_unique<StubProxyBackendAdapter>();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter), 1, 1, 1), NIXL_SUCCESS);
+    ASSERT_EQ(runtime.init(std::move(adapter), 4, 1, 1), NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
     const auto mvhs = registerDummyMemViews(runtime);
@@ -464,6 +503,52 @@ TEST_F(ProxyDeviceApiTest, AtomicAddReturnsInProgWhenEnqueued) {
     EXPECT_EQ(deviceGet(d_status), NIXL_IN_PROG);
     cudaFree(d_status);
 
+    clearProxyContext();
+    ASSERT_EQ(runtime.shutdown(), NIXL_SUCCESS);
+}
+
+TEST_F(ProxyDeviceApiTest, PeerBoundsAreValidatedAndChannelsAreNormalized) {
+    auto adapter_owner = std::make_unique<ControllableStubAdapter>();
+    auto *adapter = adapter_owner.get();
+    nixlProxyRuntime runtime;
+
+    ASSERT_EQ(runtime.init(std::move(adapter_owner), 2, 2, 1), NIXL_SUCCESS);
+    ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
+    publishProxyContext(runtime);
+    const auto mvhs = registerDummyMemViews(runtime, 1);
+
+    nixl_status_t *d_status = deviceAlloc<nixl_status_t>();
+    proxyPutAtKernel<<<1, 1>>>(mvhs.src, mvhs.dst, 2, 0, d_status);
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    EXPECT_EQ(deviceGet(d_status), NIXL_ERR_INVALID_PARAM);
+
+    proxyPutAtKernel<<<1, 1>>>(mvhs.src, mvhs.dst, 0, 5, d_status);
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    EXPECT_EQ(deviceGet(d_status), NIXL_IN_PROG);
+    ASSERT_TRUE(waitForCondition([adapter]() { return adapter->hasPendingForChannel(1); }));
+
+    cudaFree(d_status);
+    clearProxyContext();
+    ASSERT_EQ(runtime.shutdown(), NIXL_SUCCESS);
+}
+
+TEST_F(ProxyDeviceApiTest, SecondPeerSubmissionPreservesLogicalChannel) {
+    auto adapter_owner = std::make_unique<ControllableStubAdapter>();
+    auto *adapter = adapter_owner.get();
+    nixlProxyRuntime runtime;
+
+    ASSERT_EQ(runtime.init(std::move(adapter_owner), 2, 2, 1), NIXL_SUCCESS);
+    ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
+    publishProxyContext(runtime);
+    const auto mvhs = registerDummyMemViews(runtime, 2);
+
+    nixl_status_t *d_status = deviceAlloc<nixl_status_t>();
+    proxyPutAtKernel<<<1, 1>>>(mvhs.src, mvhs.dst, 1, 1, d_status);
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    ASSERT_EQ(deviceGet(d_status), NIXL_IN_PROG);
+    ASSERT_TRUE(waitForCondition([&]() { return adapter->hasPendingForChannel(1); }));
+
+    cudaFree(d_status);
     clearProxyContext();
     ASSERT_EQ(runtime.shutdown(), NIXL_SUCCESS);
 }
@@ -497,6 +582,31 @@ proxyPutAndPollKernel(nixlMemViewH src_mvh,
         poll = nixlGpuGetXferStatus(xfer_status);
     } while (poll == NIXL_IN_PROG);
     *out_poll_status = poll;
+}
+
+__global__ void
+proxyPutPollLoopKernel(nixlMemViewH src_mvh,
+                       nixlMemViewH dst_mvh,
+                       uint32_t channel_id,
+                       uint32_t op_count,
+                       nixl_status_t *out_put_statuses,
+                       nixl_status_t *out_poll_statuses) {
+    nixlMemViewElem src{src_mvh, 0, 0}, dst{dst_mvh, 0, 0};
+    for (uint32_t i = 0; i < op_count; ++i) {
+        nixlGpuXferStatusH xfer_status{};
+        out_put_statuses[i] = nixlPut(src, dst, 0, channel_id, 0, &xfer_status);
+        if (out_put_statuses[i] != NIXL_IN_PROG) {
+            out_poll_statuses[i] = out_put_statuses[i];
+            return;
+        }
+
+        do {
+            out_poll_statuses[i] = nixlGpuGetXferStatus(xfer_status);
+        } while (out_poll_statuses[i] == NIXL_IN_PROG);
+        if (out_poll_statuses[i] != NIXL_SUCCESS) {
+            return;
+        }
+    }
 }
 
 __global__ void
@@ -574,29 +684,29 @@ proxyPollOnceKernel(nixlGpuXferStatusH *xfer_status, nixl_status_t *out_poll_sta
 // Register one local and one remote proxy memview so dispatch can prepare
 // transport-ready descriptors before submit().
 static DummyProxyMemViews
-registerDummyMemViews(nixlProxyRuntime &runtime) {
+registerDummyMemViews(nixlProxyRuntime &runtime, uint32_t peer_count) {
     static DummyBackendMD local_md;
     static DummyBackendMD remote_md;
 
     DummyProxyMemViews handles;
     nixlMemViewH dummy_local_backend = reinterpret_cast<nixlMemViewH>(uintptr_t{0xBEEF});
-    nixlMemViewH dummy_remote_backend = reinterpret_cast<nixlMemViewH>(uintptr_t{0xFEED});
 
     EXPECT_EQ(runtime.registerProxyMemView(dummy_local_backend, &handles.src), NIXL_SUCCESS);
-    EXPECT_EQ(runtime.registerProxyMemView(dummy_remote_backend, &handles.dst), NIXL_SUCCESS);
 
     nixl_meta_dlist_t local_dlist(DRAM_SEG);
     local_dlist.addDesc(nixlMetaDesc(0x1000, 64, 0, &local_md));
     EXPECT_EQ(runtime.storeMetadata(handles.src, local_dlist), NIXL_SUCCESS);
 
     nixl_remote_meta_dlist_t remote_dlist(DRAM_SEG);
-    nixlRemoteMetaDesc remote_desc("peer");
-    remote_desc.addr = 0x2000;
-    remote_desc.len = 64;
-    remote_desc.devId = 0;
-    remote_desc.metadataP = &remote_md;
-    remote_dlist.addDesc(remote_desc);
-    EXPECT_EQ(runtime.storeMetadata(handles.dst, remote_dlist), NIXL_SUCCESS);
+    for (uint32_t peer = 0; peer < peer_count; ++peer) {
+        nixlRemoteMetaDesc remote_desc("peer" + std::to_string(peer));
+        remote_desc.addr = 0x2000 + peer * 0x100;
+        remote_desc.len = 64;
+        remote_desc.devId = 0;
+        remote_desc.metadataP = &remote_md;
+        remote_dlist.addDesc(remote_desc);
+    }
+    EXPECT_EQ(runtime.prepMemView(remote_dlist, &handles.dst), NIXL_SUCCESS);
 
     return handles;
 }
@@ -641,7 +751,7 @@ TEST_F(ProxyDeviceApiTest, PutCompletionRoundTrip) {
     auto adapter = std::make_unique<StubProxyBackendAdapter>();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter), 1, 1, 1), NIXL_SUCCESS);
+    ASSERT_EQ(runtime.init(std::move(adapter), 4, 1, 1), NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
 
@@ -667,7 +777,7 @@ TEST_F(ProxyDeviceApiTest, AtomicAddCompletionRoundTrip) {
     auto adapter = std::make_unique<StubProxyBackendAdapter>();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter), 1, 1, 1), NIXL_SUCCESS);
+    ASSERT_EQ(runtime.init(std::move(adapter), 4, 1, 1), NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
 
@@ -696,12 +806,11 @@ TEST_F(ProxyDeviceApiTest, CompletionNotVisibleUntilPublished) {
     auto *adapter = adapter_owner.get();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter_owner), 1, 1, 1), NIXL_SUCCESS);
+    ASSERT_EQ(runtime.init(std::move(adapter_owner), 4, 1, 1), NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
 
     const auto mvhs = registerDummyMemViews(runtime);
-
     nixl_status_t *d_put_status = deviceAlloc<nixl_status_t>();
     nixl_status_t *d_poll_status = deviceAlloc<nixl_status_t>();
 
@@ -737,7 +846,7 @@ TEST_F(ProxyDeviceApiTest, MultipleSubmissionsCompletionFrontier) {
     auto *adapter = adapter_owner.get();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter_owner), 1, 1, 1), NIXL_SUCCESS);
+    ASSERT_EQ(runtime.init(std::move(adapter_owner), 4, 1, 1), NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
 
@@ -760,6 +869,8 @@ TEST_F(ProxyDeviceApiTest, MultipleSubmissionsCompletionFrontier) {
         ASSERT_EQ(cudaGetLastError(), cudaSuccess);
         EXPECT_EQ(deviceGet(d_put_status[i]), NIXL_IN_PROG);
     }
+
+    ASSERT_TRUE(waitForCondition([adapter]() { return adapter->pendingCount() == kOps; }));
 
     // All three should still be in-progress.
     nixl_status_t *d_poll = deviceAlloc<nixl_status_t>();
@@ -798,7 +909,7 @@ TEST_F(ProxyDeviceApiTest, PutPutAtomicAddCompletionFrontier) {
     auto *adapter = adapter_owner.get();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter_owner), 1, 1, 1), NIXL_SUCCESS);
+    ASSERT_EQ(runtime.init(std::move(adapter_owner), 4, 1, 1), NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
 
@@ -868,7 +979,7 @@ TEST_F(ProxyDeviceApiTest, EarlierCompletionStaysSuccessfulAfterLaterError) {
     auto *adapter = adapter_owner.get();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter_owner), 1, 1, 1), NIXL_SUCCESS);
+    ASSERT_EQ(runtime.init(std::move(adapter_owner), 4, 1, 1), NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
 
@@ -921,12 +1032,11 @@ TEST_F(ProxyDeviceApiTest, EarlierErrorPropagatesToLaterQueuedOp) {
     auto *adapter = adapter_owner.get();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter_owner), 1, 1, 1), NIXL_SUCCESS);
+    ASSERT_EQ(runtime.init(std::move(adapter_owner), 4, 1, 1), NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
 
     const auto mvhs = registerDummyMemViews(runtime);
-
     nixl_status_t *d_put_status[2];
     nixlGpuXferStatusH *d_xfer_status[2];
     for (int i = 0; i < 2; ++i) {
@@ -952,6 +1062,13 @@ TEST_F(ProxyDeviceApiTest, EarlierErrorPropagatesToLaterQueuedOp) {
     ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
     EXPECT_EQ(deviceGet(d_poll), NIXL_ERR_BACKEND);
 
+    nixl_status_t *d_rejected_status = deviceAlloc<nixl_status_t>();
+    proxyPutAtKernel<<<1, 1>>>(mvhs.src, mvhs.dst, 0, 0, d_rejected_status);
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    EXPECT_EQ(deviceGet(d_rejected_status), NIXL_ERR_BACKEND);
+
+    adapter->markCompleteWithStatus(2, NIXL_SUCCESS);
+    cudaFree(d_rejected_status);
     cudaFree(d_poll);
     for (int i = 0; i < 2; ++i) {
         cudaFree(d_put_status[i]);
@@ -967,7 +1084,7 @@ TEST_F(ProxyDeviceApiTest, CompletionPropagatesErrorStatus) {
     auto adapter = std::make_unique<ErrorStubAdapter>();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter), 1, 1, 1), NIXL_SUCCESS);
+    ASSERT_EQ(runtime.init(std::move(adapter), 4, 1, 1), NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
 
@@ -997,7 +1114,7 @@ TEST_F(ProxyDeviceApiTest, SubmitFailurePropagatesErrorStatus) {
     auto *adapter = adapter_owner.get();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter_owner), 1, 1, 1), NIXL_SUCCESS);
+    ASSERT_EQ(runtime.init(std::move(adapter_owner), 4, 1, 1), NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
 
@@ -1021,13 +1138,70 @@ TEST_F(ProxyDeviceApiTest, SubmitFailurePropagatesErrorStatus) {
     ASSERT_EQ(runtime.shutdown(), NIXL_SUCCESS);
 }
 
+TEST_F(ProxyDeviceApiTest, RingSlotsAreReusedAfterWraparound) {
+    auto adapter = std::make_unique<StubProxyBackendAdapter>();
+    nixlProxyRuntime runtime;
+
+    ASSERT_EQ(runtime.init(std::move(adapter), 1, 1, 1), NIXL_SUCCESS);
+    ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
+    publishProxyContext(runtime);
+    const auto mvhs = registerDummyMemViews(runtime);
+
+    constexpr uint32_t kOps = kDefaultProxyRingDepth + 3;
+    nixl_status_t *d_put_statuses = nullptr;
+    nixl_status_t *d_poll_statuses = nullptr;
+    ASSERT_EQ(cudaMalloc(&d_put_statuses, sizeof(nixl_status_t) * kOps), cudaSuccess);
+    ASSERT_EQ(cudaMalloc(&d_poll_statuses, sizeof(nixl_status_t) * kOps), cudaSuccess);
+
+    proxyPutPollLoopKernel<<<1, 1>>>(mvhs.src, mvhs.dst, 0, kOps, d_put_statuses, d_poll_statuses);
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    ASSERT_EQ(cudaGetLastError(), cudaSuccess);
+
+    std::vector<nixl_status_t> put_statuses(kOps);
+    std::vector<nixl_status_t> poll_statuses(kOps);
+    ASSERT_EQ(cudaMemcpy(put_statuses.data(),
+                         d_put_statuses,
+                         sizeof(nixl_status_t) * kOps,
+                         cudaMemcpyDeviceToHost),
+              cudaSuccess);
+    ASSERT_EQ(cudaMemcpy(poll_statuses.data(),
+                         d_poll_statuses,
+                         sizeof(nixl_status_t) * kOps,
+                         cudaMemcpyDeviceToHost),
+              cudaSuccess);
+    for (uint32_t i = 0; i < kOps; ++i) {
+        EXPECT_EQ(put_statuses[i], NIXL_IN_PROG) << "put " << i;
+        EXPECT_EQ(poll_statuses[i], NIXL_SUCCESS) << "poll " << i;
+    }
+    nixlProxyWorkRing ring{};
+    ASSERT_EQ(
+        cudaMemcpy(
+            &ring, runtime.deviceChannelViews()[0].work_ring, sizeof(ring), cudaMemcpyDeviceToHost),
+        cudaSuccess);
+    uint64_t producer_idx = 0;
+    ASSERT_EQ(
+        cudaMemcpy(&producer_idx, ring.producer_idx, sizeof(producer_idx), cudaMemcpyDeviceToHost),
+        cudaSuccess);
+    EXPECT_EQ(producer_idx, kOps);
+    uint64_t *consumer_idx_host = hostAliasOf(ring.consumer_idx);
+    ASSERT_NE(consumer_idx_host, nullptr);
+    EXPECT_EQ(__atomic_load_n(consumer_idx_host, __ATOMIC_ACQUIRE), kOps);
+
+    cudaFree(d_poll_statuses);
+    cudaFree(d_put_statuses);
+    clearProxyContext();
+    ASSERT_EQ(runtime.shutdown(), NIXL_SUCCESS);
+}
+
 // When the ring is full and no worker can drain it, the next enqueue should
 // spin until shutdown is signalled and then return NIXL_ERR_BACKEND.
 TEST_F(ProxyDeviceApiTest, RingOverflowReturnsBackendErrorOnShutdown) {
     auto adapter = std::make_unique<StubProxyBackendAdapter>();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter), 1, 1, 1), NIXL_SUCCESS);
+    ASSERT_EQ(runtime.init(std::move(adapter), 4, 1, 1), NIXL_SUCCESS);
+    const auto mvhs = registerDummyMemViews(runtime);
+    ASSERT_NE(mvhs.dst, nullptr);
     publishProxyContext(runtime);
     uint32_t *shutdown_host = shutdownWordHostFromRuntime(runtime);
     ASSERT_NE(shutdown_host, nullptr);
@@ -1068,7 +1242,7 @@ TEST_F(ProxyDeviceApiTest, ChannelCompletionsAdvanceIndependently) {
     auto *adapter = adapter_owner.get();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter_owner), 1, 2, 2), NIXL_SUCCESS);
+    ASSERT_EQ(runtime.init(std::move(adapter_owner), 4, 2, 2), NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
 
