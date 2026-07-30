@@ -311,8 +311,11 @@ nixlAgentData::createProxyRuntime(nixlBackendEngine *engine,
 
     proxyRuntime = std::make_unique<nixlProxyRuntime>();
 
-    status = proxyRuntime->init(
-        std::move(proxy_adapter), config_.proxyChannelCount, config_.proxyWorkerCount, config_.pthrDelay);
+    status = proxyRuntime->init(std::move(proxy_adapter),
+                                config_.proxyMaxPeers,
+                                config_.proxyChannelCount,
+                                config_.proxyWorkerCount,
+                                config_.pthrDelay);
     if (status != NIXL_SUCCESS) {
         proxyRuntime.reset();
         return status;
@@ -327,7 +330,8 @@ nixlAgentData::createProxyRuntime(nixlBackendEngine *engine,
 
     proxyTransportEngine = engine;
     NIXL_INFO << "Enabled device proxy runtime for backend '" << backend << "' with "
-              << config_.proxyWorkerCount << " worker(s) and " << config_.proxyChannelCount << " channel(s)";
+              << config_.proxyWorkerCount << " worker(s), max_peers=" << config_.proxyMaxPeers
+              << ", and " << config_.proxyChannelCount << " channel(s) per peer";
     return NIXL_SUCCESS;
 }
 

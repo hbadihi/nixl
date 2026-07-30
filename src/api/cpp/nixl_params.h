@@ -36,6 +36,7 @@ struct nixlAgentConfig {
     static constexpr bool kDefaultEnableDeviceProxy = false;
     static constexpr uint32_t kDefaultProxyWorkerCount = 1;
     static constexpr uint32_t kDefaultProxyChannelCount = 1;
+    static constexpr uint32_t kDefaultProxyMaxPeers = 256;
     static constexpr uint64_t kDefaultPthrDelayUs = 0;
     static constexpr uint64_t kDefaultLthrDelayUs = 100000;
     static constexpr std::chrono::microseconds kDefaultEtcdWatchTimeout =
@@ -66,6 +67,7 @@ struct nixlAgentConfig {
      *      multiple GPU submission queues while using one proxy worker.
      */
     uint32_t proxyChannelCount = kDefaultProxyChannelCount;
+    uint32_t proxyMaxPeers = kDefaultProxyMaxPeers;
 
     /**
      * @var Progress thread event waiting timeout.
@@ -115,7 +117,8 @@ struct nixlAgentConfig {
         bool enable_device_proxy = kDefaultEnableDeviceProxy,
         uint32_t proxy_worker_count = kDefaultProxyWorkerCount,
         uint32_t proxy_channel_count = kDefaultProxyChannelCount,
-        std::chrono::microseconds etcd_watch_timeout = kDefaultEtcdWatchTimeout) noexcept
+        std::chrono::microseconds etcd_watch_timeout = kDefaultEtcdWatchTimeout,
+        uint32_t proxy_max_peers = kDefaultProxyMaxPeers) noexcept
         : useProgThread(use_prog_thread),
           useListenThread(use_listen_thread),
           listenPort(port),
@@ -124,6 +127,7 @@ struct nixlAgentConfig {
           enableDeviceProxy(enable_device_proxy),
           proxyWorkerCount(proxy_worker_count),
           proxyChannelCount(proxy_channel_count),
+          proxyMaxPeers(proxy_max_peers),
           pthrDelay(pthr_delay_us),
           lthrDelay(lthr_delay_us),
           etcdWatchTimeout(etcd_watch_timeout) {}
