@@ -88,7 +88,7 @@ ProxyWorker::submitOwnedChannels() {
         for (uint32_t peer = 0; peer < max_peers_; ++peer) {
             nixlProxyChannelState *channel = getChannelState(peer, channel_id);
             nixlProxySubmission submission;
-            while (tryDequeue(*channel, submission)) {
+            if (tryDequeue(*channel, submission)) {
                 submitToBackend(*channel, peer, submission);
             }
         }
