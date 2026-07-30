@@ -75,6 +75,11 @@ class StubBackend : public nixlDeviceProxyBackendAdapter {
         }
 
         nixl_status_t
+        progress(uint32_t, uint32_t) override {
+            return progress();
+        }
+
+        nixl_status_t
         shutdown() override {
             return NIXL_SUCCESS;
         }
@@ -95,14 +100,16 @@ class ProxyRuntimeTest : public testing::Test {
         nixl_status_t
         initRuntime(uint32_t channel_count,
                     uint32_t worker_count,
-                    nixl_status_t init_rc = NIXL_SUCCESS) {
+                    nixl_status_t init_rc = NIXL_SUCCESS,
+                    uint32_t max_peers = 4) {
             auto backend = std::make_unique<StubBackend>();
             backend_ = backend.get();
             backend_->init_rc_ = init_rc;
-            return runtime_.init(std::move(backend), 1, channel_count, worker_count);
+            return runtime_.init(std::move(backend), max_peers, channel_count, worker_count);
         }
 
-        void TearDown() override {
+        void
+        TearDown() override {
             runtime_.shutdown();
         }
 
@@ -113,17 +120,56 @@ class ProxyRuntimeTest : public testing::Test {
 static nixlProxyWorkRing
 copyDeviceWorkRing(const nixlProxyChannelView &view) {
     nixlProxyWorkRing ring{};
-    EXPECT_EQ(cudaMemcpy(&ring, view.work_ring, sizeof(ring), cudaMemcpyDeviceToHost),
-              cudaSuccess);
+    EXPECT_EQ(cudaMemcpy(&ring, view.work_ring, sizeof(ring), cudaMemcpyDeviceToHost), cudaSuccess);
     return ring;
 }
 
-static nixlProxySubmission *
-hostRecordsFromDeviceAlias(nixlProxySubmission *records_host_dev) {
+template<class T>
+static T *
+hostAliasOf(T *device_alias) {
     cudaPointerAttributes attrs{};
-    EXPECT_EQ(cudaPointerGetAttributes(&attrs, records_host_dev), cudaSuccess);
+    EXPECT_EQ(cudaPointerGetAttributes(&attrs, device_alias), cudaSuccess);
     EXPECT_NE(attrs.hostPointer, nullptr);
-    return static_cast<nixlProxySubmission *>(attrs.hostPointer);
+    return static_cast<T *>(attrs.hostPointer);
+}
+
+static size_t
+channelViewIndex(uint32_t peer, uint32_t channel, uint32_t max_peers = 4) {
+    return static_cast<size_t>(channel) * max_peers + peer;
+}
+
+static std::vector<nixlBackendProxySubmission>
+waitForSubmissions(StubBackend *backend, size_t count) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
+    while (std::chrono::steady_clock::now() < deadline) {
+        {
+            std::lock_guard<std::mutex> lock(backend->submit_mutex_);
+            if (backend->submissions_.size() >= count) {
+                return backend->submissions_;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    std::lock_guard<std::mutex> lock(backend->submit_mutex_);
+    return backend->submissions_;
+}
+
+static nixl_remote_meta_dlist_t
+makeRemotePeerDlist(const std::vector<std::string> &agents, nixlBackendMD *md) {
+    nixl_remote_meta_dlist_t dlist(VRAM_SEG);
+    for (const auto &agent : agents) {
+        if (agent.empty()) {
+            dlist.addDesc(nixlRemoteMetaDesc(nixl_null_agent));
+        } else {
+            nixlRemoteMetaDesc desc(agent);
+            desc.addr = 0x4000;
+            desc.len = 64;
+            desc.devId = 0;
+            desc.metadataP = md;
+            dlist.addDesc(desc);
+        }
+    }
+    return dlist;
 }
 
 TEST_F(ProxyRuntimeTest, InitCallsBackendInit) {
@@ -131,11 +177,14 @@ TEST_F(ProxyRuntimeTest, InitCallsBackendInit) {
     EXPECT_TRUE(backend_->init_called_);
     EXPECT_EQ(backend_->init_worker_count_, 2u);
     EXPECT_EQ(backend_->init_channel_count_, 4u);
-    EXPECT_EQ(backend_->init_max_peers_, 1u);
 }
 
 TEST_F(ProxyRuntimeTest, InitRejectsNullBackend) {
-    EXPECT_EQ(runtime_.init(nullptr, 1, 4, 2), NIXL_ERR_INVALID_PARAM);
+    EXPECT_EQ(runtime_.init(nullptr, 4, 4, 2), NIXL_ERR_INVALID_PARAM);
+}
+
+TEST_F(ProxyRuntimeTest, InitRejectsZeroPeerCapacity) {
+    EXPECT_EQ(initRuntime(2, 1, NIXL_SUCCESS, 0), NIXL_ERR_INVALID_PARAM);
 }
 
 TEST_F(ProxyRuntimeTest, InitRejectsZeroChannels) {
@@ -150,50 +199,52 @@ TEST_F(ProxyRuntimeTest, InitPropagatesBackendFailure) {
     EXPECT_EQ(initRuntime(4, 2, NIXL_ERR_BACKEND), NIXL_ERR_BACKEND);
 }
 
-TEST_F(ProxyRuntimeTest, DeviceChannelViewsPopulated) {
+TEST_F(ProxyRuntimeTest, DeviceChannelViewMatrixStartsAllocated) {
     ASSERT_EQ(initRuntime(3, 1), NIXL_SUCCESS);
     const nixlProxyChannelView *views = runtime_.deviceChannelViews();
     ASSERT_NE(views, nullptr);
-    for (uint32_t i = 0; i < 3; ++i) {
-        EXPECT_NE(views[i].work_ring, nullptr);
-        const nixlProxyWorkRing ring = copyDeviceWorkRing(views[i]);
-        EXPECT_NE(ring.records, nullptr);
-        EXPECT_NE(ring.producer_idx, nullptr);
-        EXPECT_NE(ring.consumer_idx, nullptr);
-        EXPECT_NE(views[i].completion_slot, nullptr);
-        EXPECT_EQ(ring.depth, kDefaultProxyRingDepth);
+    for (uint32_t peer = 0; peer < 4; ++peer) {
+        for (uint32_t channel = 0; channel < 3; ++channel) {
+            const auto &view = views[channelViewIndex(peer, channel)];
+            EXPECT_NE(view.work_ring, nullptr);
+            EXPECT_NE(view.completion_slot, nullptr);
+        }
     }
 }
 
 TEST_F(ProxyRuntimeTest, WorkRingIndicesStartAtZero) {
+    DummyBackendMD remote_md;
     ASSERT_EQ(initRuntime(2, 1), NIXL_SUCCESS);
+    nixlMemViewH remote_mvh = nullptr;
+    ASSERT_EQ(runtime_.prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &remote_mvh),
+              NIXL_SUCCESS);
     const nixlProxyChannelView *views = runtime_.deviceChannelViews();
-    for (uint32_t i = 0; i < 2; ++i) {
-        const nixlProxyWorkRing ring = copyDeviceWorkRing(views[i]);
+    for (uint32_t channel = 0; channel < 2; ++channel) {
+        const nixlProxyWorkRing ring = copyDeviceWorkRing(views[channelViewIndex(0, channel)]);
         uint64_t producer = 0;
         uint64_t consumer = 0;
-        ASSERT_EQ(cudaMemcpy(&producer,
-                             ring.producer_idx,
-                             sizeof(producer),
-                             cudaMemcpyDeviceToHost),
-                  cudaSuccess);
-        ASSERT_EQ(cudaMemcpy(&consumer,
-                             ring.consumer_idx,
-                             sizeof(consumer),
-                             cudaMemcpyDeviceToHost),
-                  cudaSuccess);
+        ASSERT_EQ(
+            cudaMemcpy(&producer, ring.producer_idx, sizeof(producer), cudaMemcpyDeviceToHost),
+            cudaSuccess);
+        ASSERT_EQ(
+            cudaMemcpy(&consumer, ring.consumer_idx, sizeof(consumer), cudaMemcpyDeviceToHost),
+            cudaSuccess);
         EXPECT_EQ(producer, 0u);
         EXPECT_EQ(consumer, 0u);
     }
 }
 
 TEST_F(ProxyRuntimeTest, CompletionSlotsInitialized) {
+    DummyBackendMD remote_md;
     ASSERT_EQ(initRuntime(2, 1), NIXL_SUCCESS);
+    nixlMemViewH remote_mvh = nullptr;
+    ASSERT_EQ(runtime_.prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &remote_mvh),
+              NIXL_SUCCESS);
     const nixlProxyChannelView *views = runtime_.deviceChannelViews();
-    for (uint32_t i = 0; i < 2; ++i) {
+    for (uint32_t channel = 0; channel < 2; ++channel) {
         nixlProxyCompletionSlot slot{};
         ASSERT_EQ(cudaMemcpy(&slot,
-                             views[i].completion_slot,
+                             views[channelViewIndex(0, channel)].completion_slot,
                              sizeof(nixlProxyCompletionSlot),
                              cudaMemcpyDeviceToHost),
                   cudaSuccess);
@@ -202,8 +253,14 @@ TEST_F(ProxyRuntimeTest, CompletionSlotsInitialized) {
     }
 }
 
-TEST_F(ProxyRuntimeTest, WorkerCountClampedToChannels) {
-    ASSERT_EQ(initRuntime(2, 8), NIXL_SUCCESS);
+TEST_F(ProxyRuntimeTest, WorkerCountIsNotClampedToPeerCapacity) {
+    ASSERT_EQ(initRuntime(8, 8, NIXL_SUCCESS, 2), NIXL_SUCCESS);
+    EXPECT_EQ(backend_->init_worker_count_, 8u);
+    EXPECT_EQ(backend_->init_channel_count_, 8u);
+}
+
+TEST_F(ProxyRuntimeTest, WorkerCountClampedToChannelCount) {
+    ASSERT_EQ(initRuntime(2, 8, NIXL_SUCCESS, 4), NIXL_SUCCESS);
     EXPECT_EQ(backend_->init_worker_count_, 2u);
     EXPECT_EQ(backend_->init_channel_count_, 2u);
 }
@@ -214,6 +271,7 @@ TEST_F(ProxyRuntimeTest, DeviceContextPopulated) {
     ASSERT_NE(device_ctx, nullptr);
     nixlProxyDeviceContextData ctx{};
     ASSERT_EQ(cudaMemcpy(&ctx, device_ctx, sizeof(ctx), cudaMemcpyDeviceToHost), cudaSuccess);
+    EXPECT_EQ(ctx.max_peers, 4u);
     EXPECT_EQ(ctx.num_channels, 3u);
     EXPECT_NE(ctx.channels, nullptr);
     EXPECT_NE(ctx.shutdown_word, nullptr);
@@ -295,6 +353,7 @@ TEST_F(ProxyRuntimeTest, ManyChannelsManyWorkers) {
 TEST_F(ProxyRuntimeTest, PrepMemViewProducesReadyEntries) {
     DummyBackendMD local_md;
     DummyBackendMD remote_md;
+    ASSERT_EQ(initRuntime(1, 1), NIXL_SUCCESS);
     const auto local_backend = reinterpret_cast<nixlMemViewH>(uintptr_t{0x10});
     const auto remote_backend = reinterpret_cast<nixlMemViewH>(uintptr_t{0x20});
 
@@ -311,10 +370,8 @@ TEST_F(ProxyRuntimeTest, PrepMemViewProducesReadyEntries) {
 
     nixlMemViewH src_proxy = nullptr;
     nixlMemViewH dst_proxy = nullptr;
-    ASSERT_EQ(runtime_.prepMemView(local_backend, local_dlist, &src_proxy),
-              NIXL_SUCCESS);
-    ASSERT_EQ(runtime_.prepMemView(remote_backend, remote_dlist, &dst_proxy),
-              NIXL_SUCCESS);
+    ASSERT_EQ(runtime_.prepMemView(local_backend, local_dlist, &src_proxy), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_.prepMemView(remote_backend, remote_dlist, &dst_proxy), NIXL_SUCCESS);
 
     nixlMemViewH resolved = nullptr;
     EXPECT_TRUE(runtime_.resolveProxyMemView(src_proxy, resolved));
@@ -347,8 +404,7 @@ TEST_F(ProxyRuntimeTest, PrepMemViewRejectsNullOutput) {
     nixl_meta_dlist_t local_dlist(DRAM_SEG);
     local_dlist.addDesc(nixlMetaDesc(0x1000, 64, 0, &local_md));
 
-    EXPECT_EQ(runtime_.prepMemView(local_dlist, nullptr),
-              NIXL_ERR_INVALID_PARAM);
+    EXPECT_EQ(runtime_.prepMemView(local_dlist, nullptr), NIXL_ERR_INVALID_PARAM);
 }
 
 TEST_F(ProxyRuntimeTest, PrepRemoteMemViewRejectsNonVramMetadata) {
@@ -374,12 +430,9 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedTransportDescriptors) {
 
     nixlMemViewH src_proxy = nullptr;
     nixlMemViewH dst_proxy = nullptr;
-    ASSERT_EQ(runtime_.registerProxyMemView(reinterpret_cast<nixlMemViewH>(uintptr_t{0x10}),
-                                           &src_proxy),
-              NIXL_SUCCESS);
-    ASSERT_EQ(runtime_.registerProxyMemView(reinterpret_cast<nixlMemViewH>(uintptr_t{0x20}),
-                                           &dst_proxy),
-              NIXL_SUCCESS);
+    ASSERT_EQ(
+        runtime_.registerProxyMemView(reinterpret_cast<nixlMemViewH>(uintptr_t{0x10}), &src_proxy),
+        NIXL_SUCCESS);
 
     nixl_meta_dlist_t local_dlist(DRAM_SEG);
     local_dlist.addDesc(nixlMetaDesc(0x1000, 64, 0, &local_md));
@@ -392,9 +445,8 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedTransportDescriptors) {
     remote_desc.devId = 0;
     remote_desc.metadataP = &remote_md;
     remote_dlist.addDesc(remote_desc);
-    ASSERT_EQ(runtime_.storeMetadata(dst_proxy, remote_dlist), NIXL_SUCCESS);
-
     ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_.prepMemView(remote_dlist, &dst_proxy), NIXL_SUCCESS);
 
     nixlProxySubmission submission{};
     submission.op_idx = 11;
@@ -407,7 +459,7 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedTransportDescriptors) {
     submission.size = 32;
 
     const nixlProxyWorkRing ring = copyDeviceWorkRing(runtime_.deviceChannelViews()[0]);
-    auto *records = hostRecordsFromDeviceAlias(ring.records);
+    auto *records = hostAliasOf(ring.records);
     ASSERT_NE(records, nullptr);
     submission.op_idx = 0;
     records[0] = submission;
@@ -436,6 +488,7 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedTransportDescriptors) {
     const auto &prepared = submissions.front();
     EXPECT_EQ(prepared.op_idx, 11u);
     EXPECT_EQ(prepared.channel_id, 0u);
+    EXPECT_EQ(prepared.peer_index, 0u);
     EXPECT_EQ(prepared.local.mem_type, DRAM_SEG);
     EXPECT_EQ(prepared.local.desc.addr, 0x1004u);
     EXPECT_EQ(prepared.local.desc.len, 32u);
@@ -453,10 +506,6 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedAtomicAddDescriptor) {
     ASSERT_EQ(initRuntime(1, 1), NIXL_SUCCESS);
 
     nixlMemViewH dst_proxy = nullptr;
-    ASSERT_EQ(runtime_.registerProxyMemView(reinterpret_cast<nixlMemViewH>(uintptr_t{0x20}),
-                                           &dst_proxy),
-              NIXL_SUCCESS);
-
     nixl_remote_meta_dlist_t remote_dlist(VRAM_SEG);
     nixlRemoteMetaDesc remote_desc("peer");
     remote_desc.addr = 0x2000;
@@ -464,9 +513,8 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedAtomicAddDescriptor) {
     remote_desc.devId = 0;
     remote_desc.metadataP = &remote_md;
     remote_dlist.addDesc(remote_desc);
-    ASSERT_EQ(runtime_.storeMetadata(dst_proxy, remote_dlist), NIXL_SUCCESS);
-
     ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_.prepMemView(remote_dlist, &dst_proxy), NIXL_SUCCESS);
 
     nixlProxySubmission submission{};
     submission.op_idx = 11;
@@ -478,7 +526,7 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedAtomicAddDescriptor) {
     submission.value = 42;
 
     const nixlProxyWorkRing ring = copyDeviceWorkRing(runtime_.deviceChannelViews()[0]);
-    auto *records = hostRecordsFromDeviceAlias(ring.records);
+    auto *records = hostAliasOf(ring.records);
     ASSERT_NE(records, nullptr);
     submission.op_idx = 0;
     records[0] = submission;
@@ -508,12 +556,72 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedAtomicAddDescriptor) {
     EXPECT_EQ(prepared.op_idx, 11u);
     EXPECT_EQ(prepared.opcode, nixl_proxy_opcode_t::ATOMIC_ADD);
     EXPECT_EQ(prepared.channel_id, 0u);
+    EXPECT_EQ(prepared.peer_index, 0u);
     EXPECT_EQ(prepared.remote.mem_type, VRAM_SEG);
     EXPECT_EQ(prepared.remote.desc.addr, 0x2008u);
     EXPECT_EQ(prepared.remote.desc.len, sizeof(uint64_t));
     EXPECT_EQ(prepared.remote.desc.metadataP, &remote_md);
     EXPECT_EQ(prepared.remote_agent, "peer");
     EXPECT_EQ(prepared.value, 42u);
+}
+
+TEST_F(ProxyRuntimeTest, WorkerSubmitsReadyPeersForOwnedChannel) {
+    DummyBackendMD local_md;
+    DummyBackendMD remote_md;
+
+    ASSERT_EQ(initRuntime(1, 1, NIXL_SUCCESS, 2), NIXL_SUCCESS);
+
+    nixlMemViewH src_proxy = nullptr;
+    ASSERT_EQ(
+        runtime_.registerProxyMemView(reinterpret_cast<nixlMemViewH>(uintptr_t{0x10}), &src_proxy),
+        NIXL_SUCCESS);
+
+    nixl_meta_dlist_t local_dlist(DRAM_SEG);
+    local_dlist.addDesc(nixlMetaDesc(0x1000, 64, 0, &local_md));
+    ASSERT_EQ(runtime_.storeMetadata(src_proxy, local_dlist), NIXL_SUCCESS);
+
+    nixlMemViewH dst_proxy = nullptr;
+    ASSERT_EQ(runtime_.prepMemView(makeRemotePeerDlist({"peer0", "peer1"}, &remote_md), &dst_proxy),
+              NIXL_SUCCESS);
+    ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
+
+    nixlProxySubmission peer0{};
+    peer0.opcode = nixl_proxy_opcode_t::PUT;
+    peer0.channel_id = 0;
+    peer0.src_proxy_memview_id = reinterpret_cast<uint64_t>(src_proxy);
+    peer0.dst_proxy_memview_id = reinterpret_cast<uint64_t>(dst_proxy);
+    peer0.dst_index = 0;
+    peer0.size = 32;
+
+    nixlProxySubmission peer1 = peer0;
+    peer1.dst_index = 1;
+
+    const nixlProxyWorkRing ring0 =
+        copyDeviceWorkRing(runtime_.deviceChannelViews()[channelViewIndex(0, 0, 2)]);
+    const nixlProxyWorkRing ring1 =
+        copyDeviceWorkRing(runtime_.deviceChannelViews()[channelViewIndex(1, 0, 2)]);
+    auto *records0 = hostAliasOf(ring0.records);
+    auto *records1 = hostAliasOf(ring1.records);
+    ASSERT_NE(records0, nullptr);
+    ASSERT_NE(records1, nullptr);
+
+    records0[0] = peer0;
+    records1[0] = peer1;
+    __atomic_store_n(&records0[0].op_idx, uint64_t{21}, __ATOMIC_RELEASE);
+    __atomic_store_n(&records1[0].op_idx, uint64_t{22}, __ATOMIC_RELEASE);
+
+    const auto submissions = waitForSubmissions(backend_, 2);
+    ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
+
+    ASSERT_EQ(submissions.size(), 2u);
+    std::vector<bool> seen(2, false);
+    for (const auto &submission : submissions) {
+        ASSERT_LT(submission.peer_index, 2u);
+        EXPECT_EQ(submission.channel_id, 0u);
+        seen[submission.peer_index] = true;
+    }
+    EXPECT_TRUE(seen[0]);
+    EXPECT_TRUE(seen[1]);
 }
 
 } // namespace proxy_runtime
