@@ -540,13 +540,14 @@ nixlProxyRuntime::~nixlProxyRuntime() {
 
 nixl_status_t
 nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
+                       uint32_t max_peers,
                        uint32_t channel_count,
                        uint32_t worker_count,
                        uint64_t pthr_delay_us) {
-    NIXL_INFO << "ProxyRuntime::init: channel_count=" << channel_count
+    NIXL_INFO << "ProxyRuntime::init: max_peers=" << max_peers << " channel_count=" << channel_count
               << " worker_count=" << worker_count << " pthr_delay_us=" << pthr_delay_us
               << " backend=" << backend.get();
-    if (backend == nullptr || channel_count == 0 || worker_count == 0) {
+    if (backend == nullptr || max_peers == 0 || channel_count == 0 || worker_count == 0) {
         NIXL_ERROR << "ProxyRuntime::init: invalid params";
         return NIXL_ERR_INVALID_PARAM;
     }
@@ -573,11 +574,11 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
                      static_cast<uint32_t>(nixl_proxy_control_state_t::RUNNING),
                      __ATOMIC_RELEASE);
 
-    worker_count = std::min(worker_count, channel_count);
-    NIXL_INFO << "ProxyRuntime::init: effective worker_count=" << worker_count
+    const uint32_t effective_worker_count = std::min(worker_count, channel_count);
+    NIXL_INFO << "ProxyRuntime::init: effective worker_count=" << effective_worker_count
               << " (clamped to channel_count)";
 
-    nixl_status_t rc = backend_->init(worker_count, channel_count);
+    nixl_status_t rc = backend_->init(effective_worker_count, channel_count, max_peers);
     if ((rc != NIXL_SUCCESS) && (rc != NIXL_ERR_NOT_SUPPORTED)) {
         NIXL_ERROR << "ProxyRuntime::init: backend init failed: " << rc;
         cudaFreeHost(shutdown_word_host_);
@@ -590,51 +591,33 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
         NIXL_INFO << "ProxyRuntime::init: backend init hook not supported; continuing";
     }
 
-    channels_.resize(channel_count);
-    for (uint32_t channel_id = 0; channel_id < channel_count; ++channel_id) {
-        rc = channels_[channel_id].allocate(ring_depth_);
-        if (rc != NIXL_SUCCESS) {
-            channels_.clear();
-            backend_->shutdown();
-            cudaFreeHost(shutdown_word_host_);
-            shutdown_word_host_ = nullptr;
-            shutdown_word_dev_ = nullptr;
-            backend_.reset();
-            return rc;
+    const size_t channel_slots = static_cast<size_t>(max_peers) * channel_count;
+    channels_.resize(channel_slots);
+    device_channel_views_.resize(channel_slots);
+    for (uint32_t channel_idx = 0; channel_idx < channel_count; channel_idx++) {
+        for (uint32_t peer_idx = 0; peer_idx < max_peers; peer_idx++) {
+            const size_t slot = static_cast<size_t>(channel_idx) * max_peers + peer_idx;
+            rc = channels_[slot].allocate(ring_depth_);
+            if (rc != NIXL_SUCCESS) {
+                shutdown();
+                return rc;
+            }
+            device_channel_views_[slot] = channels_[slot].device_view;
         }
     }
 
-    device_channel_views_.resize(channel_count);
     if (cudaMalloc(reinterpret_cast<void **>(&device_channel_views_dev_),
-                   sizeof(nixlProxyChannelView) * channel_count) != cudaSuccess) {
-        channels_.clear();
-        backend_->shutdown();
-        cudaFreeHost(shutdown_word_host_);
-        shutdown_word_host_ = nullptr;
-        shutdown_word_dev_ = nullptr;
-        backend_.reset();
-        return NIXL_ERR_BACKEND;
-    }
-    for (uint32_t channel_id = 0; channel_id < channel_count; ++channel_id) {
-        device_channel_views_[channel_id] = channels_[channel_id].device_view;
-    }
-    if (cudaMemcpy(device_channel_views_dev_,
+                   sizeof(nixlProxyChannelView) * channel_slots) != cudaSuccess ||
+        cudaMemcpy(device_channel_views_dev_,
                    device_channel_views_.data(),
-                   sizeof(nixlProxyChannelView) * channel_count,
+                   sizeof(nixlProxyChannelView) * channel_slots,
                    cudaMemcpyHostToDevice) != cudaSuccess) {
-        cudaFree(device_channel_views_dev_);
-        device_channel_views_dev_ = nullptr;
-        device_channel_views_.clear();
-        channels_.clear();
-        backend_->shutdown();
-        cudaFreeHost(shutdown_word_host_);
-        shutdown_word_host_ = nullptr;
-        shutdown_word_dev_ = nullptr;
-        backend_.reset();
+        shutdown();
         return NIXL_ERR_BACKEND;
     }
+
     nixlProxyDeviceContextData device_context{
-        device_channel_views_dev_, channel_count, shutdown_word_dev_};
+        device_channel_views_dev_, max_peers, channel_count, shutdown_word_dev_};
     if (cudaMalloc(reinterpret_cast<void **>(&device_context_),
                    sizeof(nixlProxyDeviceContextData)) != cudaSuccess ||
         cudaMemcpy(
@@ -644,40 +627,32 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
             cudaFree(device_context_);
             device_context_ = nullptr;
         }
-        cudaFree(device_channel_views_dev_);
-        device_channel_views_dev_ = nullptr;
-        device_channel_views_.clear();
-        channels_.clear();
-        backend_->shutdown();
-        cudaFreeHost(shutdown_word_host_);
-        shutdown_word_host_ = nullptr;
-        shutdown_word_dev_ = nullptr;
-        backend_.reset();
+        shutdown();
         return NIXL_ERR_BACKEND;
     }
 
     workers_.clear();
-    workers_.reserve(worker_count);
+    workers_.reserve(effective_worker_count);
     workers_started_ = false;
 
-    for (uint32_t w = 0; w < worker_count; ++w) {
-        uint32_t first_ch = (w * channel_count) / worker_count;
-        uint32_t end_ch = ((w + 1) * channel_count) / worker_count;
-        uint32_t n_ch = end_ch - first_ch;
-
-        NIXL_INFO << "ProxyRuntime::init: worker " << w << " assigned channels [" << first_ch
-                  << ", " << end_ch << ")";
+    for (uint32_t worker_idx = 0; worker_idx < effective_worker_count; worker_idx++) {
+        NIXL_INFO << "ProxyRuntime::init: worker " << worker_idx
+                  << " owns channel(s) where channel_id % " << effective_worker_count
+                  << " == " << worker_idx << "; handles all dest rings of those channels";
         workers_.push_back(std::make_unique<ProxyWorker>(backend_.get(),
                                                          &memview_registry_,
                                                          shutdown_word_host_,
-                                                         &channels_[first_ch],
-                                                         n_ch,
+                                                         channels_.data(),
+                                                         max_peers,
+                                                         channel_count,
+                                                         worker_idx,
+                                                         effective_worker_count,
                                                          pthr_delay_us));
     }
 
-    NIXL_INFO << "ProxyRuntime::init: complete — " << channel_count << " channels, " << worker_count
-              << " workers, "
-              << "device_context(dev)=" << device_context_;
+    NIXL_INFO << "ProxyRuntime::init: complete — " << max_peers << " peers, " << channel_count
+              << " channels (rings per dest), " << effective_worker_count
+              << " workers, device_context(dev)=" << device_context_;
     return NIXL_SUCCESS;
 }
 
@@ -771,10 +746,8 @@ nixlProxyRuntime::startWorkers() {
                      static_cast<uint32_t>(nixl_proxy_control_state_t::RUNNING),
                      __ATOMIC_RELEASE);
 
-    uint32_t idx = 0;
     for (auto &worker : workers_) {
-        worker->start(idx);
-        ++idx;
+        worker->start();
     }
     workers_started_ = true;
 

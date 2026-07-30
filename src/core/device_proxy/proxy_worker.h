@@ -17,6 +17,7 @@
 #ifndef NIXL_SRC_CORE_DEVICE_PROXY_PROXY_WORKER_H
 #define NIXL_SRC_CORE_DEVICE_PROXY_PROXY_WORKER_H
 
+#include <cstddef>
 #include <cstdint>
 #include <thread>
 #include "proxy_protocol.h"
@@ -30,23 +31,39 @@ class ProxyWorker {
         ProxyWorker(nixlDeviceProxyBackendAdapter *backend,
                     const nixlProxyMemViewRegistry *proxy_memview_registry,
                     uint32_t *shutdown_word,
-                    nixlProxyChannelState *assigned_channels,
-                    uint32_t assigned_channel_count,
+                    nixlProxyChannelState *channels,
+                    uint32_t max_peers,
+                    uint32_t channel_count,
+                    uint32_t worker_index,
+                    uint32_t worker_count,
                     uint64_t pthr_delay_us) noexcept;
         ~ProxyWorker();
 
-        void start(uint32_t worker_idx);
+        void
+        start();
+
         void join() noexcept;
 
         void
         runOnce();
 
     private:
+        nixlProxyChannelState *
+        getChannelState(uint32_t peer, uint32_t channel_id);
+
+        void
+        publishOwnedChannels();
+
+        void
+        submitOwnedChannels();
+
         bool
         tryDequeue(nixlProxyChannelState &channel, nixlProxySubmission &submission);
 
         void
-        submitToBackend(nixlProxyChannelState &channel, const nixlProxySubmission &submission);
+        submitToBackend(nixlProxyChannelState &channel,
+                        uint32_t peer,
+                        const nixlProxySubmission &submission);
 
         void
         driveBackendProgress();
@@ -57,8 +74,11 @@ class ProxyWorker {
         nixlDeviceProxyBackendAdapter *backend_ = nullptr;
         const nixlProxyMemViewRegistry *proxy_memview_registry_ = nullptr;
         uint32_t *shutdown_word_ = nullptr;
-        nixlProxyChannelState *assigned_channels_ = nullptr;
-        uint32_t assigned_channel_count_ = 0;
+        nixlProxyChannelState *channels_ = nullptr;
+        uint32_t max_peers_ = 0;
+        uint32_t channel_count_ = 0;
+        uint32_t worker_index_ = 0;
+        uint32_t worker_count_ = 0;
         uint64_t pthr_delay_us_ = 0;
         std::thread thread_;
 };
