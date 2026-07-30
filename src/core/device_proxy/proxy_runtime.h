@@ -211,6 +211,7 @@ class nixlProxyRuntime {
 
         nixl_status_t
         init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
+             uint32_t max_peers,
              uint32_t channel_count,
              uint32_t worker_count,
              uint64_t pthr_delay_us = 0);

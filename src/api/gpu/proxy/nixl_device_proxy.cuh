@@ -113,14 +113,24 @@ __device__ inline void nixlProxySync() {
 
 struct ProxyDeviceContext : nixlProxyDeviceContextData {
 
+    __device__ __forceinline__ size_t
+    channelIndex(uint32_t peer_index, uint32_t channel_id) const {
+        return static_cast<size_t>(channel_id) * max_peers + peer_index;
+    }
+
     __device__ inline nixl_status_t
     enqueue(nixlProxySubmission submission, nixlGpuXferStatusH *xfer_status = nullptr) {
-        if (submission.channel_id >= num_channels) {
+        if (submission.dst_index >= max_peers || num_channels == 0) {
             return NIXL_ERR_INVALID_PARAM;
         }
+        submission.channel_id %= num_channels;
 
-        nixlProxyChannelView &channel_view = channels[submission.channel_id];
-        nixlProxyWorkRing         *ring    = channel_view.work_ring;
+        nixlProxyChannelView &channel_view =
+            channels[channelIndex(submission.dst_index, submission.channel_id)];
+        if (channel_view.work_ring == nullptr || channel_view.completion_slot == nullptr) {
+            return NIXL_ERR_INVALID_PARAM;
+        }
+        nixlProxyWorkRing *ring = channel_view.work_ring;
 
         cuda::atomic_ref<uint64_t, cuda::thread_scope_device> producer_idx(
             *ring->producer_idx);
@@ -176,6 +186,9 @@ struct ProxyDeviceContext : nixlProxyDeviceContextData {
     pollXferStatus(const nixlGpuXferStatusH &xfer_status) const {
         const ProxyXferStatus *pxs =
             reinterpret_cast<const ProxyXferStatus *>(xfer_status.storage);
+        if (pxs->slot == nullptr) {
+            return NIXL_ERR_BACKEND;
+        }
 
         cuda::atomic_ref<uint64_t, cuda::thread_scope_system> comp_idx(
             pxs->slot->completed_idx);

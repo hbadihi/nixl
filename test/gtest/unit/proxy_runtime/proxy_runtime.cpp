@@ -40,10 +40,11 @@ class DummyBackendMD : public nixlBackendMD {
 class StubBackend : public nixlDeviceProxyBackendAdapter {
     public:
         nixl_status_t
-        init(uint32_t worker_count, uint32_t channel_count) override {
+        init(uint32_t worker_count, uint32_t channel_count, uint32_t max_peers) override {
             init_called_ = true;
             init_worker_count_ = worker_count;
             init_channel_count_ = channel_count;
+            init_max_peers_ = max_peers;
             return init_rc_;
         }
 
@@ -81,6 +82,7 @@ class StubBackend : public nixlDeviceProxyBackendAdapter {
         bool init_called_ = false;
         uint32_t init_worker_count_ = 0;
         uint32_t init_channel_count_ = 0;
+        uint32_t init_max_peers_ = 0;
         nixl_status_t init_rc_ = NIXL_SUCCESS;
         std::atomic<uint64_t> progress_calls_{0};
         mutable std::mutex submit_mutex_;
@@ -97,7 +99,7 @@ class ProxyRuntimeTest : public testing::Test {
             auto backend = std::make_unique<StubBackend>();
             backend_ = backend.get();
             backend_->init_rc_ = init_rc;
-            return runtime_.init(std::move(backend), channel_count, worker_count);
+            return runtime_.init(std::move(backend), 1, channel_count, worker_count);
         }
 
         void TearDown() override {
@@ -129,10 +131,11 @@ TEST_F(ProxyRuntimeTest, InitCallsBackendInit) {
     EXPECT_TRUE(backend_->init_called_);
     EXPECT_EQ(backend_->init_worker_count_, 2u);
     EXPECT_EQ(backend_->init_channel_count_, 4u);
+    EXPECT_EQ(backend_->init_max_peers_, 1u);
 }
 
 TEST_F(ProxyRuntimeTest, InitRejectsNullBackend) {
-    EXPECT_EQ(runtime_.init(nullptr, 4, 2), NIXL_ERR_INVALID_PARAM);
+    EXPECT_EQ(runtime_.init(nullptr, 1, 4, 2), NIXL_ERR_INVALID_PARAM);
 }
 
 TEST_F(ProxyRuntimeTest, InitRejectsZeroChannels) {
