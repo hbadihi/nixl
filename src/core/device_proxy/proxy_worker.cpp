@@ -19,19 +19,24 @@
 #include "backend_adapter.h"
 #include "nixl_log.h"
 #include <chrono>
-#include <cuda_runtime.h>
 
 ProxyWorker::ProxyWorker(nixlDeviceProxyBackendAdapter *backend,
                          const nixlProxyMemViewRegistry *proxy_memview_registry,
                          uint32_t *shutdown_word,
-                         nixlProxyChannelState *assigned_channels,
-                         uint32_t assigned_channel_count,
+                         nixlProxyChannelState *channels,
+                         uint32_t max_peers,
+                         uint32_t channel_count,
+                         uint32_t worker_index,
+                         uint32_t worker_count,
                          uint64_t pthr_delay_us) noexcept
     : backend_(backend),
       proxy_memview_registry_(proxy_memview_registry),
       shutdown_word_(shutdown_word),
-      assigned_channels_(assigned_channels),
-      assigned_channel_count_(assigned_channel_count),
+      channels_(channels),
+      max_peers_(max_peers),
+      channel_count_(channel_count),
+      worker_index_(worker_index),
+      worker_count_(worker_count),
       pthr_delay_us_(pthr_delay_us) {}
 
 ProxyWorker::~ProxyWorker() {
@@ -39,9 +44,9 @@ ProxyWorker::~ProxyWorker() {
 }
 
 void
-ProxyWorker::start(uint32_t worker_idx) {
-    thread_ = std::thread([this, worker_idx]() {
-        NIXL_INFO << "ProxyWorker thread " << worker_idx << " started";
+ProxyWorker::start() {
+    thread_ = std::thread([this]() {
+        NIXL_INFO << "ProxyWorker thread " << worker_index_ << " started";
         while (__atomic_load_n(shutdown_word_, __ATOMIC_ACQUIRE) ==
                static_cast<uint32_t>(nixl_proxy_control_state_t::RUNNING)) {
             runOnce();
@@ -49,7 +54,7 @@ ProxyWorker::start(uint32_t worker_idx) {
                 std::this_thread::sleep_for(std::chrono::microseconds(pthr_delay_us_));
             }
         }
-        NIXL_INFO << "ProxyWorker thread " << worker_idx << " exiting";
+        NIXL_INFO << "ProxyWorker thread " << worker_index_ << " exiting";
     });
 }
 
@@ -60,20 +65,41 @@ ProxyWorker::join() noexcept {
     }
 }
 
+nixlProxyChannelState *
+ProxyWorker::getChannelState(uint32_t peer, uint32_t channel_id) {
+    return &channels_[static_cast<size_t>(channel_id) * max_peers_ + peer];
+}
+
 void
-ProxyWorker::runOnce() {
-    for (uint32_t i = 0; i < assigned_channel_count_; i++) {
-        nixlProxyChannelState &channel = assigned_channels_[i];
-        nixlProxySubmission submission;
-        while (tryDequeue(channel, submission)) {
-            submitToBackend(channel, submission);
+ProxyWorker::publishOwnedChannels() {
+    for (uint32_t channel_id = worker_index_; channel_id < channel_count_;
+         channel_id += worker_count_) {
+        for (uint32_t peer = 0; peer < max_peers_; ++peer) {
+            nixlProxyChannelState *channel = getChannelState(peer, channel_id);
+            publishCompletions(*channel);
         }
     }
-    driveBackendProgress();
-    for (uint32_t i = 0; i < assigned_channel_count_; i++) {
-        nixlProxyChannelState &channel = assigned_channels_[i];
-        publishCompletions(channel);
+}
+
+void
+ProxyWorker::submitOwnedChannels() {
+    for (uint32_t channel_id = worker_index_; channel_id < channel_count_;
+         channel_id += worker_count_) {
+        for (uint32_t peer = 0; peer < max_peers_; ++peer) {
+            nixlProxyChannelState *channel = getChannelState(peer, channel_id);
+            nixlProxySubmission submission;
+            while (tryDequeue(*channel, submission)) {
+                submitToBackend(*channel, peer, submission);
+            }
+        }
     }
+}
+
+void
+ProxyWorker::runOnce() {
+    submitOwnedChannels();
+    driveBackendProgress();
+    publishOwnedChannels();
 }
 
 bool
@@ -97,10 +123,12 @@ ProxyWorker::tryDequeue(nixlProxyChannelState &channel, nixlProxySubmission &sub
 
 void
 ProxyWorker::submitToBackend(nixlProxyChannelState &channel,
+                             uint32_t peer,
                              const nixlProxySubmission &submission) {
     nixlBackendProxySubmission prepared_submission;
     nixl_status_t status =
         proxy_memview_registry_->prepareSubmission(submission, prepared_submission);
+    prepared_submission.peer_index = peer;
     if (status != NIXL_SUCCESS) {
         NIXL_DEBUG << "ProxyWorker::submitToBackend: submission preparation failed"
                    << " op_idx=" << submission.op_idx << " status=" << status;
@@ -134,7 +162,12 @@ ProxyWorker::submitToBackend(nixlProxyChannelState &channel,
 
 void
 ProxyWorker::driveBackendProgress() {
-    backend_->progress();
+    for (uint32_t channel_id = worker_index_; channel_id < channel_count_;
+         channel_id += worker_count_) {
+        for (uint32_t peer = 0; peer < max_peers_; ++peer) {
+            backend_->progress(channel_id, peer);
+        }
+    }
 }
 
 void
@@ -153,7 +186,7 @@ ProxyWorker::publishCompletions(nixlProxyChannelState &channel) {
         NIXL_DEBUG << "ProxyWorker::publishCompletions: op_idx=" << front.op_idx << " status=" << st
                    << " token=" << front.backend_req_token;
 
-        if (channel.completion_slot_host_->next_status >= NIXL_SUCCESS) {
+        if (channel.completion_slot_host_->next_status >= 0) {
             channel.completion_slot_host_->next_status = st;
             __atomic_store_n(
                 &channel.completion_slot_host_->completed_idx, front.op_idx, __ATOMIC_RELEASE);

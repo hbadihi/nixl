@@ -79,6 +79,7 @@ struct nixlProxyChannelView {
 
 struct nixlProxyDeviceContextData {
     nixlProxyChannelView *channels = nullptr;
+    uint32_t max_peers = 0;
     uint32_t num_channels = 0;
     uint32_t *shutdown_word = nullptr;
 };

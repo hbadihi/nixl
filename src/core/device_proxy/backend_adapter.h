@@ -34,6 +34,7 @@ struct nixlBackendProxySubmission {
     uint64_t op_idx = 0;
     nixl_proxy_opcode_t opcode = nixl_proxy_opcode_t::PUT;
     uint32_t channel_id = 0;
+    uint32_t peer_index = 0;
     uint64_t flags = 0;
 
     nixlBackendProxyXferDesc local{};
@@ -49,7 +50,7 @@ class nixlDeviceProxyBackendAdapter {
         virtual ~nixlDeviceProxyBackendAdapter() = default;
 
         virtual nixl_status_t
-        init(uint32_t, uint32_t) {
+        init(uint32_t proxy_worker_count, uint32_t channel_count, uint32_t max_peers) {
             return NIXL_ERR_NOT_SUPPORTED;
         }
 
@@ -67,6 +68,11 @@ class nixlDeviceProxyBackendAdapter {
         virtual nixl_status_t
         progress() {
             return NIXL_ERR_NOT_SUPPORTED;
+        }
+
+        virtual nixl_status_t
+        progress(uint32_t, uint32_t) {
+            return progress();
         }
 
         virtual nixl_status_t
