@@ -52,8 +52,9 @@ namespace proxy_memview_registry {
         nixl_remote_meta_dlist_t
         makeRemoteMetadata(uintptr_t base_addr,
                            const std::string &remote_agent = "peer",
-                           uint64_t dev_id = 0) {
-            nixl_remote_meta_dlist_t dlist(DRAM_SEG);
+                           uint64_t dev_id = 0,
+                           nixl_mem_t mem_type = VRAM_SEG) {
+            nixl_remote_meta_dlist_t dlist(mem_type);
             nixlRemoteMetaDesc desc(remote_agent);
             desc.addr = base_addr;
             desc.len = 64;
@@ -174,11 +175,21 @@ namespace proxy_memview_registry {
         EXPECT_EQ(prepared_submission.local.desc.addr, 0x1005u);
         EXPECT_EQ(prepared_submission.local.desc.len, 16u);
         EXPECT_EQ(prepared_submission.local.desc.metadataP, &local_md_);
-        EXPECT_EQ(prepared_submission.remote.mem_type, DRAM_SEG);
+        EXPECT_EQ(prepared_submission.remote.mem_type, VRAM_SEG);
         EXPECT_EQ(prepared_submission.remote.desc.addr, 0x2009u);
         EXPECT_EQ(prepared_submission.remote.desc.len, 16u);
         EXPECT_EQ(prepared_submission.remote.desc.metadataP, &remote_md_);
         EXPECT_EQ(prepared_submission.remote_agent, "remote-agent");
+    }
+
+    TEST_F(ProxyMemViewRegistryTest, StoreRemoteMetadataRejectsNonVram) {
+        nixlMemViewH dst_proxy = nullptr;
+        ASSERT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(20), &dst_proxy),
+                  NIXL_SUCCESS);
+
+        EXPECT_EQ(registry_.storeMetadata(
+                      dst_proxy, makeRemoteMetadata(0x2000, "remote-agent", 0, DRAM_SEG)),
+                  NIXL_ERR_INVALID_PARAM);
     }
 
     TEST_F(ProxyMemViewRegistryTest, PrepMemViewProducesReadyEntries) {
@@ -389,12 +400,44 @@ namespace proxy_memview_registry {
         EXPECT_EQ(prepared_submission.opcode, nixl_proxy_opcode_t::ATOMIC_ADD);
         EXPECT_EQ(prepared_submission.op_idx, 7u);
         EXPECT_EQ(prepared_submission.channel_id, 3u);
-        EXPECT_EQ(prepared_submission.remote.mem_type, DRAM_SEG);
+        EXPECT_EQ(prepared_submission.remote.mem_type, VRAM_SEG);
         EXPECT_EQ(prepared_submission.remote.desc.addr, 0x2009u);
         EXPECT_EQ(prepared_submission.remote.desc.len, sizeof(uint64_t));
         EXPECT_EQ(prepared_submission.remote.desc.metadataP, &remote_md_);
         EXPECT_EQ(prepared_submission.remote_agent, "remote-agent");
         EXPECT_EQ(prepared_submission.value, 42u);
+    }
+
+    TEST_F(ProxyMemViewRegistryTest, PrepareSubmissionRejectsEmptyRemoteAgent) {
+        nixlMemViewH dst_proxy = nullptr;
+        ASSERT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(20), &dst_proxy),
+                  NIXL_SUCCESS);
+        ASSERT_EQ(registry_.storeMetadata(dst_proxy, makeRemoteMetadata(0x2000, "")),
+                  NIXL_SUCCESS);
+
+        nixlProxySubmission submission{};
+        submission.opcode = nixl_proxy_opcode_t::ATOMIC_ADD;
+        submission.dst_proxy_memview_id = reinterpret_cast<uint64_t>(dst_proxy);
+
+        nixlBackendProxySubmission prepared_submission;
+        EXPECT_EQ(registry_.prepareSubmission(submission, prepared_submission),
+                  NIXL_ERR_INVALID_PARAM);
+    }
+
+    TEST_F(ProxyMemViewRegistryTest, PrepareSubmissionRejectsNullRemoteAgent) {
+        nixlMemViewH dst_proxy = nullptr;
+        ASSERT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(20), &dst_proxy),
+                  NIXL_SUCCESS);
+        ASSERT_EQ(registry_.storeMetadata(dst_proxy, makeRemoteMetadata(0x2000, nixl_null_agent)),
+                  NIXL_SUCCESS);
+
+        nixlProxySubmission submission{};
+        submission.opcode = nixl_proxy_opcode_t::ATOMIC_ADD;
+        submission.dst_proxy_memview_id = reinterpret_cast<uint64_t>(dst_proxy);
+
+        nixlBackendProxySubmission prepared_submission;
+        EXPECT_EQ(registry_.prepareSubmission(submission, prepared_submission),
+                  NIXL_ERR_INVALID_PARAM);
     }
 
     TEST_F(ProxyMemViewRegistryTest, MetadataKindMustMatchSubmissionRole) {
