@@ -307,7 +307,7 @@ TEST_F(ProxyRuntimeTest, PrepMemViewProducesReadyEntries) {
     nixl_meta_dlist_t local_dlist(DRAM_SEG);
     local_dlist.addDesc(nixlMetaDesc(0x1000, 64, 0, &local_md));
 
-    nixl_remote_meta_dlist_t remote_dlist(DRAM_SEG);
+    nixl_remote_meta_dlist_t remote_dlist(VRAM_SEG);
     nixlRemoteMetaDesc remote_desc("peer");
     remote_desc.addr = 0x2000;
     remote_desc.len = 64;
@@ -357,6 +357,21 @@ TEST_F(ProxyRuntimeTest, PrepMemViewRejectsNullOutput) {
               NIXL_ERR_INVALID_PARAM);
 }
 
+TEST_F(ProxyRuntimeTest, PrepRemoteMemViewRejectsNonVramMetadata) {
+    DummyBackendMD remote_md;
+
+    nixl_remote_meta_dlist_t remote_dlist(DRAM_SEG);
+    nixlRemoteMetaDesc remote_desc("peer");
+    remote_desc.addr = 0x2000;
+    remote_desc.len = 64;
+    remote_desc.devId = 0;
+    remote_desc.metadataP = &remote_md;
+    remote_dlist.addDesc(remote_desc);
+
+    nixlMemViewH dst_proxy = nullptr;
+    EXPECT_EQ(runtime_.prepMemView(remote_dlist, &dst_proxy), NIXL_ERR_INVALID_PARAM);
+}
+
 TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedTransportDescriptors) {
     DummyBackendMD local_md;
     DummyBackendMD remote_md;
@@ -376,7 +391,7 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedTransportDescriptors) {
     local_dlist.addDesc(nixlMetaDesc(0x1000, 64, 0, &local_md));
     ASSERT_EQ(runtime_.storeMetadata(src_proxy, local_dlist), NIXL_SUCCESS);
 
-    nixl_remote_meta_dlist_t remote_dlist(DRAM_SEG);
+    nixl_remote_meta_dlist_t remote_dlist(VRAM_SEG);
     nixlRemoteMetaDesc remote_desc("peer");
     remote_desc.addr = 0x2000;
     remote_desc.len = 64;
@@ -431,7 +446,7 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedTransportDescriptors) {
     EXPECT_EQ(prepared.local.desc.addr, 0x1004u);
     EXPECT_EQ(prepared.local.desc.len, 32u);
     EXPECT_EQ(prepared.local.desc.metadataP, &local_md);
-    EXPECT_EQ(prepared.remote.mem_type, DRAM_SEG);
+    EXPECT_EQ(prepared.remote.mem_type, VRAM_SEG);
     EXPECT_EQ(prepared.remote.desc.addr, 0x2008u);
     EXPECT_EQ(prepared.remote.desc.len, 32u);
     EXPECT_EQ(prepared.remote.desc.metadataP, &remote_md);
@@ -448,7 +463,7 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedAtomicAddDescriptor) {
                                            &dst_proxy),
               NIXL_SUCCESS);
 
-    nixl_remote_meta_dlist_t remote_dlist(DRAM_SEG);
+    nixl_remote_meta_dlist_t remote_dlist(VRAM_SEG);
     nixlRemoteMetaDesc remote_desc("peer");
     remote_desc.addr = 0x2000;
     remote_desc.len = 64;
@@ -499,7 +514,7 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedAtomicAddDescriptor) {
     EXPECT_EQ(prepared.op_idx, 11u);
     EXPECT_EQ(prepared.opcode, nixl_proxy_opcode_t::ATOMIC_ADD);
     EXPECT_EQ(prepared.channel_id, 0u);
-    EXPECT_EQ(prepared.remote.mem_type, DRAM_SEG);
+    EXPECT_EQ(prepared.remote.mem_type, VRAM_SEG);
     EXPECT_EQ(prepared.remote.desc.addr, 0x2008u);
     EXPECT_EQ(prepared.remote.desc.len, sizeof(uint64_t));
     EXPECT_EQ(prepared.remote.desc.metadataP, &remote_md);
