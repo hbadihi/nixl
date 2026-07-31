@@ -113,14 +113,6 @@ __device__ inline void nixlProxySync() {
 
 struct ProxyDeviceContext : nixlProxyDeviceContextData {
 
-    // Enqueue a transfer submission into the MPSC work ring for the selected
-    // channel, spinning if the ring is full.  Optionally records a completion
-    // token in *xfer_status for later polling via pollXferStatus().
-    //
-    // producer_idx lives in device memory and only needs device-scope atomicity.
-    // consumer_idx lives in pinned host memory (accessible from device via
-    // UVA mapped pointer). The device cache keeps the non-full path from
-    // repeatedly touching host memory.
     __device__ inline nixl_status_t
     enqueue(nixlProxySubmission submission, nixlGpuXferStatusH *xfer_status = nullptr) {
         if (submission.channel_id >= num_channels) {
@@ -160,9 +152,6 @@ struct ProxyDeviceContext : nixlProxyDeviceContextData {
         submission.op_idx = 0;
         ring->records[slot] = submission;
 
-        // Avoiding system-scope release keeps enqueue from paying
-        // a global GPU memory drain; the CPU worker acquire-polls op_idx
-        // before copying the record.
         cuda::atomic_ref<uint64_t, cuda::thread_scope_device> record_op_idx(
             ring->records[slot].op_idx);
         record_op_idx.store(submission_op_idx, cuda::memory_order_release);
