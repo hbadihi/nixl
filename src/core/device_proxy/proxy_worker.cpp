@@ -78,13 +78,9 @@ ProxyWorker::runOnce() {
 
 bool
 ProxyWorker::tryDequeue(nixlProxyChannelState &channel, nixlProxySubmission &submission) {
-    // Sole writer of consumer_idx on host — relaxed load is sufficient.
     uint64_t local_consumer_idx =
         __atomic_load_n(channel.consumer_idx_host_, __ATOMIC_RELAXED);
     uint32_t slot = static_cast<uint32_t>(local_consumer_idx % channel.ring_depth_);
-    // op_idx is the GPU-to-CPU signal that the record is written
-    // (pairs with release store in device enqueue).  No producer index
-    // read on host — it is GPU-internal for slot allocation.
     const uint64_t op_idx = __atomic_load_n(&channel.records_host_[slot].op_idx, __ATOMIC_ACQUIRE);
     if (op_idx == 0) {
         return false;
@@ -114,7 +110,6 @@ ProxyWorker::submitToBackend(nixlProxyChannelState &channel, const nixlProxySubm
                    << " status=" << status;
         channel.inflight_requests.push_back(
             {submission.op_idx, 0, status});
-        // The terminal error is queued for publishCompletions(); the worker handled it.
         return;
     }
 
@@ -132,8 +127,6 @@ ProxyWorker::submitToBackend(nixlProxyChannelState &channel, const nixlProxySubm
     status = backend_->submit(prepared_submission, request_token);
     inflight.backend_req_token = request_token;
     if (status != NIXL_SUCCESS) {
-        // backend submit failed, so status is already terminal and can be
-        // published without polling the backend.
         NIXL_ERROR << "ProxyWorker::submitToBackend: backend submit failed"
                    << " status=" << status << " op_idx=" << submission.op_idx
                    << " request_token=" << request_token;

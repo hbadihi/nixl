@@ -387,7 +387,7 @@ TEST_F(ProxyDeviceApiTest, ContextPublishedAfterStartWorkers)
     auto adapter = std::make_unique<StubProxyBackendAdapter>();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter), /*channel_count=*/1, /*worker_count=*/1),
+    ASSERT_EQ(runtime.init(std::move(adapter), 1, 1),
               NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
@@ -410,7 +410,7 @@ TEST_F(ProxyDeviceApiTest, ContextClearedAfterShutdown)
     auto adapter = std::make_unique<StubProxyBackendAdapter>();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter), /*channel_count=*/1, /*worker_count=*/1),
+    ASSERT_EQ(runtime.init(std::move(adapter), 1, 1),
               NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
@@ -437,7 +437,7 @@ TEST_F(ProxyDeviceApiTest, PutReturnsInProgWhenEnqueued)
     auto adapter = std::make_unique<StubProxyBackendAdapter>();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter), /*channel_count=*/1, /*worker_count=*/1),
+    ASSERT_EQ(runtime.init(std::move(adapter), 1, 1),
               NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
@@ -460,7 +460,7 @@ TEST_F(ProxyDeviceApiTest, AtomicAddReturnsInProgWhenEnqueued)
     auto adapter = std::make_unique<StubProxyBackendAdapter>();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter), /*channel_count=*/1, /*worker_count=*/1),
+    ASSERT_EQ(runtime.init(std::move(adapter), 1, 1),
               NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
@@ -648,7 +648,7 @@ TEST_F(ProxyDeviceApiTest, PutCompletionRoundTrip)
     auto adapter = std::make_unique<StubProxyBackendAdapter>();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter), /*channel_count=*/1, /*worker_count=*/1),
+    ASSERT_EQ(runtime.init(std::move(adapter), 1, 1),
               NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
@@ -676,7 +676,7 @@ TEST_F(ProxyDeviceApiTest, AtomicAddCompletionRoundTrip)
     auto adapter = std::make_unique<StubProxyBackendAdapter>();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter), /*channel_count=*/1, /*worker_count=*/1),
+    ASSERT_EQ(runtime.init(std::move(adapter), 1, 1),
               NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
@@ -708,7 +708,7 @@ TEST_F(ProxyDeviceApiTest, CompletionNotVisibleUntilPublished)
     auto *adapter = adapter_owner.get();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter_owner), /*channel_count=*/1, /*worker_count=*/1),
+    ASSERT_EQ(runtime.init(std::move(adapter_owner), 1, 1),
               NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
@@ -751,7 +751,7 @@ TEST_F(ProxyDeviceApiTest, MultipleSubmissionsCompletionFrontier)
     auto *adapter = adapter_owner.get();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter_owner), /*channel_count=*/1, /*worker_count=*/1),
+    ASSERT_EQ(runtime.init(std::move(adapter_owner), 1, 1),
               NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
@@ -817,7 +817,7 @@ TEST_F(ProxyDeviceApiTest, PutPutAtomicAddCompletionFrontier)
     auto *adapter = adapter_owner.get();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter_owner), /*channel_count=*/1, /*worker_count=*/1),
+    ASSERT_EQ(runtime.init(std::move(adapter_owner), 1, 1),
               NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
@@ -895,7 +895,7 @@ TEST_F(ProxyDeviceApiTest, EarlierCompletionStaysSuccessfulAfterLaterError)
     auto *adapter = adapter_owner.get();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter_owner), /*channel_count=*/1, /*worker_count=*/1),
+    ASSERT_EQ(runtime.init(std::move(adapter_owner), 1, 1),
               NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
@@ -953,7 +953,7 @@ TEST_F(ProxyDeviceApiTest, EarlierErrorPropagatesToLaterQueuedOp)
     auto *adapter = adapter_owner.get();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter_owner), /*channel_count=*/1, /*worker_count=*/1),
+    ASSERT_EQ(runtime.init(std::move(adapter_owner), 1, 1),
               NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
@@ -1004,7 +1004,7 @@ TEST_F(ProxyDeviceApiTest, CompletionPropagatesErrorStatus)
     auto adapter = std::make_unique<ErrorStubAdapter>();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter), /*channel_count=*/1, /*worker_count=*/1),
+    ASSERT_EQ(runtime.init(std::move(adapter), 1, 1),
               NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
@@ -1036,7 +1036,7 @@ TEST_F(ProxyDeviceApiTest, SubmitFailurePropagatesErrorStatus)
     auto *adapter = adapter_owner.get();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter_owner), /*channel_count=*/1, /*worker_count=*/1),
+    ASSERT_EQ(runtime.init(std::move(adapter_owner), 1, 1),
               NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
@@ -1068,7 +1068,7 @@ TEST_F(ProxyDeviceApiTest, RingOverflowReturnsBackendErrorOnShutdown)
     auto adapter = std::make_unique<StubProxyBackendAdapter>();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter), /*channel_count=*/1, /*worker_count=*/1),
+    ASSERT_EQ(runtime.init(std::move(adapter), 1, 1),
               NIXL_SUCCESS);
     publishProxyContext(runtime);
     uint32_t *shutdown_host = shutdownWordHostFromRuntime(runtime);
@@ -1114,7 +1114,7 @@ TEST_F(ProxyDeviceApiTest, ChannelCompletionsAdvanceIndependently)
     auto *adapter = adapter_owner.get();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter_owner), /*channel_count=*/2, /*worker_count=*/2),
+    ASSERT_EQ(runtime.init(std::move(adapter_owner), 2, 2),
               NIXL_SUCCESS);
     ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
     publishProxyContext(runtime);
