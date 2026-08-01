@@ -393,9 +393,8 @@ nixlProxyMemViewRegistry::fillRemoteMetadata(const nixl_remote_meta_dlist_t &dli
 }
 
 nixl_status_t
-nixlProxyChannelState::allocate(uint32_t channel_id, uint32_t depth) {
-    NIXL_INFO << "nixlProxyChannelState::allocate: channel_id=" << channel_id
-              << " depth=" << depth;
+nixlProxyChannelState::allocate(uint32_t depth) {
+    NIXL_INFO << "nixlProxyChannelState::allocate: depth=" << depth;
     ring_depth_ = depth;
     if (cudaMalloc(reinterpret_cast<void **>(&work_ring_dev_),
                    sizeof(nixlProxyWorkRing))                             != cudaSuccess
@@ -407,8 +406,7 @@ nixlProxyChannelState::allocate(uint32_t channel_id, uint32_t depth) {
      || cudaMallocHost(reinterpret_cast<void **>(&consumer_idx_host_),
                        sizeof(uint64_t))                                  != cudaSuccess
      || cudaMallocHost(&completion_slot_host_, sizeof(nixlProxyCompletionSlot)) != cudaSuccess) {
-        NIXL_ERROR << "nixlProxyChannelState::allocate: CUDA allocation failed for channel "
-                   << channel_id;
+        NIXL_ERROR << "nixlProxyChannelState::allocate: CUDA allocation failed";
         deallocate();
         return NIXL_ERR_BACKEND;
     }
@@ -463,7 +461,7 @@ nixlProxyChannelState::allocate(uint32_t channel_id, uint32_t depth) {
     device_view = nixlProxyChannelView{ work_ring_dev_, completion_slot_dev_ };
 
     inflight_requests.clear();
-    NIXL_INFO << "nixlProxyChannelState::allocate: channel " << channel_id << " ready"
+    NIXL_INFO << "nixlProxyChannelState::allocate: ready"
               << " work_ring(dev)=" << work_ring_dev_
               << " records=" << records_host_
               << " records(dev)=" << records_dev_ptr
@@ -605,7 +603,7 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
 
     channels_.resize(channel_count);
     for (uint32_t channel_id = 0; channel_id < channel_count; ++channel_id) {
-        rc = channels_[channel_id].allocate(channel_id, ring_depth_);
+        rc = channels_[channel_id].allocate(ring_depth_);
         if (rc != NIXL_SUCCESS) {
             channels_.clear();
             backend_->shutdown();
