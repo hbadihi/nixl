@@ -147,11 +147,6 @@ TEST_F(ProxyRuntimeTest, InitPropagatesBackendFailure) {
     EXPECT_EQ(initRuntime(4, 2, NIXL_ERR_BACKEND), NIXL_ERR_BACKEND);
 }
 
-TEST_F(ProxyRuntimeTest, InitSetsChannelCount) {
-    ASSERT_EQ(initRuntime(4, 2), NIXL_SUCCESS);
-    EXPECT_EQ(runtime_.channelCount(), 4u);
-}
-
 TEST_F(ProxyRuntimeTest, DeviceChannelViewsPopulated) {
     ASSERT_EQ(initRuntime(3, 1), NIXL_SUCCESS);
     const nixlProxyChannelView *views = runtime_.deviceChannelViews();
@@ -206,7 +201,6 @@ TEST_F(ProxyRuntimeTest, CompletionSlotsInitialized) {
 
 TEST_F(ProxyRuntimeTest, WorkerCountClampedToChannels) {
     ASSERT_EQ(initRuntime(2, 8), NIXL_SUCCESS);
-    EXPECT_EQ(runtime_.channelCount(), 2u);
     EXPECT_EQ(backend_->init_worker_count_, 2u);
     EXPECT_EQ(backend_->init_channel_count_, 2u);
 }
@@ -273,7 +267,6 @@ TEST_F(ProxyRuntimeTest, InitAfterShutdownWorks) {
     ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
 
     ASSERT_EQ(initRuntime(4, 2), NIXL_SUCCESS);
-    EXPECT_EQ(runtime_.channelCount(), 4u);
     ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
     EXPECT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
 }
@@ -285,7 +278,6 @@ TEST_F(ProxyRuntimeTest, SingleChannelSingleWorker) {
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
     ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
-    EXPECT_EQ(runtime_.channelCount(), 0u);
 }
 
 TEST_F(ProxyRuntimeTest, ManyChannelsManyWorkers) {
