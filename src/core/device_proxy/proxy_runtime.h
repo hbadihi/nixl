@@ -40,7 +40,6 @@ struct nixlProxyRequestState {
 struct alignas(64) nixlProxyChannelState {
     nixlProxyChannelView device_view{};
     std::deque<nixlProxyRequestState> inflight_requests;
-    bool error_latched = false;
 
     nixlProxyWorkRing *work_ring_dev_ = nullptr;
     nixlProxySubmission *records_host_ = nullptr;

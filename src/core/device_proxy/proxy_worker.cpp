@@ -145,9 +145,6 @@ ProxyWorker::driveBackendProgress() {
 
 void
 ProxyWorker::publishCompletions(nixlProxyChannelState &channel) {
-    if (channel.error_latched) {
-        return;
-    }
     while (!channel.inflight_requests.empty()) {
         nixlProxyRequestState &front = channel.inflight_requests.front();
         nixl_status_t st;
@@ -164,13 +161,12 @@ ProxyWorker::publishCompletions(nixlProxyChannelState &channel) {
                    << " op_idx=" << front.op_idx
                    << " status=" << st
                    << " token=" << front.backend_req_token;
-        channel.completion_slot_host_->next_status = st;
-        __atomic_store_n(&channel.completion_slot_host_->completed_idx,
-                         front.op_idx, __ATOMIC_RELEASE);
-        channel.inflight_requests.pop_front();
-        if (st != NIXL_SUCCESS) {
-            channel.error_latched = true;
-            break;
+
+        if (channel.completion_slot_host_->next_status >= NIXL_SUCCESS) {
+            channel.completion_slot_host_->next_status = st;
+            __atomic_store_n(&channel.completion_slot_host_->completed_idx,
+                             front.op_idx, __ATOMIC_RELEASE);
         }
+        channel.inflight_requests.pop_front();
     }
 }
