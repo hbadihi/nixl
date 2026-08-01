@@ -269,9 +269,6 @@ class nixlProxyRuntime {
         const nixlProxyMemViewRegistry &
         memviewRegistry() const { return memview_registry_; }
 
-        uint32_t
-        channelCount() const { return static_cast<uint32_t>(channels_.size()); }
-
         const nixlProxyChannelView *
         deviceChannelViews() const {
             return device_channel_views_.empty() ? nullptr : device_channel_views_.data();
