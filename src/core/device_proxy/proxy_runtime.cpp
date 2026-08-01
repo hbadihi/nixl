@@ -460,7 +460,7 @@ nixlProxyChannelState::allocate(uint32_t channel_id, uint32_t depth) {
         deallocate();
         return NIXL_ERR_BACKEND;
     }
-    device_view = nixlProxyChannelView{ work_ring_dev_, completion_slot_dev_, channel_id };
+    device_view = nixlProxyChannelView{ work_ring_dev_, completion_slot_dev_ };
 
     inflight_requests.clear();
     NIXL_INFO << "nixlProxyChannelState::allocate: channel " << channel_id << " ready"
