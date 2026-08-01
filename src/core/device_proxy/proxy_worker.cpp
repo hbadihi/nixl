@@ -91,7 +91,7 @@ ProxyWorker::tryDequeue(nixlProxyChannelState &channel, nixlProxySubmission &sub
     __atomic_store_n(channel.consumer_idx_host_,
                      local_consumer_idx + 1,
                      __ATOMIC_RELEASE);
-    NIXL_DEBUG << "ProxyWorker::tryDequeue: channel=" << channel.device_view.channel_id
+    NIXL_DEBUG << "ProxyWorker::tryDequeue: channel=" << submission.channel_id
                << " consumer=" << local_consumer_idx
                << " opcode=" << static_cast<int>(submission.opcode)
                << " op_idx=" << submission.op_idx
@@ -156,9 +156,7 @@ ProxyWorker::publishCompletions(nixlProxyChannelState &channel) {
                 break;
             }
         }
-        NIXL_DEBUG << "ProxyWorker::publishCompletions: channel="
-                   << channel.device_view.channel_id
-                   << " op_idx=" << front.op_idx
+        NIXL_DEBUG << "ProxyWorker::publishCompletions: op_idx=" << front.op_idx
                    << " status=" << st
                    << " token=" << front.backend_req_token;
 
