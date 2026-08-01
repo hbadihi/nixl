@@ -157,7 +157,6 @@ TEST_F(ProxyRuntimeTest, DeviceChannelViewsPopulated) {
     const nixlProxyChannelView *views = runtime_.deviceChannelViews();
     ASSERT_NE(views, nullptr);
     for (uint32_t i = 0; i < 3; ++i) {
-        EXPECT_EQ(views[i].channel_id, i);
         EXPECT_NE(views[i].work_ring, nullptr);
         const nixlProxyWorkRing ring = copyDeviceWorkRing(views[i]);
         EXPECT_NE(ring.records, nullptr);

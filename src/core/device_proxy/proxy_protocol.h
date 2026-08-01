@@ -75,7 +75,6 @@ struct nixlProxyChannelView {
     nixlProxyWorkRing *work_ring = nullptr;
     /** Mapped pinned host memory (device alias); host writes via host pointer with atomics. */
     nixlProxyCompletionSlot *completion_slot = nullptr;
-    uint32_t channel_id = 0;
 };
 
 struct nixlProxyDeviceContextData {
