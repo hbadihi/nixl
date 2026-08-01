@@ -792,7 +792,6 @@ nixlProxyRuntime::startWorkers() {
 
     for (auto &channel : channels_) {
         channel.inflight_requests.clear();
-        channel.error_latched = false;
     }
 
     __atomic_store_n(shutdown_word_host_,
