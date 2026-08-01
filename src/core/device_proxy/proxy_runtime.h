@@ -64,7 +64,7 @@ struct alignas(64) nixlProxyChannelState {
     nixlProxyChannelState &operator=(const nixlProxyChannelState &) = delete;
 
     nixl_status_t
-    allocate(uint32_t channel_id, uint32_t depth);
+    allocate(uint32_t depth);
 
     void
     deallocate() noexcept;
