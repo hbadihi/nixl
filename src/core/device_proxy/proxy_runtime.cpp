@@ -775,6 +775,17 @@ nixlProxyRuntime::shutdown() {
     workers_started_ = false;
     NIXL_INFO << "ProxyRuntime::shutdown: all worker threads joined";
 
+    if (backend_ != nullptr) {
+        for (auto &channel : channels_) {
+            for (auto &inflight : channel.inflight_requests) {
+                if (inflight.status == NIXL_IN_PROG && inflight.backend_req_token != 0) {
+                    backend_->releaseRequest(inflight.backend_req_token);
+                }
+            }
+            channel.inflight_requests.clear();
+        }
+    }
+
     nixl_status_t backend_status = NIXL_SUCCESS;
     if (backend_ != nullptr) {
         NIXL_INFO << "ProxyRuntime::shutdown: shutting down backend";

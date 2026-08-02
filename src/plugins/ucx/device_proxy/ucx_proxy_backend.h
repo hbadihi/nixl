@@ -43,6 +43,9 @@ class nixlUcxProxyBackendAdapter : public nixlDeviceProxyBackendAdapter {
         nixl_status_t
         checkCompletion(uint64_t request_token) override;
 
+        void
+        releaseRequest(uint64_t request_token) override;
+
         nixl_status_t
         progress() override;
 
