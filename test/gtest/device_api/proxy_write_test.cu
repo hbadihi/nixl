@@ -107,7 +107,7 @@ public:
         pending_.insert(token);
         token_channel_[token] = submission.channel_id;
         submitted_opcodes_.push_back(submission.opcode);
-        return NIXL_SUCCESS;
+        return NIXL_IN_PROG;
     }
 
     nixl_status_t
@@ -223,8 +223,8 @@ public:
 
     nixl_status_t
     submit(const nixlBackendProxySubmission &, uint64_t &token) override {
-        token = 0;
-        return NIXL_SUCCESS;
+        token = 1;
+        return NIXL_IN_PROG;
     }
 
     nixl_status_t
