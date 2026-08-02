@@ -1107,8 +1107,8 @@ nixlUcxEngine::submitProxyRmaWrite(const nixlMetaDesc &local,
                                    const nixlMetaDesc &remote,
                                    size_t size,
                                    size_t worker_id,
-                                   nixlBackendReqH *&handle) const {
-    handle = nullptr;
+                                   nixlUcxReq &req) const {
+    req = nullptr;
 
     if (local.len != size || remote.len != size) {
         return NIXL_ERR_INVALID_PARAM;
@@ -1124,34 +1124,21 @@ nixlUcxEngine::submitProxyRmaWrite(const nixlMetaDesc &local,
         return NIXL_ERR_INVALID_PARAM;
     }
 
-    auto *ucx_handle = new nixlUcxBackendReqH(getWorker(worker_id).get(), worker_id);
-    handle = ucx_handle;
-    ucx_handle->reserve(1);
-
     auto &ep = rmd->conn->getEp(worker_id);
-    nixlUcxReq req = nullptr;
-    const nixl_status_t submit_status = ep->write(reinterpret_cast<void *>(local.addr),
-                                                  lmd->mem,
-                                                  static_cast<uint64_t>(remote.addr),
-                                                  rmd->getRkey(worker_id),
-                                                  size,
-                                                  req);
-    const nixl_status_t append_status = ucx_handle->append(submit_status, req, rmd->conn);
-    if (append_status != NIXL_SUCCESS) {
-        releaseReqH(handle);
-        handle = nullptr;
-        return append_status;
-    }
-
-    return submit_status;
+    return ep->write(reinterpret_cast<void *>(local.addr),
+                     lmd->mem,
+                     static_cast<uint64_t>(remote.addr),
+                     rmd->getRkey(worker_id),
+                     size,
+                     req);
 }
 
 nixl_status_t
 nixlUcxEngine::submitProxyAtomicAdd(const nixlMetaDesc &remote,
                                     uint64_t value,
                                     size_t worker_id,
-                                    nixlBackendReqH *&handle) const {
-    handle = nullptr;
+                                    nixlUcxReq &req) const {
+    req = nullptr;
 
     if (remote.len != sizeof(uint64_t)) {
         return NIXL_ERR_INVALID_PARAM;
@@ -1166,24 +1153,30 @@ nixlUcxEngine::submitProxyAtomicAdd(const nixlMetaDesc &remote,
         return NIXL_ERR_INVALID_PARAM;
     }
 
-    auto *ucx_handle = new nixlUcxBackendReqH(getWorker(worker_id).get(), worker_id);
-    handle = ucx_handle;
-    ucx_handle->reserve(1);
-
     auto &ep = rmd->conn->getEp(worker_id);
-    nixlUcxReq req = nullptr;
-    const nixl_status_t submit_status = ep->atomicAdd(value,
-                                                      static_cast<uint64_t>(remote.addr),
-                                                      rmd->getRkey(worker_id),
-                                                      req);
-    const nixl_status_t append_status = ucx_handle->append(submit_status, req, rmd->conn);
-    if (append_status != NIXL_SUCCESS) {
-        releaseReqH(handle);
-        handle = nullptr;
-        return append_status;
+    return ep->atomicAdd(value, static_cast<uint64_t>(remote.addr), rmd->getRkey(worker_id), req);
+}
+
+nixl_status_t
+nixlUcxEngine::checkProxyRequest(nixlUcxReq req) const {
+    return nixl::ucx::ucsToNixlStatus(ucp_request_check_status(req));
+}
+
+void
+nixlUcxEngine::releaseProxyRequest(size_t worker_id, nixlUcxReq req, bool cancel) const {
+    if (req == nullptr) {
+        return;
+    }
+    if (worker_id >= getSharedWorkersSize()) {
+        NIXL_WARN << "nixlUcxEngine::releaseProxyRequest: invalid worker_id=" << worker_id;
+        return;
     }
 
-    return submit_status;
+    auto *worker = getSharedWorker(worker_id).get();
+    if (cancel && checkProxyRequest(req) == NIXL_IN_PROG) {
+        worker->reqCancel(req);
+    }
+    worker->reqRelease(req);
 }
 
 nixl_status_t nixlUcxEngine::estimateXferCost (const nixl_xfer_op_t &operation,
