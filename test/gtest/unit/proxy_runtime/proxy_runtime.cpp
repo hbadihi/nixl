@@ -37,6 +37,11 @@ class DummyBackendMD : public nixlBackendMD {
         DummyBackendMD() : nixlBackendMD(false) {}
 };
 
+struct StubBackendState {
+    mutable std::mutex released_mutex;
+    std::vector<uint64_t> released_requests;
+};
+
 class StubBackend : public nixlDeviceProxyBackendAdapter {
     public:
         nixl_status_t
@@ -59,13 +64,21 @@ class StubBackend : public nixlDeviceProxyBackendAdapter {
                 std::lock_guard<std::mutex> lock(submit_mutex_);
                 submissions_.push_back(submission);
             }
-            request_token = ++next_request_token_;
-            return NIXL_SUCCESS;
+            request_token =
+                request_token_to_return_ != 0 ? request_token_to_return_ : ++next_request_token_;
+            return submit_rc_;
         }
 
         nixl_status_t
         checkCompletion(uint64_t) override {
-            return NIXL_SUCCESS;
+            ++check_completion_calls_;
+            return completion_rc_;
+        }
+
+        void
+        releaseRequest(uint64_t request_token) override {
+            std::lock_guard<std::mutex> lock(state_->released_mutex);
+            state_->released_requests.push_back(request_token);
         }
 
         nixl_status_t
@@ -93,6 +106,11 @@ class StubBackend : public nixlDeviceProxyBackendAdapter {
         mutable std::mutex submit_mutex_;
         std::vector<nixlBackendProxySubmission> submissions_;
         uint64_t next_request_token_ = 0;
+        nixl_status_t submit_rc_ = NIXL_SUCCESS;
+        nixl_status_t completion_rc_ = NIXL_SUCCESS;
+        uint64_t request_token_to_return_ = 0;
+        uint64_t check_completion_calls_ = 0;
+        std::shared_ptr<StubBackendState> state_ = std::make_shared<StubBackendState>();
 };
 
 class ProxyRuntimeTest : public testing::Test {
@@ -563,6 +581,51 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedAtomicAddDescriptor) {
     EXPECT_EQ(prepared.remote.desc.metadataP, &remote_md);
     EXPECT_EQ(prepared.remote_agent, "peer");
     EXPECT_EQ(prepared.value, 42u);
+}
+
+TEST_F(ProxyRuntimeTest, ShutdownReleasesPendingBackendRequests) {
+    DummyBackendMD remote_md;
+
+    ASSERT_EQ(initRuntime(1, 1), NIXL_SUCCESS);
+    backend_->submit_rc_ = NIXL_IN_PROG;
+    backend_->completion_rc_ = NIXL_IN_PROG;
+    backend_->request_token_to_return_ = 303;
+    auto backend_state = backend_->state_;
+
+    nixlMemViewH dst_proxy = nullptr;
+    nixl_remote_meta_dlist_t remote_dlist(VRAM_SEG);
+    nixlRemoteMetaDesc remote_desc("peer");
+    remote_desc.addr = 0x2000;
+    remote_desc.len = 64;
+    remote_desc.devId = 0;
+    remote_desc.metadataP = &remote_md;
+    remote_dlist.addDesc(remote_desc);
+    ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_.prepMemView(remote_dlist, &dst_proxy), NIXL_SUCCESS);
+
+    nixlProxySubmission submission{};
+    submission.op_idx = 31;
+    submission.opcode = nixl_proxy_opcode_t::ATOMIC_ADD;
+    submission.channel_id = 0;
+    submission.dst_proxy_memview_id = reinterpret_cast<uint64_t>(dst_proxy);
+    submission.dst_offset = 8;
+    submission.size = sizeof(uint64_t);
+    submission.value = 42;
+
+    const nixlProxyWorkRing ring = copyDeviceWorkRing(runtime_.deviceChannelViews()[0]);
+    auto *records = hostAliasOf(ring.records);
+    ASSERT_NE(records, nullptr);
+    submission.op_idx = 0;
+    records[0] = submission;
+    __atomic_store_n(&records[0].op_idx, uint64_t{31}, __ATOMIC_RELEASE);
+
+    const auto submissions = waitForSubmissions(backend_, 1);
+    ASSERT_EQ(submissions.size(), 1u);
+    ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
+
+    std::lock_guard<std::mutex> lock(backend_state->released_mutex);
+    ASSERT_EQ(backend_state->released_requests.size(), 1u);
+    EXPECT_EQ(backend_state->released_requests.front(), 303u);
 }
 
 TEST_F(ProxyRuntimeTest, WorkerSubmitsReadyPeersForOwnedChannel) {
