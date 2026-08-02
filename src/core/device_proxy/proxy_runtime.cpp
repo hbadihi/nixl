@@ -436,6 +436,7 @@ nixlProxyChannelState::allocate(uint32_t depth) {
         return NIXL_ERR_BACKEND;
     }
     __atomic_store_n(consumer_idx_host_, uint64_t{0}, __ATOMIC_RELEASE);
+    submit_idx_ = 0;
     completion_slot_host_->next_status = NIXL_IN_PROG;
     __atomic_store_n(&completion_slot_host_->completed_idx, uint64_t{0}, __ATOMIC_RELEASE);
     nixlProxyWorkRing work_ring{
@@ -452,7 +453,7 @@ nixlProxyChannelState::allocate(uint32_t depth) {
     }
     device_view = nixlProxyChannelView{work_ring_dev_, completion_slot_dev_};
 
-    inflight_requests.clear();
+    inflight_slots_.assign(depth, nixlProxyRequestState{});
     NIXL_INFO << "nixlProxyChannelState::allocate: ready"
               << " work_ring(dev)=" << work_ring_dev_ << " records=" << records_host_
               << " records(dev)=" << records_dev_ptr << " producer_idx(dev)=" << producer_idx_dev_
@@ -491,6 +492,8 @@ nixlProxyChannelState::deallocate() noexcept {
         cudaFree(work_ring_dev_);
         work_ring_dev_ = nullptr;
     }
+    inflight_slots_.clear();
+    submit_idx_ = 0;
     ring_depth_ = 0;
     device_view = nixlProxyChannelView{};
 }
@@ -508,7 +511,8 @@ nixlProxyChannelState::operator=(nixlProxyChannelState &&other) noexcept {
     if (this != &other) {
         deallocate();
         device_view = other.device_view;
-        inflight_requests = std::move(other.inflight_requests);
+        inflight_slots_ = std::move(other.inflight_slots_);
+        submit_idx_ = other.submit_idx_;
         work_ring_dev_ = other.work_ring_dev_;
         records_host_ = other.records_host_;
         producer_idx_dev_ = other.producer_idx_dev_;
@@ -523,6 +527,7 @@ nixlProxyChannelState::operator=(nixlProxyChannelState &&other) noexcept {
         other.consumer_idx_host_ = nullptr;
         other.consumer_idx_cache_dev_ = nullptr;
         other.ring_depth_ = 0;
+        other.submit_idx_ = 0;
         other.completion_slot_host_ = nullptr;
         other.completion_slot_dev_ = nullptr;
         other.device_view = nixlProxyChannelView{};
@@ -738,10 +743,6 @@ nixlProxyRuntime::startWorkers() {
         return NIXL_ERR_INVALID_PARAM;
     }
 
-    for (auto &channel : channels_) {
-        channel.inflight_requests.clear();
-    }
-
     __atomic_store_n(shutdown_word_host_,
                      static_cast<uint32_t>(nixl_proxy_control_state_t::RUNNING),
                      __ATOMIC_RELEASE);
@@ -776,13 +777,28 @@ nixlProxyRuntime::shutdown() {
     NIXL_INFO << "ProxyRuntime::shutdown: all worker threads joined";
 
     if (backend_ != nullptr) {
+        size_t released = 0;
         for (auto &channel : channels_) {
-            for (auto &inflight : channel.inflight_requests) {
+            if (channel.ring_depth_ == 0 || channel.consumer_idx_host_ == nullptr) {
+                continue;
+            }
+
+            const uint64_t consumer_idx =
+                __atomic_load_n(channel.consumer_idx_host_, __ATOMIC_RELAXED);
+            for (uint64_t idx = consumer_idx; idx < channel.submit_idx_; ++idx) {
+                nixlProxyRequestState &inflight =
+                    channel.inflight_slots_[idx % channel.ring_depth_];
                 if (inflight.status == NIXL_IN_PROG && inflight.backend_request) {
                     backend_->releaseRequest(inflight.backend_request);
+                    ++released;
                 }
+                inflight = nixlProxyRequestState{};
             }
-            channel.inflight_requests.clear();
+            channel.submit_idx_ = consumer_idx;
+        }
+        if (released != 0) {
+            NIXL_INFO << "ProxyRuntime::shutdown: released " << released
+                      << " pending backend request(s)";
         }
     }
 
