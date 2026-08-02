@@ -18,7 +18,6 @@
 #define NIXL_SRC_CORE_DEVICE_PROXY_PROXY_RUNTIME_H
 
 #include <cstdint>
-#include <deque>
 #include <memory>
 #include <string>
 #include <vector>
@@ -39,7 +38,13 @@ struct nixlProxyRequestState {
 
 struct alignas(64) nixlProxyChannelState {
     nixlProxyChannelView device_view{};
-    std::deque<nixlProxyRequestState> inflight_requests;
+    /**
+     * Per-ring-slot backend state. A submitted record remains associated with
+     * its ring slot until completion advances consumer_idx_host_ past it.
+     */
+    std::vector<nixlProxyRequestState> inflight_slots_;
+    /** Host-only submit frontier; consumer_idx_host_ remains the completion frontier. */
+    uint64_t submit_idx_ = 0;
 
     nixlProxyWorkRing *work_ring_dev_ = nullptr;
     nixlProxySubmission *records_host_ = nullptr;

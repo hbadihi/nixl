@@ -57,12 +57,13 @@ class ProxyWorker {
         void
         submitOwnedChannels();
 
-        bool
-        tryDequeue(nixlProxyChannelState &channel, nixlProxySubmission &submission);
+        void
+        submitReady(nixlProxyChannelState &channel, uint32_t peer);
 
         void
         submitToBackend(nixlProxyChannelState &channel,
                         uint32_t peer,
+                        uint32_t slot,
                         const nixlProxySubmission &submission);
 
         void
