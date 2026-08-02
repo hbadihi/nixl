@@ -18,11 +18,8 @@
 #define NIXL_SRC_PLUGINS_UCX_DEVICE_PROXY_UCX_PROXY_BACKEND_H
 
 #include <cstdint>
-#include <mutex>
 #include <string>
-#include <unordered_map>
 
-#include "backend/backend_aux.h"
 #include "../../../core/device_proxy/backend_adapter.h"
 
 class nixlUcxEngine;
@@ -67,14 +64,8 @@ class nixlUcxProxyBackendAdapter : public nixlDeviceProxyBackendAdapter {
         submitAtomicAdd(const nixlBackendProxySubmission &submission,
                         nixlBackendProxyRequest &request);
 
-        nixlBackendProxyRequest
-        trackRequest(nixlBackendReqH *handle, size_t worker_id);
-
         nixlUcxEngine *engine_ = nullptr;
         uint32_t peer_capacity_ = 0;
-        std::mutex request_mutex_;
-        std::unordered_map<uint64_t, nixlBackendReqH *> tracked_requests_;
-        uint64_t next_request_token_ = 1;
 };
 
 #endif // NIXL_SRC_PLUGINS_UCX_DEVICE_PROXY_UCX_PROXY_BACKEND_H

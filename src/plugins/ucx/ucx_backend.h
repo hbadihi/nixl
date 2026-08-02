@@ -264,13 +264,19 @@ private:
                         const nixlMetaDesc &remote,
                         size_t size,
                         size_t worker_id,
-                        nixlBackendReqH *&handle) const;
+                        nixlUcxReq &req) const;
 
     nixl_status_t
     submitProxyAtomicAdd(const nixlMetaDesc &remote,
                          uint64_t value,
                          size_t worker_id,
-                         nixlBackendReqH *&handle) const;
+                         nixlUcxReq &req) const;
+
+    nixl_status_t
+    checkProxyRequest(nixlUcxReq req) const;
+
+    void
+    releaseProxyRequest(size_t worker_id, nixlUcxReq req, bool cancel) const;
 
     // Memory management helpers
     nixl_status_t
