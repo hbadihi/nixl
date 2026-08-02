@@ -166,6 +166,7 @@ protected:
         cfg.syncMode = nixl_thread_sync_t::NIXL_THREAD_SYNC_RW;
         cfg.pthrDelay = 100000;
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+        cfg.useProgThread = false;
         cfg.enableDeviceProxy = true;
         cfg.proxyChannelCount = numWorkers;
         cfg.proxyWorkerCount =

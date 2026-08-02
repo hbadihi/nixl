@@ -29,10 +29,8 @@ class nixlUcxEngine;
 
 class nixlUcxProxyBackendAdapter : public nixlDeviceProxyBackendAdapter {
     public:
-        explicit nixlUcxProxyBackendAdapter(nixlUcxEngine *engine = nullptr,
-                                            bool progress_thread_enabled = false) noexcept
-            : engine_(engine),
-              progress_thread_enabled_(progress_thread_enabled) {}
+        explicit nixlUcxProxyBackendAdapter(nixlUcxEngine *engine = nullptr) noexcept
+            : engine_(engine) {}
 
         ~nixlUcxProxyBackendAdapter() override = default;
 
@@ -68,7 +66,6 @@ class nixlUcxProxyBackendAdapter : public nixlDeviceProxyBackendAdapter {
         trackRequest(nixlBackendReqH *handle);
 
         nixlUcxEngine *engine_ = nullptr;
-        bool progress_thread_enabled_ = false;
         uint32_t peer_capacity_ = 0;
         std::mutex request_mutex_;
         std::unordered_map<uint64_t, nixlBackendReqH *> tracked_requests_;
