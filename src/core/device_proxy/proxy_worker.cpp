@@ -148,11 +148,11 @@ ProxyWorker::submitToBackend(nixlProxyChannelState &channel,
     inflight.op_idx = submission.op_idx;
     status = backend_->submit(prepared_submission, request_token);
     inflight.backend_req_token = request_token;
-    if (status != NIXL_SUCCESS) {
+    inflight.status = status;
+    if (status != NIXL_SUCCESS && status != NIXL_IN_PROG) {
         NIXL_ERROR << "ProxyWorker::submitToBackend: backend submit failed"
                    << " status=" << status << " op_idx=" << submission.op_idx
                    << " request_token=" << request_token;
-        inflight.status = status;
     }
 
     NIXL_DEBUG << "ProxyWorker::submitToBackend: submitted op_idx=" << submission.op_idx

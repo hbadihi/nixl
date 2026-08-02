@@ -80,16 +80,18 @@ nixlUcxProxyBackendAdapter::submitPut(const nixlBackendProxySubmission &submissi
         return status;
     }
 
-    request_token = trackRequest(handle);
+    if (status == NIXL_SUCCESS) {
+        engine_->releaseReqH(handle);
+        request_token = kInvalidToken;
+    } else {
+        request_token = trackRequest(handle);
+    }
     NIXL_DEBUG << "nixlUcxProxyBackendAdapter::submitPut: posted RDMA write"
-               << " src_addr=0x" << std::hex
-               << submission.local.desc.addr << std::dec
-               << " dst_addr=0x" << std::hex
-               << submission.remote.desc.addr << std::dec
-               << " size=" << submission.size
-               << " remote_agent='" << submission.remote_agent << "'"
-               << " token=" << request_token;
-    return NIXL_SUCCESS;
+               << " src_addr=0x" << std::hex << submission.local.desc.addr << std::dec
+               << " dst_addr=0x" << std::hex << submission.remote.desc.addr << std::dec
+               << " size=" << submission.size << " remote_agent='" << submission.remote_agent << "'"
+               << " token=" << request_token << " status=" << status;
+    return status;
 }
 
 nixl_status_t
@@ -108,15 +110,18 @@ nixlUcxProxyBackendAdapter::submitAtomicAdd(const nixlBackendProxySubmission &su
         return status;
     }
 
-    request_token = trackRequest(handle);
+    if (status == NIXL_SUCCESS) {
+        engine_->releaseReqH(handle);
+        request_token = kInvalidToken;
+    } else {
+        request_token = trackRequest(handle);
+    }
     NIXL_DEBUG << "nixlUcxProxyBackendAdapter::submitAtomicAdd: posted RDMA atomic add"
-               << " dst_addr=0x" << std::hex
-               << submission.remote.desc.addr << std::dec
-               << " size=" << submission.size
-               << " value=" << submission.value
-               << " remote_agent='" << submission.remote_agent << "'"
-               << " token=" << request_token;
-    return NIXL_SUCCESS;
+               << " dst_addr=0x" << std::hex << submission.remote.desc.addr << std::dec
+               << " size=" << submission.size << " value=" << submission.value << " remote_agent='"
+               << submission.remote_agent << "'"
+               << " token=" << request_token << " status=" << status;
+    return status;
 }
 
 nixl_status_t
