@@ -149,6 +149,22 @@ nixlUcxProxyBackendAdapter::checkCompletion(uint64_t request_token) {
     return status;
 }
 
+void
+nixlUcxProxyBackendAdapter::releaseRequest(uint64_t request_token) {
+    if (engine_ == nullptr || request_token == kInvalidToken) {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(request_mutex_);
+    const auto it = tracked_requests_.find(request_token);
+    if (it == tracked_requests_.end()) {
+        return;
+    }
+
+    engine_->releaseReqH(it->second);
+    tracked_requests_.erase(it);
+}
+
 nixl_status_t
 nixlUcxProxyBackendAdapter::progress() {
     if (engine_ != nullptr) {
