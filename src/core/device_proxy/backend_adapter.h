@@ -65,6 +65,9 @@ class nixlDeviceProxyBackendAdapter {
         virtual nixl_status_t
         checkCompletion(uint64_t request_token) = 0;
 
+        virtual void
+        releaseRequest(uint64_t) {}
+
         virtual nixl_status_t
         progress() {
             return NIXL_ERR_NOT_SUPPORTED;
