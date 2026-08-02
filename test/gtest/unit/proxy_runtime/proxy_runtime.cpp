@@ -39,7 +39,7 @@ class DummyBackendMD : public nixlBackendMD {
 
 struct StubBackendState {
     mutable std::mutex released_mutex;
-    std::vector<uint64_t> released_requests;
+    std::vector<nixlBackendProxyRequest> released_requests;
 };
 
 class StubBackend : public nixlDeviceProxyBackendAdapter {
@@ -59,26 +59,31 @@ class StubBackend : public nixlDeviceProxyBackendAdapter {
         }
 
         nixl_status_t
-        submit(const nixlBackendProxySubmission &submission, uint64_t &request_token) override {
+        submit(const nixlBackendProxySubmission &submission,
+               nixlBackendProxyRequest &request) override {
             {
                 std::lock_guard<std::mutex> lock(submit_mutex_);
                 submissions_.push_back(submission);
             }
-            request_token =
-                request_token_to_return_ != 0 ? request_token_to_return_ : ++next_request_token_;
+            request = request_to_return_;
+            if (submit_rc_ == NIXL_IN_PROG && !request) {
+                request = nixlBackendProxyRequest{++next_request_token_, 0};
+            }
             return submit_rc_;
         }
 
         nixl_status_t
-        checkCompletion(uint64_t) override {
+        checkCompletion(const nixlBackendProxyRequest &request) override {
+            std::lock_guard<std::mutex> lock(completion_mutex_);
+            last_checked_request_ = request;
             ++check_completion_calls_;
             return completion_rc_;
         }
 
         void
-        releaseRequest(uint64_t request_token) override {
+        releaseRequest(const nixlBackendProxyRequest &request) override {
             std::lock_guard<std::mutex> lock(state_->released_mutex);
-            state_->released_requests.push_back(request_token);
+            state_->released_requests.push_back(request);
         }
 
         nixl_status_t
@@ -108,7 +113,9 @@ class StubBackend : public nixlDeviceProxyBackendAdapter {
         uint64_t next_request_token_ = 0;
         nixl_status_t submit_rc_ = NIXL_SUCCESS;
         nixl_status_t completion_rc_ = NIXL_SUCCESS;
-        uint64_t request_token_to_return_ = 0;
+        nixlBackendProxyRequest request_to_return_{};
+        mutable std::mutex completion_mutex_;
+        nixlBackendProxyRequest last_checked_request_{};
         uint64_t check_completion_calls_ = 0;
         std::shared_ptr<StubBackendState> state_ = std::make_shared<StubBackendState>();
 };
@@ -589,7 +596,7 @@ TEST_F(ProxyRuntimeTest, ShutdownReleasesPendingBackendRequests) {
     ASSERT_EQ(initRuntime(1, 1), NIXL_SUCCESS);
     backend_->submit_rc_ = NIXL_IN_PROG;
     backend_->completion_rc_ = NIXL_IN_PROG;
-    backend_->request_token_to_return_ = 303;
+    backend_->request_to_return_ = nixlBackendProxyRequest{303, 9};
     auto backend_state = backend_->state_;
 
     nixlMemViewH dst_proxy = nullptr;
@@ -625,7 +632,8 @@ TEST_F(ProxyRuntimeTest, ShutdownReleasesPendingBackendRequests) {
 
     std::lock_guard<std::mutex> lock(backend_state->released_mutex);
     ASSERT_EQ(backend_state->released_requests.size(), 1u);
-    EXPECT_EQ(backend_state->released_requests.front(), 303u);
+    EXPECT_EQ(backend_state->released_requests.front().token, 303u);
+    EXPECT_EQ(backend_state->released_requests.front().context, 9u);
 }
 
 TEST_F(ProxyRuntimeTest, WorkerSubmitsReadyPeersForOwnedChannel) {
