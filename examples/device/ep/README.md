@@ -93,6 +93,8 @@ cd build
 ninja install
 ```
 
+For the NIXL device proxy backend, add `-Dgpu_device_api_backend=proxy`.
+
 
 Finally, configure PYTHONPATH to use NIXL EP:
 ```bash
