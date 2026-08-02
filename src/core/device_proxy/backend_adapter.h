@@ -45,6 +45,16 @@ struct nixlBackendProxySubmission {
     uint64_t value = 0;
 };
 
+struct nixlBackendProxyRequest {
+    uint64_t token = 0;
+    size_t context = 0;
+
+    explicit
+    operator bool() const {
+        return token != 0;
+    }
+};
+
 class nixlDeviceProxyBackendAdapter {
     public:
         virtual ~nixlDeviceProxyBackendAdapter() = default;
@@ -60,13 +70,13 @@ class nixlDeviceProxyBackendAdapter {
         }
 
         virtual nixl_status_t
-        submit(const nixlBackendProxySubmission &submission, uint64_t &request_token) = 0;
+        submit(const nixlBackendProxySubmission &submission, nixlBackendProxyRequest &request) = 0;
 
         virtual nixl_status_t
-        checkCompletion(uint64_t request_token) = 0;
+        checkCompletion(const nixlBackendProxyRequest &request) = 0;
 
         virtual void
-        releaseRequest(uint64_t) {}
+        releaseRequest(const nixlBackendProxyRequest &) {}
 
         virtual nixl_status_t
         progress() {
