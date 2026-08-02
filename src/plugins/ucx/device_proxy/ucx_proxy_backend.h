@@ -38,13 +38,14 @@ class nixlUcxProxyBackendAdapter : public nixlDeviceProxyBackendAdapter {
         init(uint32_t proxy_worker_count, uint32_t channel_count, uint32_t peer_capacity) override;
 
         nixl_status_t
-        submit(const nixlBackendProxySubmission &submission, uint64_t &request_token) override;
+        submit(const nixlBackendProxySubmission &submission,
+               nixlBackendProxyRequest &request) override;
 
         nixl_status_t
-        checkCompletion(uint64_t request_token) override;
+        checkCompletion(const nixlBackendProxyRequest &request) override;
 
         void
-        releaseRequest(uint64_t request_token) override;
+        releaseRequest(const nixlBackendProxyRequest &request) override;
 
         nixl_status_t
         progress() override;
@@ -60,13 +61,14 @@ class nixlUcxProxyBackendAdapter : public nixlDeviceProxyBackendAdapter {
         getSharedWorkerIdForChannelPeer(uint32_t channel_id, uint32_t peer_index) const;
 
         nixl_status_t
-        submitPut(const nixlBackendProxySubmission &submission, uint64_t &request_token);
+        submitPut(const nixlBackendProxySubmission &submission, nixlBackendProxyRequest &request);
 
         nixl_status_t
-        submitAtomicAdd(const nixlBackendProxySubmission &submission, uint64_t &request_token);
+        submitAtomicAdd(const nixlBackendProxySubmission &submission,
+                        nixlBackendProxyRequest &request);
 
-        uint64_t
-        trackRequest(nixlBackendReqH *handle);
+        nixlBackendProxyRequest
+        trackRequest(nixlBackendReqH *handle, size_t worker_id);
 
         nixlUcxEngine *engine_ = nullptr;
         uint32_t peer_capacity_ = 0;

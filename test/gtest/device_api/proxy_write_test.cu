@@ -57,13 +57,13 @@ public:
     }
 
     nixl_status_t
-    submit(const nixlBackendProxySubmission &, uint64_t &token) override {
-        token = 0;
+    submit(const nixlBackendProxySubmission &, nixlBackendProxyRequest &request) override {
+        request = nixlBackendProxyRequest{};
         return NIXL_SUCCESS;
     }
 
     nixl_status_t
-    checkCompletion(uint64_t) override {
+    checkCompletion(const nixlBackendProxyRequest &) override {
         return NIXL_SUCCESS;
     }
 
@@ -85,8 +85,8 @@ public:
 
 // ---------------------------------------------------------------------------
 // Controllable stub — lets the test thread decide when each submission
-// completes.  submit() assigns unique monotonic tokens; checkCompletion()
-// returns NIXL_IN_PROG until markComplete() is called for a token.
+// completes. submit() assigns unique monotonic requests; checkCompletion()
+// returns NIXL_IN_PROG until markComplete() is called for the request token.
 // ---------------------------------------------------------------------------
 class ControllableStubAdapter : public nixlDeviceProxyBackendAdapter {
 public:
@@ -101,19 +101,20 @@ public:
     }
 
     nixl_status_t
-    submit(const nixlBackendProxySubmission &submission, uint64_t &token) override {
+    submit(const nixlBackendProxySubmission &submission,
+           nixlBackendProxyRequest &request) override {
         std::lock_guard<std::mutex> lk(mu_);
-        token = next_token_++;
-        pending_.insert(token);
-        token_channel_[token] = submission.channel_id;
+        request = nixlBackendProxyRequest{next_token_++, submission.channel_id};
+        pending_.insert(request.token);
+        token_channel_[request.token] = submission.channel_id;
         submitted_opcodes_.push_back(submission.opcode);
         return NIXL_IN_PROG;
     }
 
     nixl_status_t
-    checkCompletion(uint64_t token) override {
+    checkCompletion(const nixlBackendProxyRequest &request) override {
         std::lock_guard<std::mutex> lk(mu_);
-        auto it = completed_.find(token);
+        auto it = completed_.find(request.token);
         if (it != completed_.end()) {
             nixl_status_t status = it->second;
             completed_.erase(it);
@@ -222,13 +223,13 @@ public:
     }
 
     nixl_status_t
-    submit(const nixlBackendProxySubmission &, uint64_t &token) override {
-        token = 1;
+    submit(const nixlBackendProxySubmission &, nixlBackendProxyRequest &request) override {
+        request = nixlBackendProxyRequest{1, 0};
         return NIXL_IN_PROG;
     }
 
     nixl_status_t
-    checkCompletion(uint64_t) override {
+    checkCompletion(const nixlBackendProxyRequest &) override {
         return NIXL_ERR_BACKEND;
     }
 
@@ -265,13 +266,13 @@ public:
     }
 
     nixl_status_t
-    submit(const nixlBackendProxySubmission &, uint64_t &) override {
+    submit(const nixlBackendProxySubmission &, nixlBackendProxyRequest &) override {
         ++submit_calls_;
         return NIXL_ERR_BACKEND;
     }
 
     nixl_status_t
-    checkCompletion(uint64_t) override {
+    checkCompletion(const nixlBackendProxyRequest &) override {
         ++check_completion_calls_;
         return NIXL_SUCCESS;
     }
