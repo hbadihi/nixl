@@ -1105,10 +1105,15 @@ nixl_status_t
 nixlUcxEngine::submitProxyRmaWrite(const nixlMetaDesc &local,
                                    const nixlMetaDesc &remote,
                                    size_t size,
+                                   size_t worker_id,
                                    nixlBackendReqH *&handle) const {
     handle = nullptr;
 
     if (local.len != size || remote.len != size) {
+        return NIXL_ERR_INVALID_PARAM;
+    }
+
+    if (worker_id >= getSharedWorkersSize()) {
         return NIXL_ERR_INVALID_PARAM;
     }
 
@@ -1118,7 +1123,6 @@ nixlUcxEngine::submitProxyRmaWrite(const nixlMetaDesc &local,
         return NIXL_ERR_INVALID_PARAM;
     }
 
-    const auto worker_id = getWorkerId();
     auto *ucx_handle = new nixlUcxBackendReqH(getWorker(worker_id).get(), worker_id);
     handle = ucx_handle;
     ucx_handle->reserve(1);
@@ -1144,10 +1148,15 @@ nixlUcxEngine::submitProxyRmaWrite(const nixlMetaDesc &local,
 nixl_status_t
 nixlUcxEngine::submitProxyAtomicAdd(const nixlMetaDesc &remote,
                                     uint64_t value,
+                                    size_t worker_id,
                                     nixlBackendReqH *&handle) const {
     handle = nullptr;
 
     if (remote.len != sizeof(uint64_t)) {
+        return NIXL_ERR_INVALID_PARAM;
+    }
+
+    if (worker_id >= getSharedWorkersSize()) {
         return NIXL_ERR_INVALID_PARAM;
     }
 
@@ -1156,7 +1165,6 @@ nixlUcxEngine::submitProxyAtomicAdd(const nixlMetaDesc &remote,
         return NIXL_ERR_INVALID_PARAM;
     }
 
-    const auto worker_id = getWorkerId();
     auto *ucx_handle = new nixlUcxBackendReqH(getWorker(worker_id).get(), worker_id);
     handle = ucx_handle;
     ucx_handle->reserve(1);
@@ -1434,6 +1442,11 @@ nixlUcxEngine::progress() {
         ret += uw->progress();
     }
     return ret;
+}
+
+unsigned
+nixlUcxEngine::progress(size_t worker_id) {
+    return getWorker(worker_id)->progress();
 }
 
 void

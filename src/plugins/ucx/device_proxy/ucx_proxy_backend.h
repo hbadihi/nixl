@@ -37,6 +37,9 @@ class nixlUcxProxyBackendAdapter : public nixlDeviceProxyBackendAdapter {
         ~nixlUcxProxyBackendAdapter() override = default;
 
         nixl_status_t
+        init(uint32_t proxy_worker_count, uint32_t channel_count, uint32_t peer_capacity) override;
+
+        nixl_status_t
         submit(const nixlBackendProxySubmission &submission, uint64_t &request_token) override;
 
         nixl_status_t
@@ -46,9 +49,15 @@ class nixlUcxProxyBackendAdapter : public nixlDeviceProxyBackendAdapter {
         progress() override;
 
         nixl_status_t
+        progress(uint32_t channel_id, uint32_t peer_index) override;
+
+        nixl_status_t
         shutdown() override;
 
     private:
+        size_t
+        getSharedWorkerIdForChannelPeer(uint32_t channel_id, uint32_t peer_index) const;
+
         nixl_status_t
         submitPut(const nixlBackendProxySubmission &submission, uint64_t &request_token);
 
@@ -60,6 +69,7 @@ class nixlUcxProxyBackendAdapter : public nixlDeviceProxyBackendAdapter {
 
         nixlUcxEngine *engine_ = nullptr;
         bool progress_thread_enabled_ = false;
+        uint32_t peer_capacity_ = 0;
         std::mutex request_mutex_;
         std::unordered_map<uint64_t, nixlBackendReqH *> tracked_requests_;
         uint64_t next_request_token_ = 1;

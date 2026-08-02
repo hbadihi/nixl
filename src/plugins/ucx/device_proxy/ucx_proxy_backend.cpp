@@ -24,6 +24,23 @@ constexpr uint64_t kInvalidToken = 0;
 }
 
 nixl_status_t
+nixlUcxProxyBackendAdapter::init(uint32_t, uint32_t channel_count, uint32_t peer_capacity) {
+    if (engine_ == nullptr || channel_count == 0 || peer_capacity == 0) {
+        return NIXL_ERR_INVALID_PARAM;
+    }
+    const size_t worker_count = engine_->getSharedWorkersSize();
+    const size_t expected_workers = static_cast<size_t>(channel_count) * peer_capacity;
+    if (worker_count != expected_workers) {
+        NIXL_ERROR << "UCX proxy requires one UCX worker per (channel, peer): workers="
+                   << worker_count << " channels=" << channel_count
+                   << " peer_capacity=" << peer_capacity << " expected=" << expected_workers;
+        return NIXL_ERR_INVALID_PARAM;
+    }
+    peer_capacity_ = peer_capacity;
+    return NIXL_SUCCESS;
+}
+
+nixl_status_t
 nixlUcxProxyBackendAdapter::submit(const nixlBackendProxySubmission &submission,
                                    uint64_t &request_token) {
     request_token = kInvalidToken;
@@ -41,14 +58,21 @@ nixlUcxProxyBackendAdapter::submit(const nixlBackendProxySubmission &submission,
     }
 }
 
+size_t
+nixlUcxProxyBackendAdapter::getSharedWorkerIdForChannelPeer(uint32_t channel_id,
+                                                            uint32_t peer_index) const {
+    return static_cast<size_t>(channel_id) * peer_capacity_ + peer_index;
+}
+
 nixl_status_t
 nixlUcxProxyBackendAdapter::submitPut(const nixlBackendProxySubmission &submission,
                                       uint64_t &request_token) {
+    const size_t worker_id =
+        getSharedWorkerIdForChannelPeer(submission.channel_id, submission.peer_index);
+
     nixlBackendReqH *handle = nullptr;
-    nixl_status_t status = engine_->submitProxyRmaWrite(submission.local.desc,
-                                                        submission.remote.desc,
-                                                        submission.size,
-                                                        handle);
+    nixl_status_t status = engine_->submitProxyRmaWrite(
+        submission.local.desc, submission.remote.desc, submission.size, worker_id, handle);
     if (status != NIXL_SUCCESS && status != NIXL_IN_PROG) {
         NIXL_DEBUG << "nixlUcxProxyBackendAdapter::submitPut: submitProxyRmaWrite failed "
                       "status="
@@ -71,10 +95,12 @@ nixlUcxProxyBackendAdapter::submitPut(const nixlBackendProxySubmission &submissi
 nixl_status_t
 nixlUcxProxyBackendAdapter::submitAtomicAdd(const nixlBackendProxySubmission &submission,
                                             uint64_t &request_token) {
+    const size_t worker_id =
+        getSharedWorkerIdForChannelPeer(submission.channel_id, submission.peer_index);
+
     nixlBackendReqH *handle = nullptr;
-    nixl_status_t status = engine_->submitProxyAtomicAdd(submission.remote.desc,
-                                                         submission.value,
-                                                         handle);
+    nixl_status_t status =
+        engine_->submitProxyAtomicAdd(submission.remote.desc, submission.value, worker_id, handle);
     if (status != NIXL_SUCCESS && status != NIXL_IN_PROG) {
         NIXL_DEBUG << "nixlUcxProxyBackendAdapter::submitAtomicAdd: submitProxyAtomicAdd "
                       "failed status="
@@ -122,6 +148,15 @@ nixl_status_t
 nixlUcxProxyBackendAdapter::progress() {
     if (engine_ != nullptr && !progress_thread_enabled_) {
         engine_->progress();
+    }
+
+    return NIXL_SUCCESS;
+}
+
+nixl_status_t
+nixlUcxProxyBackendAdapter::progress(uint32_t channel_id, uint32_t peer_index) {
+    if (engine_ != nullptr && !progress_thread_enabled_) {
+        engine_->progress(getSharedWorkerIdForChannelPeer(channel_id, peer_index));
     }
 
     return NIXL_SUCCESS;
