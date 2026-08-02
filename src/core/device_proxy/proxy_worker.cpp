@@ -132,7 +132,7 @@ ProxyWorker::submitToBackend(nixlProxyChannelState &channel,
     if (status != NIXL_SUCCESS) {
         NIXL_DEBUG << "ProxyWorker::submitToBackend: submission preparation failed"
                    << " op_idx=" << submission.op_idx << " status=" << status;
-        channel.inflight_requests.push_back({submission.op_idx, 0, status});
+        channel.inflight_requests.push_back({submission.op_idx, {}, status});
         return;
     }
 
@@ -143,20 +143,20 @@ ProxyWorker::submitToBackend(nixlProxyChannelState &channel,
                << prepared_submission.remote.desc.addr << std::dec << " size=" << submission.size
                << " remote_agent='" << prepared_submission.remote_agent << "'";
 
-    uint64_t request_token = 0;
     nixlProxyRequestState inflight{};
     inflight.op_idx = submission.op_idx;
-    status = backend_->submit(prepared_submission, request_token);
-    inflight.backend_req_token = request_token;
+    status = backend_->submit(prepared_submission, inflight.backend_request);
     inflight.status = status;
     if (status != NIXL_SUCCESS && status != NIXL_IN_PROG) {
         NIXL_ERROR << "ProxyWorker::submitToBackend: backend submit failed"
                    << " status=" << status << " op_idx=" << submission.op_idx
-                   << " request_token=" << request_token;
+                   << " request_token=" << inflight.backend_request.token
+                   << " request_context=" << inflight.backend_request.context;
     }
 
     NIXL_DEBUG << "ProxyWorker::submitToBackend: submitted op_idx=" << submission.op_idx
-               << " request_token=" << request_token << " status=" << status;
+               << " request_token=" << inflight.backend_request.token
+               << " request_context=" << inflight.backend_request.context << " status=" << status;
     channel.inflight_requests.push_back(inflight);
 }
 
@@ -178,13 +178,14 @@ ProxyWorker::publishCompletions(nixlProxyChannelState &channel) {
         if (front.status != NIXL_IN_PROG) {
             st = front.status;
         } else {
-            st = backend_->checkCompletion(front.backend_req_token);
+            st = backend_->checkCompletion(front.backend_request);
             if (st == NIXL_IN_PROG) {
                 break;
             }
         }
         NIXL_DEBUG << "ProxyWorker::publishCompletions: op_idx=" << front.op_idx << " status=" << st
-                   << " token=" << front.backend_req_token;
+                   << " token=" << front.backend_request.token
+                   << " context=" << front.backend_request.context;
 
         if (channel.completion_slot_host_->next_status >= 0) {
             channel.completion_slot_host_->next_status = st;
