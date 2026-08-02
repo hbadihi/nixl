@@ -152,7 +152,7 @@ struct ProxyDeviceContext : nixlProxyDeviceContextData {
         submission.op_idx = 0;
         ring->records[slot] = submission;
 
-        cuda::atomic_ref<uint64_t, cuda::thread_scope_device> record_op_idx(
+        cuda::atomic_ref<uint64_t, cuda::thread_scope_system> record_op_idx(
             ring->records[slot].op_idx);
         record_op_idx.store(submission_op_idx, cuda::memory_order_release);
 
