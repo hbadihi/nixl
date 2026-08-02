@@ -24,10 +24,12 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include "device_proxy/backend_adapter.h"
 #include "device_proxy/proxy_runtime.h"
+#include "device_proxy/proxy_worker.h"
 
 namespace gtest {
 namespace proxy_runtime {
@@ -61,15 +63,20 @@ class StubBackend : public nixlDeviceProxyBackendAdapter {
         nixl_status_t
         submit(const nixlBackendProxySubmission &submission,
                nixlBackendProxyRequest &request) override {
+            nixl_status_t status = submit_rc_;
             {
                 std::lock_guard<std::mutex> lock(submit_mutex_);
                 submissions_.push_back(submission);
+                if (!submit_rcs_.empty()) {
+                    status = submit_rcs_.front();
+                    submit_rcs_.erase(submit_rcs_.begin());
+                }
             }
             request = request_to_return_;
-            if (submit_rc_ == NIXL_IN_PROG && !request) {
+            if (status == NIXL_IN_PROG && !request) {
                 request = nixlBackendProxyRequest{++next_request_token_, 0};
             }
-            return submit_rc_;
+            return status;
         }
 
         nixl_status_t
@@ -77,6 +84,10 @@ class StubBackend : public nixlDeviceProxyBackendAdapter {
             std::lock_guard<std::mutex> lock(completion_mutex_);
             last_checked_request_ = request;
             ++check_completion_calls_;
+            const auto status = completion_status_by_token_.find(request.token);
+            if (status != completion_status_by_token_.end()) {
+                return status->second;
+            }
             return completion_rc_;
         }
 
@@ -102,6 +113,11 @@ class StubBackend : public nixlDeviceProxyBackendAdapter {
             return NIXL_SUCCESS;
         }
 
+        void
+        setCompletionStatus(uint64_t token, nixl_status_t status) {
+            std::lock_guard<std::mutex> lock(completion_mutex_);
+            completion_status_by_token_[token] = status;
+        }
         bool init_called_ = false;
         uint32_t init_worker_count_ = 0;
         uint32_t init_channel_count_ = 0;
@@ -110,6 +126,7 @@ class StubBackend : public nixlDeviceProxyBackendAdapter {
         std::atomic<uint64_t> progress_calls_{0};
         mutable std::mutex submit_mutex_;
         std::vector<nixlBackendProxySubmission> submissions_;
+        std::vector<nixl_status_t> submit_rcs_;
         uint64_t next_request_token_ = 0;
         nixl_status_t submit_rc_ = NIXL_SUCCESS;
         nixl_status_t completion_rc_ = NIXL_SUCCESS;
@@ -117,6 +134,7 @@ class StubBackend : public nixlDeviceProxyBackendAdapter {
         mutable std::mutex completion_mutex_;
         nixlBackendProxyRequest last_checked_request_{};
         uint64_t check_completion_calls_ = 0;
+        std::unordered_map<uint64_t, nixl_status_t> completion_status_by_token_;
         std::shared_ptr<StubBackendState> state_ = std::make_shared<StubBackendState>();
 };
 
@@ -177,6 +195,55 @@ waitForSubmissions(StubBackend *backend, size_t count) {
     }
     std::lock_guard<std::mutex> lock(backend->submit_mutex_);
     return backend->submissions_;
+}
+
+static bool
+waitForCompletedIdx(const nixlProxyChannelView &view, uint64_t completed_idx) {
+    auto *completion_slot = hostAliasOf(view.completion_slot);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (__atomic_load_n(&completion_slot->completed_idx, __ATOMIC_ACQUIRE) >= completed_idx) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return __atomic_load_n(&completion_slot->completed_idx, __ATOMIC_ACQUIRE) >= completed_idx;
+}
+
+static nixlProxySubmission
+makeAtomicAddSubmission(nixlMemViewH dst_proxy, uint64_t value = 42) {
+    nixlProxySubmission submission{};
+    submission.opcode = nixl_proxy_opcode_t::ATOMIC_ADD;
+    submission.channel_id = 0;
+    submission.dst_proxy_memview_id = reinterpret_cast<uint64_t>(dst_proxy);
+    submission.dst_offset = 0;
+    submission.size = sizeof(uint64_t);
+    submission.value = value;
+    return submission;
+}
+
+static nixlProxySubmission
+makeInvalidAtomicAddSubmission() {
+    return makeAtomicAddSubmission(nullptr);
+}
+
+static void
+publishRecord(nixlProxySubmission *records,
+              uint32_t slot,
+              const nixlProxySubmission &submission,
+              uint64_t op_idx) {
+    nixlProxySubmission record = submission;
+    record.op_idx = 0;
+    records[slot] = record;
+    __atomic_store_n(&records[slot].op_idx, op_idx, __ATOMIC_RELEASE);
+}
+
+static std::unique_ptr<ProxyWorker>
+makeDirectWorker(StubBackend *backend,
+                 const nixlProxyMemViewRegistry *registry,
+                 uint32_t *shutdown_word,
+                 nixlProxyChannelState *channel) {
+    return std::make_unique<ProxyWorker>(backend, registry, shutdown_word, channel, 1, 1, 0, 1, 0);
 }
 
 static nixl_remote_meta_dlist_t
@@ -693,6 +760,214 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsReadyPeersForOwnedChannel) {
     }
     EXPECT_TRUE(seen[0]);
     EXPECT_TRUE(seen[1]);
+}
+
+TEST_F(ProxyRuntimeTest, ConsumerIndexAdvancesOnlyAfterBackendCompletion) {
+    DummyBackendMD remote_md;
+    StubBackend backend;
+    backend.submit_rc_ = NIXL_IN_PROG;
+    backend.completion_rc_ = NIXL_IN_PROG;
+
+    nixlProxyMemViewRegistry registry;
+    nixlMemViewH dst_proxy = nullptr;
+    ASSERT_EQ(registry.prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &dst_proxy),
+              NIXL_SUCCESS);
+
+    nixlProxyChannelState channel;
+    ASSERT_EQ(channel.allocate(2), NIXL_SUCCESS);
+    uint32_t shutdown_word = static_cast<uint32_t>(nixl_proxy_control_state_t::RUNNING);
+    auto worker = makeDirectWorker(&backend, &registry, &shutdown_word, &channel);
+
+    publishRecord(channel.records_host_, 0, makeAtomicAddSubmission(dst_proxy), 1);
+
+    worker->runOnce();
+    ASSERT_EQ(backend.submissions_.size(), 1u);
+    EXPECT_EQ(__atomic_load_n(channel.consumer_idx_host_, __ATOMIC_ACQUIRE), 0u);
+    EXPECT_EQ(__atomic_load_n(&channel.completion_slot_host_->completed_idx, __ATOMIC_ACQUIRE), 0u);
+
+    backend.setCompletionStatus(1, NIXL_SUCCESS);
+    worker->runOnce();
+
+    EXPECT_EQ(__atomic_load_n(channel.consumer_idx_host_, __ATOMIC_ACQUIRE), 1u);
+    EXPECT_EQ(__atomic_load_n(&channel.completion_slot_host_->completed_idx, __ATOMIC_ACQUIRE), 1u);
+    EXPECT_EQ(channel.completion_slot_host_->next_status, NIXL_SUCCESS);
+}
+
+TEST_F(ProxyRuntimeTest, InFlightRequestsAreBoundedByRingDepth) {
+    DummyBackendMD remote_md;
+    StubBackend backend;
+    backend.submit_rc_ = NIXL_IN_PROG;
+    backend.completion_rc_ = NIXL_IN_PROG;
+
+    nixlProxyMemViewRegistry registry;
+    nixlMemViewH dst_proxy = nullptr;
+    ASSERT_EQ(registry.prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &dst_proxy),
+              NIXL_SUCCESS);
+
+    nixlProxyChannelState channel;
+    ASSERT_EQ(channel.allocate(2), NIXL_SUCCESS);
+    uint32_t shutdown_word = static_cast<uint32_t>(nixl_proxy_control_state_t::RUNNING);
+    auto worker = makeDirectWorker(&backend, &registry, &shutdown_word, &channel);
+
+    const auto submission = makeAtomicAddSubmission(dst_proxy);
+    publishRecord(channel.records_host_, 0, submission, 1);
+    publishRecord(channel.records_host_, 1, submission, 2);
+
+    worker->runOnce();
+    worker->runOnce();
+    ASSERT_EQ(backend.submissions_.size(), 2u);
+    EXPECT_EQ(__atomic_load_n(channel.consumer_idx_host_, __ATOMIC_ACQUIRE), 0u);
+
+    publishRecord(channel.records_host_, 0, submission, 3);
+    worker->runOnce();
+    EXPECT_EQ(backend.submissions_.size(), 2u);
+
+    backend.setCompletionStatus(1, NIXL_SUCCESS);
+    worker->runOnce();
+    EXPECT_EQ(backend.submissions_.size(), 2u);
+    EXPECT_EQ(__atomic_load_n(channel.consumer_idx_host_, __ATOMIC_ACQUIRE), 1u);
+
+    worker->runOnce();
+    EXPECT_EQ(backend.submissions_.size(), 3u);
+    EXPECT_EQ(backend.submissions_.back().op_idx, 3u);
+}
+
+TEST_F(ProxyRuntimeTest, CompletionsPublishInSubmissionOrder) {
+    DummyBackendMD remote_md;
+    StubBackend backend;
+    backend.submit_rc_ = NIXL_IN_PROG;
+    backend.completion_rc_ = NIXL_IN_PROG;
+
+    nixlProxyMemViewRegistry registry;
+    nixlMemViewH dst_proxy = nullptr;
+    ASSERT_EQ(registry.prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &dst_proxy),
+              NIXL_SUCCESS);
+
+    nixlProxyChannelState channel;
+    ASSERT_EQ(channel.allocate(3), NIXL_SUCCESS);
+    uint32_t shutdown_word = static_cast<uint32_t>(nixl_proxy_control_state_t::RUNNING);
+    auto worker = makeDirectWorker(&backend, &registry, &shutdown_word, &channel);
+
+    const auto submission = makeAtomicAddSubmission(dst_proxy);
+    publishRecord(channel.records_host_, 0, submission, 1);
+    publishRecord(channel.records_host_, 1, submission, 2);
+
+    worker->runOnce();
+    worker->runOnce();
+    ASSERT_EQ(backend.submissions_.size(), 2u);
+
+    backend.setCompletionStatus(2, NIXL_SUCCESS);
+    worker->runOnce();
+    EXPECT_EQ(__atomic_load_n(channel.consumer_idx_host_, __ATOMIC_ACQUIRE), 0u);
+    EXPECT_EQ(__atomic_load_n(&channel.completion_slot_host_->completed_idx, __ATOMIC_ACQUIRE), 0u);
+
+    backend.setCompletionStatus(1, NIXL_SUCCESS);
+    worker->runOnce();
+    EXPECT_EQ(__atomic_load_n(channel.consumer_idx_host_, __ATOMIC_ACQUIRE), 2u);
+    EXPECT_EQ(__atomic_load_n(&channel.completion_slot_host_->completed_idx, __ATOMIC_ACQUIRE), 2u);
+}
+
+TEST_F(ProxyRuntimeTest, PreparationErrorLatchesStatusButLaterWorkIsReclaimed) {
+    DummyBackendMD remote_md;
+    StubBackend backend;
+    backend.submit_rc_ = NIXL_IN_PROG;
+    backend.completion_rc_ = NIXL_SUCCESS;
+
+    nixlProxyMemViewRegistry registry;
+    nixlMemViewH dst_proxy = nullptr;
+    ASSERT_EQ(registry.prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &dst_proxy),
+              NIXL_SUCCESS);
+
+    nixlProxyChannelState channel;
+    ASSERT_EQ(channel.allocate(3), NIXL_SUCCESS);
+    uint32_t shutdown_word = static_cast<uint32_t>(nixl_proxy_control_state_t::RUNNING);
+    auto worker = makeDirectWorker(&backend, &registry, &shutdown_word, &channel);
+
+    publishRecord(channel.records_host_, 0, makeInvalidAtomicAddSubmission(), 1);
+    worker->runOnce();
+    EXPECT_EQ(__atomic_load_n(channel.consumer_idx_host_, __ATOMIC_ACQUIRE), 1u);
+    EXPECT_EQ(__atomic_load_n(&channel.completion_slot_host_->completed_idx, __ATOMIC_ACQUIRE), 1u);
+    EXPECT_LT(channel.completion_slot_host_->next_status, 0);
+
+    publishRecord(channel.records_host_, 1, makeAtomicAddSubmission(dst_proxy), 2);
+    worker->runOnce();
+    EXPECT_EQ(__atomic_load_n(channel.consumer_idx_host_, __ATOMIC_ACQUIRE), 2u);
+    EXPECT_EQ(__atomic_load_n(&channel.completion_slot_host_->completed_idx, __ATOMIC_ACQUIRE), 1u);
+    ASSERT_EQ(backend.submissions_.size(), 1u);
+    EXPECT_EQ(backend.submissions_.front().op_idx, 2u);
+}
+
+TEST_F(ProxyRuntimeTest, SubmitAndCompletionErrorsLatchFirstStatusAndRetireWork) {
+    DummyBackendMD remote_md;
+    StubBackend backend;
+    backend.submit_rcs_ = {NIXL_ERR_BACKEND, NIXL_IN_PROG, NIXL_IN_PROG};
+    backend.completion_rc_ = NIXL_IN_PROG;
+
+    nixlProxyMemViewRegistry registry;
+    nixlMemViewH dst_proxy = nullptr;
+    ASSERT_EQ(registry.prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &dst_proxy),
+              NIXL_SUCCESS);
+
+    nixlProxyChannelState channel;
+    ASSERT_EQ(channel.allocate(4), NIXL_SUCCESS);
+    uint32_t shutdown_word = static_cast<uint32_t>(nixl_proxy_control_state_t::RUNNING);
+    auto worker = makeDirectWorker(&backend, &registry, &shutdown_word, &channel);
+
+    const auto submission = makeAtomicAddSubmission(dst_proxy);
+    publishRecord(channel.records_host_, 0, submission, 1);
+    publishRecord(channel.records_host_, 1, submission, 2);
+    publishRecord(channel.records_host_, 2, submission, 3);
+
+    worker->runOnce();
+    EXPECT_EQ(__atomic_load_n(channel.consumer_idx_host_, __ATOMIC_ACQUIRE), 1u);
+    EXPECT_EQ(__atomic_load_n(&channel.completion_slot_host_->completed_idx, __ATOMIC_ACQUIRE), 1u);
+    const nixl_status_t first_error = channel.completion_slot_host_->next_status;
+    EXPECT_LT(first_error, 0);
+
+    worker->runOnce();
+    ASSERT_EQ(backend.submissions_.size(), 2u);
+    backend.setCompletionStatus(1, NIXL_ERR_BACKEND);
+    worker->runOnce();
+    EXPECT_EQ(__atomic_load_n(channel.consumer_idx_host_, __ATOMIC_ACQUIRE), 2u);
+    EXPECT_EQ(channel.completion_slot_host_->next_status, first_error);
+    EXPECT_EQ(__atomic_load_n(&channel.completion_slot_host_->completed_idx, __ATOMIC_ACQUIRE), 1u);
+
+    backend.setCompletionStatus(2, NIXL_SUCCESS);
+    worker->runOnce();
+    EXPECT_EQ(__atomic_load_n(channel.consumer_idx_host_, __ATOMIC_ACQUIRE), 3u);
+    EXPECT_EQ(channel.completion_slot_host_->next_status, first_error);
+    EXPECT_EQ(__atomic_load_n(&channel.completion_slot_host_->completed_idx, __ATOMIC_ACQUIRE), 1u);
+}
+
+TEST_F(ProxyRuntimeTest, ShutdownReleasesAllPendingBackendRequests) {
+    DummyBackendMD remote_md;
+
+    ASSERT_EQ(initRuntime(1, 1), NIXL_SUCCESS);
+    backend_->submit_rc_ = NIXL_IN_PROG;
+    backend_->completion_rc_ = NIXL_IN_PROG;
+    auto backend_state = backend_->state_;
+
+    nixlMemViewH dst_proxy = nullptr;
+    ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_.prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &dst_proxy),
+              NIXL_SUCCESS);
+
+    const nixlProxyWorkRing ring = copyDeviceWorkRing(runtime_.deviceChannelViews()[0]);
+    auto *records = hostAliasOf(ring.records);
+    ASSERT_NE(records, nullptr);
+
+    const auto submission = makeAtomicAddSubmission(dst_proxy);
+    publishRecord(records, 0, submission, 1);
+    publishRecord(records, 1, submission, 2);
+
+    const auto submissions = waitForSubmissions(backend_, 2);
+    ASSERT_EQ(submissions.size(), 2u);
+    ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
+
+    std::lock_guard<std::mutex> lock(backend_state->released_mutex);
+    ASSERT_EQ(backend_state->released_requests.size(), 2u);
+    EXPECT_EQ(backend_state->released_requests[0].token, 1u);
+    EXPECT_EQ(backend_state->released_requests[1].token, 2u);
 }
 
 } // namespace proxy_runtime

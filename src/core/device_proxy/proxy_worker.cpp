@@ -87,10 +87,7 @@ ProxyWorker::submitOwnedChannels() {
          channel_id += worker_count_) {
         for (uint32_t peer = 0; peer < max_peers_; ++peer) {
             nixlProxyChannelState *channel = getChannelState(peer, channel_id);
-            nixlProxySubmission submission;
-            if (tryDequeue(*channel, submission)) {
-                submitToBackend(*channel, peer, submission);
-            }
+            submitReady(*channel, peer);
         }
     }
 }
@@ -102,29 +99,41 @@ ProxyWorker::runOnce() {
     publishOwnedChannels();
 }
 
-bool
-ProxyWorker::tryDequeue(nixlProxyChannelState &channel, nixlProxySubmission &submission) {
-    uint64_t local_consumer_idx = __atomic_load_n(channel.consumer_idx_host_, __ATOMIC_RELAXED);
-    uint32_t slot = static_cast<uint32_t>(local_consumer_idx % channel.ring_depth_);
+void
+ProxyWorker::submitReady(nixlProxyChannelState &channel, uint32_t peer) {
+    const uint64_t consumer_idx = __atomic_load_n(channel.consumer_idx_host_, __ATOMIC_RELAXED);
+    const uint64_t submit_idx = channel.submit_idx_;
+
+    if (submit_idx - consumer_idx >= channel.ring_depth_) {
+        return;
+    }
+
+    const uint32_t slot = static_cast<uint32_t>(submit_idx % channel.ring_depth_);
     const uint64_t op_idx = __atomic_load_n(&channel.records_host_[slot].op_idx, __ATOMIC_ACQUIRE);
     if (op_idx == 0) {
-        return false;
+        return;
     }
-    submission = channel.records_host_[slot];
+
+    nixlProxySubmission submission = channel.records_host_[slot];
     submission.op_idx = op_idx;
+
     __atomic_store_n(&channel.records_host_[slot].op_idx, 0, __ATOMIC_RELAXED);
-    __atomic_store_n(channel.consumer_idx_host_, local_consumer_idx + 1, __ATOMIC_RELEASE);
-    NIXL_DEBUG << "ProxyWorker::tryDequeue: channel=" << submission.channel_id
-               << " consumer=" << local_consumer_idx
-               << " opcode=" << static_cast<int>(submission.opcode)
+    channel.submit_idx_ = submit_idx + 1;
+
+    NIXL_DEBUG << "ProxyWorker::submitReady: channel=" << submission.channel_id
+               << " submit=" << submit_idx << " opcode=" << static_cast<int>(submission.opcode)
                << " op_idx=" << submission.op_idx << " size=" << submission.size;
-    return true;
+    submitToBackend(channel, peer, slot, submission);
 }
 
 void
 ProxyWorker::submitToBackend(nixlProxyChannelState &channel,
                              uint32_t peer,
+                             uint32_t slot,
                              const nixlProxySubmission &submission) {
+    nixlProxyRequestState inflight{};
+    inflight.op_idx = submission.op_idx;
+
     nixlBackendProxySubmission prepared_submission;
     nixl_status_t status =
         proxy_memview_registry_->prepareSubmission(submission, prepared_submission);
@@ -132,7 +141,8 @@ ProxyWorker::submitToBackend(nixlProxyChannelState &channel,
     if (status != NIXL_SUCCESS) {
         NIXL_DEBUG << "ProxyWorker::submitToBackend: submission preparation failed"
                    << " op_idx=" << submission.op_idx << " status=" << status;
-        channel.inflight_requests.push_back({submission.op_idx, {}, status});
+        inflight.status = status;
+        channel.inflight_slots_[slot] = inflight;
         return;
     }
 
@@ -143,8 +153,6 @@ ProxyWorker::submitToBackend(nixlProxyChannelState &channel,
                << prepared_submission.remote.desc.addr << std::dec << " size=" << submission.size
                << " remote_agent='" << prepared_submission.remote_agent << "'";
 
-    nixlProxyRequestState inflight{};
-    inflight.op_idx = submission.op_idx;
     status = backend_->submit(prepared_submission, inflight.backend_request);
     inflight.status = status;
     if (status != NIXL_SUCCESS && status != NIXL_IN_PROG) {
@@ -157,7 +165,7 @@ ProxyWorker::submitToBackend(nixlProxyChannelState &channel,
     NIXL_DEBUG << "ProxyWorker::submitToBackend: submitted op_idx=" << submission.op_idx
                << " request_token=" << inflight.backend_request.token
                << " request_context=" << inflight.backend_request.context << " status=" << status;
-    channel.inflight_requests.push_back(inflight);
+    channel.inflight_slots_[slot] = inflight;
 }
 
 void
@@ -172,8 +180,15 @@ ProxyWorker::driveBackendProgress() {
 
 void
 ProxyWorker::publishCompletions(nixlProxyChannelState &channel) {
-    while (!channel.inflight_requests.empty()) {
-        nixlProxyRequestState &front = channel.inflight_requests.front();
+    for (;;) {
+        const uint64_t consumer_idx = __atomic_load_n(channel.consumer_idx_host_, __ATOMIC_RELAXED);
+        if (consumer_idx >= channel.submit_idx_) {
+            break;
+        }
+
+        const uint32_t slot = static_cast<uint32_t>(consumer_idx % channel.ring_depth_);
+        nixlProxyRequestState &front = channel.inflight_slots_[slot];
+
         nixl_status_t st;
         if (front.status != NIXL_IN_PROG) {
             st = front.status;
@@ -192,6 +207,7 @@ ProxyWorker::publishCompletions(nixlProxyChannelState &channel) {
             __atomic_store_n(
                 &channel.completion_slot_host_->completed_idx, front.op_idx, __ATOMIC_RELEASE);
         }
-        channel.inflight_requests.pop_front();
+        front = nixlProxyRequestState{};
+        __atomic_store_n(channel.consumer_idx_host_, consumer_idx + 1, __ATOMIC_RELEASE);
     }
 }
