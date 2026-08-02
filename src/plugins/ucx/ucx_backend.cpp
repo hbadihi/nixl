@@ -870,7 +870,13 @@ nixl_status_t
 nixlUcxEngine::createDeviceProxyBackendAdapter(
     const nixlBackendInitParams &init_params,
     std::unique_ptr<nixlDeviceProxyBackendAdapter> &adapter) {
-    adapter = std::make_unique<nixlUcxProxyBackendAdapter>(this, init_params.enableProgTh);
+    if (init_params.enableProgTh) {
+        NIXL_ERROR << "UCX device proxy requires ProxyWorker-driven progress; "
+                   << "disable the UCX progress thread";
+        return NIXL_ERR_NOT_SUPPORTED;
+    }
+
+    adapter = std::make_unique<nixlUcxProxyBackendAdapter>(this);
     return NIXL_SUCCESS;
 }
 
