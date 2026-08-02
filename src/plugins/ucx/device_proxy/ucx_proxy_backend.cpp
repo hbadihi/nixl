@@ -146,7 +146,7 @@ nixlUcxProxyBackendAdapter::checkCompletion(uint64_t request_token) {
 
 nixl_status_t
 nixlUcxProxyBackendAdapter::progress() {
-    if (engine_ != nullptr && !progress_thread_enabled_) {
+    if (engine_ != nullptr) {
         engine_->progress();
     }
 
@@ -155,7 +155,7 @@ nixlUcxProxyBackendAdapter::progress() {
 
 nixl_status_t
 nixlUcxProxyBackendAdapter::progress(uint32_t channel_id, uint32_t peer_index) {
-    if (engine_ != nullptr && !progress_thread_enabled_) {
+    if (engine_ != nullptr) {
         engine_->progress(getSharedWorkerIdForChannelPeer(channel_id, peer_index));
     }
 
