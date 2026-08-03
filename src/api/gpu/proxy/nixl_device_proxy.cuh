@@ -68,7 +68,7 @@ nixlProxyClearContext() {
 
 __device__ __forceinline__ uint32_t
 proxyMemViewIdFromHandle(nixlMemViewH mvh) {
-    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(mvh));
+    return static_cast<const nixlProxyDeviceMemView *>(mvh)->proxy_memview_id;
 }
 
 __device__ __forceinline__  ProxyDeviceContext *
