@@ -81,7 +81,7 @@ struct nixlProxyDeviceContextData {
     nixlProxyChannelView *channels = nullptr;
     uint32_t max_peers = 0;
     uint32_t num_channels = 0;
-    uint32_t *shutdown_word = nullptr;
+    uint64_t *shutdown_word = nullptr;
 };
 
 #endif // NIXL_SRC_CORE_DEVICE_PROXY_PROXY_PROTOCOL_H

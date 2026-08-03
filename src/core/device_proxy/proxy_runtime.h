@@ -17,6 +17,7 @@
 #ifndef NIXL_SRC_CORE_DEVICE_PROXY_PROXY_RUNTIME_H
 #define NIXL_SRC_CORE_DEVICE_PROXY_PROXY_RUNTIME_H
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -31,6 +32,8 @@
 class ProxyWorker;
 
 static constexpr uint32_t kDefaultProxyRingDepth = 256;
+static constexpr size_t kProxyShutdownSlot = 0;
+static constexpr size_t kProxyCiSlotBase = 1;
 
 struct nixlProxyRequestState {
     uint64_t op_idx = 0;
@@ -58,8 +61,8 @@ struct alignas(64) nixlProxyChannelState {
     uint64_t *consumer_idx_dev_ = nullptr;
     /** Device-resident cache of consumer_idx_dev_ used by GPU enqueue backpressure. */
     uint64_t *consumer_idx_cache_dev_ = nullptr;
-    nixlProxyControlBuffer *consumer_indices_ = nullptr;
-    uint32_t consumer_idx_slot_ = 0;
+    nixlProxyControlBuffer *control_slots_ = nullptr;
+    size_t control_slot_index_ = 0;
     /** Host-side ring depth for the CPU worker; nixlProxyWorkRing itself is device-only. */
     uint32_t         ring_depth_         = 0;
     /** Mapped pinned host memory; proxy worker writes directly via host alias. */
@@ -75,7 +78,7 @@ struct alignas(64) nixlProxyChannelState {
     nixlProxyChannelState &operator=(const nixlProxyChannelState &) = delete;
 
     nixl_status_t
-    allocate(uint32_t depth, nixlProxyControlBuffer *consumer_indices, uint32_t consumer_idx_slot);
+    allocate(uint32_t depth, nixlProxyControlBuffer *control_slots, size_t control_slot_index);
 
     nixl_status_t
     publishConsumerIdx(uint64_t value) noexcept;
@@ -302,15 +305,16 @@ class nixlProxyRuntime {
         joinWorkerThreads() noexcept;
 
         std::vector<nixlProxyChannelState> channels_;
-        nixlProxyControlBuffer consumer_indices_;
+        nixlProxyControlBuffer control_slots_;
         std::vector<nixlProxyChannelView> device_channel_views_;
         nixlProxyChannelView *device_channel_views_dev_ = nullptr;
         nixlProxyDeviceContextData *device_context_ = nullptr;
         std::vector<std::unique_ptr<ProxyWorker>> workers_;
         nixlProxyMemViewRegistry memview_registry_;
         std::unique_ptr<nixlDeviceProxyBackendAdapter> backend_;
-        uint32_t *shutdown_word_host_ = nullptr;
-        uint32_t *shutdown_word_dev_  = nullptr;
+        alignas(64) std::atomic<uint64_t> shutdown_state_{
+            static_cast<uint64_t>(nixl_proxy_control_state_t::SHUTDOWN)};
+        uint64_t *shutdown_word_dev_ = nullptr;
         uint32_t ring_depth_ = kDefaultProxyRingDepth;
         bool workers_started_ = false;
 };
