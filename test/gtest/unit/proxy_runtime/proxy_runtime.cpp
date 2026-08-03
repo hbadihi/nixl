@@ -184,6 +184,11 @@ channelViewIndex(uint32_t peer, uint32_t channel, uint32_t max_peers = 4) {
     return static_cast<size_t>(channel) * max_peers + peer;
 }
 
+static uint32_t
+proxyMemViewId(nixlMemViewH proxy_memview) {
+    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(proxy_memview));
+}
+
 static std::vector<nixlBackendProxySubmission>
 waitForSubmissions(StubBackend *backend, size_t count) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
@@ -239,7 +244,7 @@ makeAtomicAddSubmission(nixlMemViewH dst_proxy, uint64_t value = 42) {
     nixlProxySubmission submission{};
     submission.opcode = nixl_proxy_opcode_t::ATOMIC_ADD;
     submission.channel_id = 0;
-    submission.dst_proxy_memview_id = reinterpret_cast<uint64_t>(dst_proxy);
+    submission.dst_proxy_memview_id = proxyMemViewId(dst_proxy);
     submission.dst_offset = 0;
     submission.size = sizeof(uint64_t);
     submission.value = value;
@@ -497,9 +502,9 @@ TEST_F(ProxyRuntimeTest, PrepMemViewProducesReadyEntries) {
 
     nixlProxySubmission submission{};
     submission.opcode = nixl_proxy_opcode_t::PUT;
-    submission.src_proxy_memview_id = reinterpret_cast<uint64_t>(src_proxy);
+    submission.src_proxy_memview_id = proxyMemViewId(src_proxy);
     submission.src_offset = 4;
-    submission.dst_proxy_memview_id = reinterpret_cast<uint64_t>(dst_proxy);
+    submission.dst_proxy_memview_id = proxyMemViewId(dst_proxy);
     submission.dst_offset = 8;
     submission.size = 32;
 
@@ -571,9 +576,9 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedTransportDescriptors) {
     submission.op_idx = 11;
     submission.opcode = nixl_proxy_opcode_t::PUT;
     submission.channel_id = 0;
-    submission.src_proxy_memview_id = reinterpret_cast<uint64_t>(src_proxy);
+    submission.src_proxy_memview_id = proxyMemViewId(src_proxy);
     submission.src_offset = 4;
-    submission.dst_proxy_memview_id = reinterpret_cast<uint64_t>(dst_proxy);
+    submission.dst_proxy_memview_id = proxyMemViewId(dst_proxy);
     submission.dst_offset = 8;
     submission.size = 32;
 
@@ -646,7 +651,7 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedAtomicAddDescriptor) {
     submission.op_idx = 11;
     submission.opcode = nixl_proxy_opcode_t::ATOMIC_ADD;
     submission.channel_id = 0;
-    submission.dst_proxy_memview_id = reinterpret_cast<uint64_t>(dst_proxy);
+    submission.dst_proxy_memview_id = proxyMemViewId(dst_proxy);
     submission.dst_offset = 8;
     submission.size = sizeof(uint64_t);
     submission.value = 42;
@@ -719,7 +724,7 @@ TEST_F(ProxyRuntimeTest, ShutdownReleasesPendingBackendRequests) {
     submission.op_idx = 31;
     submission.opcode = nixl_proxy_opcode_t::ATOMIC_ADD;
     submission.channel_id = 0;
-    submission.dst_proxy_memview_id = reinterpret_cast<uint64_t>(dst_proxy);
+    submission.dst_proxy_memview_id = proxyMemViewId(dst_proxy);
     submission.dst_offset = 8;
     submission.size = sizeof(uint64_t);
     submission.value = 42;
@@ -764,8 +769,8 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsReadyPeersForOwnedChannel) {
     nixlProxySubmission peer0{};
     peer0.opcode = nixl_proxy_opcode_t::PUT;
     peer0.channel_id = 0;
-    peer0.src_proxy_memview_id = reinterpret_cast<uint64_t>(src_proxy);
-    peer0.dst_proxy_memview_id = reinterpret_cast<uint64_t>(dst_proxy);
+    peer0.src_proxy_memview_id = proxyMemViewId(src_proxy);
+    peer0.dst_proxy_memview_id = proxyMemViewId(dst_proxy);
     peer0.dst_index = 0;
     peer0.size = 32;
 
