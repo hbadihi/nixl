@@ -21,6 +21,10 @@ if cuda_dep.found()
     nixl_lib_deps += [ cuda_dep ]
 endif
 
+if have_gdrcopy
+    nixl_lib_deps += [ gdrcopy_dep ]
+endif
+
 if etcd_dep.found()
     nixl_lib_deps += [ etcd_dep ]
 endif
@@ -81,6 +85,7 @@ nixl_lib_sources = [
     'telemetry/buffer_plugin.cpp',
     'telemetry/nop_plugin.cpp',
     'tracing/tracer.cpp',
+    'device_proxy/proxy_control_buffer.cpp',
     'device_proxy/proxy_runtime.cpp',
     'device_proxy/proxy_worker.cpp',
 ]
