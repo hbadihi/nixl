@@ -389,19 +389,19 @@ nixlProxyMemViewRegistry::fillRemoteMetadata(const nixl_remote_meta_dlist_t &dli
 
 nixl_status_t
 nixlProxyChannelState::allocate(uint32_t depth,
-                                nixlProxyControlBuffer *consumer_indices,
-                                uint32_t consumer_idx_slot) {
+                                nixlProxyControlBuffer *control_slots,
+                                size_t control_slot_index) {
     NIXL_INFO << "nixlProxyChannelState::allocate: depth=" << depth
-              << " consumer_idx_slot=" << consumer_idx_slot;
-    if (depth == 0 || consumer_indices == nullptr ||
-        consumer_indices->devicePtr(consumer_idx_slot) == nullptr) {
+              << " control_slot_index=" << control_slot_index;
+    if (depth == 0 || control_slots == nullptr ||
+        control_slots->devicePtr(control_slot_index) == nullptr) {
         return NIXL_ERR_INVALID_PARAM;
     }
 
     ring_depth_ = depth;
-    consumer_indices_ = consumer_indices;
-    consumer_idx_slot_ = consumer_idx_slot;
-    consumer_idx_dev_ = consumer_indices_->devicePtr(consumer_idx_slot_);
+    control_slots_ = control_slots;
+    control_slot_index_ = control_slot_index;
+    consumer_idx_dev_ = control_slots_->devicePtr(control_slot_index_);
     consumer_idx_shadow_ = 0;
 
     if (cudaMalloc(reinterpret_cast<void **>(&work_ring_dev_), sizeof(nixlProxyWorkRing)) !=
@@ -474,10 +474,10 @@ nixlProxyChannelState::allocate(uint32_t depth,
 
 nixl_status_t
 nixlProxyChannelState::publishConsumerIdx(uint64_t value) noexcept {
-    if (consumer_indices_ == nullptr) {
+    if (control_slots_ == nullptr) {
         return NIXL_ERR_NOT_SUPPORTED;
     }
-    const nixl_status_t status = consumer_indices_->writeSlot(consumer_idx_slot_, value);
+    const nixl_status_t status = control_slots_->writeSlot(control_slot_index_, value);
     if (status == NIXL_SUCCESS) {
         consumer_idx_shadow_ = value;
     }
@@ -500,8 +500,8 @@ nixlProxyChannelState::deallocate() noexcept {
         consumer_idx_cache_dev_ = nullptr;
     }
     consumer_idx_dev_ = nullptr;
-    consumer_indices_ = nullptr;
-    consumer_idx_slot_ = 0;
+    control_slots_ = nullptr;
+    control_slot_index_ = 0;
     consumer_idx_shadow_ = 0;
     if (records_host_) {
         cudaFreeHost(records_host_);
@@ -537,8 +537,8 @@ nixlProxyChannelState::operator=(nixlProxyChannelState &&other) noexcept {
         producer_idx_dev_ = other.producer_idx_dev_;
         consumer_idx_dev_ = other.consumer_idx_dev_;
         consumer_idx_cache_dev_ = other.consumer_idx_cache_dev_;
-        consumer_indices_ = other.consumer_indices_;
-        consumer_idx_slot_ = other.consumer_idx_slot_;
+        control_slots_ = other.control_slots_;
+        control_slot_index_ = other.control_slot_index_;
         consumer_idx_shadow_ = other.consumer_idx_shadow_;
         ring_depth_ = other.ring_depth_;
         completion_slot_host_ = other.completion_slot_host_;
@@ -548,8 +548,8 @@ nixlProxyChannelState::operator=(nixlProxyChannelState &&other) noexcept {
         other.producer_idx_dev_ = nullptr;
         other.consumer_idx_dev_ = nullptr;
         other.consumer_idx_cache_dev_ = nullptr;
-        other.consumer_indices_ = nullptr;
-        other.consumer_idx_slot_ = 0;
+        other.control_slots_ = nullptr;
+        other.control_slot_index_ = 0;
         other.consumer_idx_shadow_ = 0;
         other.ring_depth_ = 0;
         other.submit_idx_ = 0;
@@ -585,25 +585,6 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
     backend_ = std::move(backend);
     memview_registry_.clear();
 
-    if (cudaMallocHost(reinterpret_cast<void **>(&shutdown_word_host_), sizeof(uint32_t)) !=
-        cudaSuccess) {
-        NIXL_ERROR << "ProxyRuntime::init: failed to allocate shutdown_word";
-        shutdown_word_host_ = nullptr;
-        backend_.reset();
-        return NIXL_ERR_BACKEND;
-    }
-    void *shutdown_dev = nullptr;
-    if (cudaHostGetDevicePointer(&shutdown_dev, shutdown_word_host_, 0) != cudaSuccess) {
-        cudaFreeHost(shutdown_word_host_);
-        shutdown_word_host_ = nullptr;
-        backend_.reset();
-        return NIXL_ERR_BACKEND;
-    }
-    shutdown_word_dev_ = static_cast<uint32_t *>(shutdown_dev);
-    __atomic_store_n(shutdown_word_host_,
-                     static_cast<uint32_t>(nixl_proxy_control_state_t::RUNNING),
-                     __ATOMIC_RELEASE);
-
     const uint32_t effective_worker_count = std::min(worker_count, channel_count);
     NIXL_INFO << "ProxyRuntime::init: effective worker_count=" << effective_worker_count
               << " (clamped to channel_count)";
@@ -611,9 +592,6 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
     nixl_status_t rc = backend_->init(effective_worker_count, channel_count, max_peers);
     if ((rc != NIXL_SUCCESS) && (rc != NIXL_ERR_NOT_SUPPORTED)) {
         NIXL_ERROR << "ProxyRuntime::init: backend init failed: " << rc;
-        cudaFreeHost(shutdown_word_host_);
-        shutdown_word_host_ = nullptr;
-        shutdown_word_dev_ = nullptr;
         backend_.reset();
         return rc;
     }
@@ -622,18 +600,19 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
     }
 
     const size_t channel_slots = static_cast<size_t>(max_peers) * channel_count;
-    rc = consumer_indices_.allocate(channel_slots);
+    rc = control_slots_.allocate(kProxyCiSlotBase + channel_slots);
     if (rc != NIXL_SUCCESS) {
-        NIXL_ERROR << "ProxyRuntime::init: failed to create GPU-visible consumer indices";
+        NIXL_ERROR << "ProxyRuntime::init: failed to create GPU-visible control slab";
         shutdown();
         return rc;
     }
+    shutdown_word_dev_ = control_slots_.devicePtr(kProxyShutdownSlot);
     channels_.resize(channel_slots);
     device_channel_views_.resize(channel_slots);
     for (uint32_t channel_idx = 0; channel_idx < channel_count; channel_idx++) {
         for (uint32_t peer_idx = 0; peer_idx < max_peers; peer_idx++) {
             const size_t slot = static_cast<size_t>(channel_idx) * max_peers + peer_idx;
-            rc = channels_[slot].allocate(ring_depth_, &consumer_indices_, slot);
+            rc = channels_[slot].allocate(ring_depth_, &control_slots_, kProxyCiSlotBase + slot);
             if (rc != NIXL_SUCCESS) {
                 shutdown();
                 return rc;
@@ -677,7 +656,7 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
                   << " == " << worker_idx << "; handles all dest rings of those channels";
         workers_.push_back(std::make_unique<ProxyWorker>(backend_.get(),
                                                          &memview_registry_,
-                                                         shutdown_word_host_,
+                                                         &shutdown_state_,
                                                          channels_.data(),
                                                          max_peers,
                                                          channel_count,
@@ -764,7 +743,7 @@ nixlProxyRuntime::resolveProxyMemViewId(uint64_t proxy_memview_id,
 nixl_status_t
 nixlProxyRuntime::startWorkers() {
     NIXL_INFO << "ProxyRuntime::startWorkers: launching " << workers_.size() << " worker thread(s)";
-    if (shutdown_word_host_ == nullptr) {
+    if (!control_slots_.allocated()) {
         NIXL_ERROR << "ProxyRuntime::startWorkers: runtime not initialized";
         return NIXL_ERR_NOT_SUPPORTED;
     }
@@ -774,9 +753,14 @@ nixlProxyRuntime::startWorkers() {
         return NIXL_ERR_INVALID_PARAM;
     }
 
-    __atomic_store_n(shutdown_word_host_,
-                     static_cast<uint32_t>(nixl_proxy_control_state_t::RUNNING),
-                     __ATOMIC_RELEASE);
+    const nixl_status_t publish_status = control_slots_.writeSlot(
+        kProxyShutdownSlot, static_cast<uint64_t>(nixl_proxy_control_state_t::RUNNING));
+    if (publish_status != NIXL_SUCCESS) {
+        NIXL_ERROR << "ProxyRuntime::startWorkers: failed to publish RUNNING state";
+        return publish_status;
+    }
+    shutdown_state_.store(static_cast<uint64_t>(nixl_proxy_control_state_t::RUNNING),
+                          std::memory_order_release);
 
     for (auto &worker : workers_) {
         worker->start();
@@ -797,11 +781,16 @@ nixlProxyRuntime::joinWorkerThreads() noexcept {
 nixl_status_t
 nixlProxyRuntime::shutdown() {
     NIXL_INFO << "ProxyRuntime::shutdown: signalling workers to stop";
-    if (shutdown_word_host_ != nullptr) {
-        __atomic_store_n(shutdown_word_host_,
-                         static_cast<uint32_t>(nixl_proxy_control_state_t::SHUTDOWN),
-                         __ATOMIC_RELEASE);
+    nixl_status_t shutdown_signal_status = NIXL_SUCCESS;
+    if (control_slots_.allocated()) {
+        shutdown_signal_status = control_slots_.writeSlot(
+            kProxyShutdownSlot, static_cast<uint64_t>(nixl_proxy_control_state_t::SHUTDOWN));
+        if (shutdown_signal_status != NIXL_SUCCESS) {
+            NIXL_ERROR << "ProxyRuntime::shutdown: failed to publish SHUTDOWN state";
+        }
     }
+    shutdown_state_.store(static_cast<uint64_t>(nixl_proxy_control_state_t::SHUTDOWN),
+                          std::memory_order_release);
 
     joinWorkerThreads();
     workers_started_ = false;
@@ -849,11 +838,7 @@ nixlProxyRuntime::shutdown() {
         cudaFree(device_context_);
         device_context_ = nullptr;
     }
-    if (shutdown_word_host_) {
-        cudaFreeHost(shutdown_word_host_);
-        shutdown_word_host_ = nullptr;
-        shutdown_word_dev_ = nullptr;
-    }
+    shutdown_word_dev_ = nullptr;
     if (device_channel_views_dev_) {
         cudaFree(device_channel_views_dev_);
         device_channel_views_dev_ = nullptr;
@@ -861,8 +846,14 @@ nixlProxyRuntime::shutdown() {
     device_channel_views_.clear();
 
     channels_.clear();
-    consumer_indices_.deallocate();
+    control_slots_.deallocate();
     backend_.reset();
     NIXL_INFO << "ProxyRuntime::shutdown: complete";
-    return backend_status;
+    if (backend_status != NIXL_SUCCESS) {
+        return backend_status;
+    }
+    if (shutdown_signal_status != NIXL_SUCCESS) {
+        return shutdown_signal_status;
+    }
+    return NIXL_SUCCESS;
 }

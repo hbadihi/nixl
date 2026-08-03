@@ -17,6 +17,7 @@
 #ifndef NIXL_SRC_CORE_DEVICE_PROXY_PROXY_WORKER_H
 #define NIXL_SRC_CORE_DEVICE_PROXY_PROXY_WORKER_H
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <thread>
@@ -30,7 +31,7 @@ class ProxyWorker {
     public:
         ProxyWorker(nixlDeviceProxyBackendAdapter *backend,
                     const nixlProxyMemViewRegistry *proxy_memview_registry,
-                    uint32_t *shutdown_word,
+                    std::atomic<uint64_t> *shutdown_state,
                     nixlProxyChannelState *channels,
                     uint32_t max_peers,
                     uint32_t channel_count,
@@ -74,7 +75,7 @@ class ProxyWorker {
 
         nixlDeviceProxyBackendAdapter *backend_ = nullptr;
         const nixlProxyMemViewRegistry *proxy_memview_registry_ = nullptr;
-        uint32_t *shutdown_word_ = nullptr;
+        std::atomic<uint64_t> *shutdown_state_ = nullptr;
         nixlProxyChannelState *channels_ = nullptr;
         uint32_t max_peers_ = 0;
         uint32_t channel_count_ = 0;
