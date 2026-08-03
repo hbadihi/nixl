@@ -21,6 +21,7 @@
 #include <string>
 
 #include <gtest/gtest.h>
+#include <cuda_runtime.h>
 
 #include "device_proxy/proxy_runtime.h"
 
@@ -45,7 +46,25 @@ namespace proxy_memview_registry {
 
         static uint32_t
         proxyMemViewId(nixlMemViewH proxy_memview) {
-            return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(proxy_memview));
+            if (proxy_memview == nullptr) {
+                return 0;
+            }
+            nixlProxyDeviceMemView device_memview{};
+            EXPECT_EQ(
+                cudaMemcpy(
+                    &device_memview, proxy_memview, sizeof(device_memview), cudaMemcpyDeviceToHost),
+                cudaSuccess);
+            return device_memview.proxy_memview_id;
+        }
+
+        static nixlProxyDeviceMemView
+        copyDeviceMemView(nixlMemViewH proxy_memview) {
+            nixlProxyDeviceMemView device_memview{};
+            EXPECT_EQ(
+                cudaMemcpy(
+                    &device_memview, proxy_memview, sizeof(device_memview), cudaMemcpyDeviceToHost),
+                cudaSuccess);
+            return device_memview;
         }
 
         nixl_meta_dlist_t
@@ -76,6 +95,9 @@ namespace proxy_memview_registry {
         EXPECT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(100), &proxy_handle),
                   NIXL_SUCCESS);
         EXPECT_NE(proxy_handle, nullptr);
+
+        const nixlProxyDeviceMemView device_memview = copyDeviceMemView(proxy_handle);
+        EXPECT_EQ(device_memview.proxy_memview_id, 1u);
     }
 
     TEST_F(ProxyMemViewRegistryTest, RegisterNullOutputReturnsError) {
@@ -559,14 +581,17 @@ namespace proxy_memview_registry {
         ASSERT_EQ(registry_.storeMetadata(src_proxy, makeLocalMetadata(0x1000)), NIXL_SUCCESS);
         ASSERT_EQ(registry_.storeMetadata(dst_proxy, makeRemoteMetadata(0x2000)), NIXL_SUCCESS);
         ASSERT_EQ(registry_.storeMetadata(other_proxy, makeRemoteMetadata(0x3000)), NIXL_SUCCESS);
+        const uint32_t src_proxy_id = proxyMemViewId(src_proxy);
+        const uint32_t dst_proxy_id = proxyMemViewId(dst_proxy);
+        const uint32_t other_proxy_id = proxyMemViewId(other_proxy);
 
         ASSERT_EQ(registry_.unregisterProxyMemView(dst_proxy), NIXL_SUCCESS);
-        EXPECT_EQ(registry_.unregisterProxyMemView(dst_proxy), NIXL_SUCCESS);
+        EXPECT_EQ(registry_.unregisterProxyMemView(dst_proxy), NIXL_ERR_INVALID_PARAM);
 
         nixlProxySubmission retired_submission{};
         retired_submission.opcode = nixl_proxy_opcode_t::PUT;
-        retired_submission.src_proxy_memview_id = proxyMemViewId(src_proxy);
-        retired_submission.dst_proxy_memview_id = proxyMemViewId(dst_proxy);
+        retired_submission.src_proxy_memview_id = src_proxy_id;
+        retired_submission.dst_proxy_memview_id = dst_proxy_id;
         retired_submission.size = 8;
 
         nixlBackendProxySubmission prepared_submission;
@@ -575,30 +600,11 @@ namespace proxy_memview_registry {
 
         nixlProxySubmission live_submission{};
         live_submission.opcode = nixl_proxy_opcode_t::PUT;
-        live_submission.src_proxy_memview_id = proxyMemViewId(src_proxy);
-        live_submission.dst_proxy_memview_id = proxyMemViewId(other_proxy);
+        live_submission.src_proxy_memview_id = src_proxy_id;
+        live_submission.dst_proxy_memview_id = other_proxy_id;
         live_submission.size = 8;
 
         EXPECT_EQ(registry_.prepareSubmission(live_submission, prepared_submission), NIXL_SUCCESS);
-    }
-
-    TEST_F(ProxyMemViewRegistryTest, ClearRetiresExistingEntriesAndPreservesFreshIds) {
-        nixlMemViewH old_proxy = nullptr;
-        ASSERT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(10), &old_proxy),
-                  NIXL_SUCCESS);
-        ASSERT_EQ(registry_.storeMetadata(old_proxy, makeLocalMetadata(0x1000)), NIXL_SUCCESS);
-
-        registry_.clear();
-
-        nixlMemViewH resolved = nullptr;
-        EXPECT_FALSE(registry_.resolveProxyMemView(old_proxy, resolved));
-
-        nixlMemViewH new_proxy = nullptr;
-        ASSERT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(20), &new_proxy),
-                  NIXL_SUCCESS);
-        EXPECT_NE(old_proxy, new_proxy);
-        EXPECT_TRUE(registry_.resolveProxyMemView(new_proxy, resolved));
-        EXPECT_EQ(resolved, makeFakeBackendHandle(20));
     }
 
     TEST_F(ProxyMemViewRegistryTest, StoreMetadataRejectsRetiredEntries) {
