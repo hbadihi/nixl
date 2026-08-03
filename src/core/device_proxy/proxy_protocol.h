@@ -32,6 +32,10 @@ enum class nixl_proxy_control_state_t : uint32_t {
     SHUTDOWN = 1,
 };
 
+struct nixlProxyDeviceMemView {
+    uint32_t proxy_memview_id = 0;
+};
+
 struct alignas(64) nixlProxySubmission {
     uint64_t op_idx = 0;
     uint64_t value = 0;

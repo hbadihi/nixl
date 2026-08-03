@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "backend_aux.h"
@@ -94,6 +95,13 @@ struct alignas(64) nixlProxyChannelState {
 
 class nixlProxyMemViewRegistry {
     public:
+        nixlProxyMemViewRegistry() = default;
+        ~nixlProxyMemViewRegistry();
+
+        nixlProxyMemViewRegistry(const nixlProxyMemViewRegistry &) = delete;
+        nixlProxyMemViewRegistry &
+        operator=(const nixlProxyMemViewRegistry &) = delete;
+
         nixl_status_t
         registerProxyMemView(nixlMemViewH backend_memview,
                              nixlMemViewH *proxy_memview);
@@ -174,12 +182,16 @@ class nixlProxyMemViewRegistry {
 
         struct RegistryEntry {
             uint32_t proxy_memview_id = 0;
+            nixlMemViewH proxy_memview = nullptr;
             nixlMemViewH backend_memview = nullptr;
             ProxyMemViewRegEntryState state = ProxyMemViewRegEntryState::ENTRY_ALLOCATED;
             ProxyMemViewRegMetadataKind metadata_kind = ProxyMemViewRegMetadataKind::METADATA_KIND_NONE;
             LocalMetadata local_metadata{};
             RemoteMetadata remote_metadata{};
         };
+
+        static void
+        releaseDeviceMemView(RegistryEntry &entry) noexcept;
 
         RegistryEntry *
         getEntryForHandle(nixlMemViewH proxy_memview);
@@ -218,6 +230,7 @@ class nixlProxyMemViewRegistry {
         fillRemoteMetadata(const nixl_remote_meta_dlist_t &dlist, RemoteMetadata &out);
 
         std::vector<RegistryEntry> entries_;
+        std::unordered_map<nixlMemViewH, uint32_t> handle_to_id_;
         uint64_t next_proxy_memview_id_ = 1;
 };
 

@@ -186,7 +186,14 @@ channelViewIndex(uint32_t peer, uint32_t channel, uint32_t max_peers = 4) {
 
 static uint32_t
 proxyMemViewId(nixlMemViewH proxy_memview) {
-    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(proxy_memview));
+    if (proxy_memview == nullptr) {
+        return 0;
+    }
+    nixlProxyDeviceMemView device_memview{};
+    EXPECT_EQ(
+        cudaMemcpy(&device_memview, proxy_memview, sizeof(device_memview), cudaMemcpyDeviceToHost),
+        cudaSuccess);
+    return device_memview.proxy_memview_id;
 }
 
 static std::vector<nixlBackendProxySubmission>
