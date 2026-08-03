@@ -32,11 +32,11 @@ nixlProxyMemViewRegistry::registerProxyMemView(nixlMemViewH backend_memview,
     }
 
     RegistryEntry entry;
-    entry.proxy_memview_id = next_proxy_memview_id_;
+    entry.proxy_memview_id = static_cast<uint32_t>(next_proxy_memview_id_);
     entry.backend_memview = backend_memview;
     entries_.push_back(entry);
 
-    *proxy_memview = reinterpret_cast<nixlMemViewH>(entry.proxy_memview_id);
+    *proxy_memview = reinterpret_cast<nixlMemViewH>(static_cast<uintptr_t>(entry.proxy_memview_id));
     ++next_proxy_memview_id_;
     NIXL_DEBUG << "nixlProxyMemViewRegistry::register: backend_mvh=" << backend_memview
                << " -> proxy_id=" << (next_proxy_memview_id_ - 1);
@@ -252,12 +252,12 @@ nixlProxyMemViewRegistry::clear() noexcept {
 
 nixlProxyMemViewRegistry::RegistryEntry *
 nixlProxyMemViewRegistry::getEntryForHandle(nixlMemViewH proxy_memview) {
-    return getEntryForId(reinterpret_cast<uint64_t>(proxy_memview));
+    return getEntryForId(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(proxy_memview)));
 }
 
 const nixlProxyMemViewRegistry::RegistryEntry *
 nixlProxyMemViewRegistry::getEntryForHandle(nixlMemViewH proxy_memview) const {
-    return getEntryForId(reinterpret_cast<uint64_t>(proxy_memview));
+    return getEntryForId(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(proxy_memview)));
 }
 
 nixlProxyMemViewRegistry::RegistryEntry *
