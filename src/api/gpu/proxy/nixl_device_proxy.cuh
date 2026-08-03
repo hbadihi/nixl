@@ -125,6 +125,12 @@ struct ProxyDeviceContext : nixlProxyDeviceContextData {
         }
         submission.channel_id %= num_channels;
 
+        cuda::atomic_ref<uint64_t, cuda::thread_scope_system> shut(*shutdown_word);
+        if (shut.load(cuda::memory_order_relaxed) ==
+            static_cast<uint64_t>(nixl_proxy_control_state_t::SHUTDOWN)) {
+            return NIXL_ERR_BACKEND;
+        }
+
         nixlProxyChannelView &channel_view =
             channels[channelIndex(submission.dst_index, submission.channel_id)];
         if (channel_view.work_ring == nullptr || channel_view.completion_slot == nullptr) {
@@ -135,7 +141,6 @@ struct ProxyDeviceContext : nixlProxyDeviceContextData {
         cuda::atomic_ref<uint64_t, cuda::thread_scope_device> producer_idx(
             *ring->producer_idx);
         cuda::atomic_ref<uint64_t, cuda::thread_scope_system> cons(*ring->consumer_idx);
-        cuda::atomic_ref<uint32_t, cuda::thread_scope_system> shut(*shutdown_word);
 
         // Atomically claim a unique slot in the ring.
         const uint64_t ticket = producer_idx.fetch_add(1, cuda::memory_order_relaxed);
@@ -147,8 +152,8 @@ struct ProxyDeviceContext : nixlProxyDeviceContextData {
             cached_consumer_idx = cons.load(cuda::memory_order_acquire);
             *ring->consumer_idx_cache = cached_consumer_idx;
 
-            if (shut.load(cuda::memory_order_relaxed)
-                == static_cast<uint32_t>(nixl_proxy_control_state_t::SHUTDOWN)) {
+            if (shut.load(cuda::memory_order_relaxed) ==
+                static_cast<uint64_t>(nixl_proxy_control_state_t::SHUTDOWN)) {
                 return NIXL_ERR_BACKEND;
             }
         }
