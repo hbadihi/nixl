@@ -115,6 +115,11 @@ class nixlProxyMemViewRegistry {
                     nixlMemViewH *proxy_memview);
 
         nixl_status_t
+        prepMemView(const nixl_remote_meta_dlist_t &dlist,
+                    const std::vector<void *> &direct_ptrs,
+                    nixlMemViewH *proxy_memview);
+
+        nixl_status_t
         prepMemView(nixlMemViewH backend_memview,
                     const nixl_meta_dlist_t &dlist,
                     nixlMemViewH *proxy_memview);
@@ -189,6 +194,11 @@ class nixlProxyMemViewRegistry {
             LocalMetadata local_metadata{};
             RemoteMetadata remote_metadata{};
         };
+
+        nixl_status_t
+        registerProxyMemView(nixlMemViewH backend_memview,
+                             const std::vector<void *> &direct_ptrs,
+                             nixlMemViewH *proxy_memview);
 
         static void
         releaseDeviceMemView(RegistryEntry &entry) noexcept;

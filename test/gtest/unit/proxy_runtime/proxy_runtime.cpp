@@ -61,6 +61,17 @@ class StubBackend : public nixlDeviceProxyBackendAdapter {
         }
 
         nixl_status_t
+        resolveDirectPointers(const nixl_remote_meta_dlist_t &dlist,
+                              std::vector<void *> &direct_ptrs) override {
+            ++resolve_direct_pointer_calls_;
+            last_resolved_desc_count_ = dlist.descCount();
+            if (resolve_direct_pointer_rc_ == NIXL_SUCCESS) {
+                direct_ptrs = direct_ptrs_to_return_;
+            }
+            return resolve_direct_pointer_rc_;
+        }
+
+        nixl_status_t
         submit(const nixlBackendProxySubmission &submission,
                nixlBackendProxyRequest &request) override {
             nixl_status_t status = submit_rc_;
@@ -137,6 +148,10 @@ class StubBackend : public nixlDeviceProxyBackendAdapter {
         uint64_t check_completion_calls_ = 0;
         std::unordered_map<uint64_t, nixl_status_t> completion_status_by_token_;
         std::shared_ptr<StubBackendState> state_ = std::make_shared<StubBackendState>();
+        uint64_t resolve_direct_pointer_calls_ = 0;
+        size_t last_resolved_desc_count_ = 0;
+        nixl_status_t resolve_direct_pointer_rc_ = NIXL_ERR_NOT_SUPPORTED;
+        std::vector<void *> direct_ptrs_to_return_;
 };
 
 class ProxyRuntimeTest : public testing::Test {
@@ -194,6 +209,30 @@ proxyMemViewId(nixlMemViewH proxy_memview) {
         cudaMemcpy(&device_memview, proxy_memview, sizeof(device_memview), cudaMemcpyDeviceToHost),
         cudaSuccess);
     return device_memview.proxy_memview_id;
+}
+
+static nixlProxyDeviceMemView
+copyDeviceMemView(nixlMemViewH proxy_memview) {
+    nixlProxyDeviceMemView device_memview{};
+    EXPECT_EQ(
+        cudaMemcpy(&device_memview, proxy_memview, sizeof(device_memview), cudaMemcpyDeviceToHost),
+        cudaSuccess);
+    return device_memview;
+}
+
+static std::vector<void *>
+copyDirectPointers(nixlMemViewH proxy_memview, size_t count) {
+    std::vector<void *> direct_ptrs(count, nullptr);
+    if (count != 0) {
+        auto *direct_ptrs_dev = static_cast<void **>(
+            static_cast<void *>(static_cast<nixlProxyDeviceMemView *>(proxy_memview) + 1));
+        EXPECT_EQ(cudaMemcpy(direct_ptrs.data(),
+                             direct_ptrs_dev,
+                             sizeof(void *) * count,
+                             cudaMemcpyDeviceToHost),
+                  cudaSuccess);
+    }
+    return direct_ptrs;
 }
 
 static std::vector<nixlBackendProxySubmission>
@@ -548,6 +587,50 @@ TEST_F(ProxyRuntimeTest, PrepRemoteMemViewRejectsNonVramMetadata) {
 
     nixlMemViewH dst_proxy = nullptr;
     EXPECT_EQ(runtime_.prepMemView(remote_dlist, &dst_proxy), NIXL_ERR_INVALID_PARAM);
+}
+
+TEST_F(ProxyRuntimeTest, PrepRemoteMemViewStoresResolvedDirectPointers) {
+    DummyBackendMD remote_md;
+    ASSERT_EQ(initRuntime(1, 1), NIXL_SUCCESS);
+
+    backend_->resolve_direct_pointer_rc_ = NIXL_SUCCESS;
+    backend_->direct_ptrs_to_return_ = {reinterpret_cast<void *>(uintptr_t{0xabc00000}), nullptr};
+
+    nixlMemViewH dst_proxy = nullptr;
+    ASSERT_EQ(runtime_.prepMemView(makeRemotePeerDlist({"peer0", "peer1"}, &remote_md), &dst_proxy),
+              NIXL_SUCCESS);
+
+    EXPECT_EQ(backend_->resolve_direct_pointer_calls_, 1u);
+    EXPECT_EQ(backend_->last_resolved_desc_count_, 2u);
+    const nixlProxyDeviceMemView device_memview = copyDeviceMemView(dst_proxy);
+    EXPECT_EQ(device_memview.proxy_memview_id, proxyMemViewId(dst_proxy));
+    EXPECT_EQ(device_memview.direct_ptr_count, backend_->direct_ptrs_to_return_.size());
+    EXPECT_EQ(copyDirectPointers(dst_proxy, backend_->direct_ptrs_to_return_.size()),
+              backend_->direct_ptrs_to_return_);
+}
+
+TEST_F(ProxyRuntimeTest, PrepRemoteMemViewFallsBackWhenDirectPointersUnsupported) {
+    DummyBackendMD remote_md;
+    ASSERT_EQ(initRuntime(1, 1), NIXL_SUCCESS);
+
+    nixlMemViewH dst_proxy = nullptr;
+    ASSERT_EQ(runtime_.prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &dst_proxy),
+              NIXL_SUCCESS);
+
+    EXPECT_EQ(backend_->resolve_direct_pointer_calls_, 1u);
+    EXPECT_EQ(copyDeviceMemView(dst_proxy).direct_ptr_count, 0u);
+}
+
+TEST_F(ProxyRuntimeTest, PrepRemoteMemViewPropagatesDirectPointerResolverErrors) {
+    DummyBackendMD remote_md;
+    ASSERT_EQ(initRuntime(1, 1), NIXL_SUCCESS);
+    backend_->resolve_direct_pointer_rc_ = NIXL_ERR_INVALID_PARAM;
+
+    nixlMemViewH dst_proxy = nullptr;
+    EXPECT_EQ(runtime_.prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &dst_proxy),
+              NIXL_ERR_INVALID_PARAM);
+    EXPECT_EQ(dst_proxy, nullptr);
+    EXPECT_EQ(backend_->resolve_direct_pointer_calls_, 1u);
 }
 
 TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedTransportDescriptors) {
