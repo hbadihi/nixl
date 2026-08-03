@@ -24,6 +24,10 @@
 #include <utility>
 #include <cuda_runtime.h>
 
+nixlProxyMemViewRegistry::~nixlProxyMemViewRegistry() {
+    clear();
+}
+
 nixl_status_t
 nixlProxyMemViewRegistry::registerProxyMemView(nixlMemViewH backend_memview,
                                                nixlMemViewH *proxy_memview) {
@@ -34,9 +38,27 @@ nixlProxyMemViewRegistry::registerProxyMemView(nixlMemViewH backend_memview,
     RegistryEntry entry;
     entry.proxy_memview_id = static_cast<uint32_t>(next_proxy_memview_id_);
     entry.backend_memview = backend_memview;
-    entries_.push_back(entry);
 
-    *proxy_memview = reinterpret_cast<nixlMemViewH>(static_cast<uintptr_t>(entry.proxy_memview_id));
+    nixlProxyDeviceMemView *device_memview = nullptr;
+    if (cudaMalloc(reinterpret_cast<void **>(&device_memview), sizeof(nixlProxyDeviceMemView)) !=
+        cudaSuccess) {
+        NIXL_ERROR << "nixlProxyMemViewRegistry::register: failed to allocate device memview";
+        return NIXL_ERR_BACKEND;
+    }
+
+    const nixlProxyDeviceMemView host_memview{entry.proxy_memview_id};
+    if (cudaMemcpy(device_memview, &host_memview, sizeof(host_memview), cudaMemcpyHostToDevice) !=
+        cudaSuccess) {
+        NIXL_ERROR << "nixlProxyMemViewRegistry::register: failed to initialize device memview";
+        cudaFree(device_memview);
+        return NIXL_ERR_BACKEND;
+    }
+
+    entry.proxy_memview = device_memview;
+    entries_.push_back(entry);
+    handle_to_id_.emplace(entry.proxy_memview, entry.proxy_memview_id);
+
+    *proxy_memview = entry.proxy_memview;
     ++next_proxy_memview_id_;
     NIXL_DEBUG << "nixlProxyMemViewRegistry::register: backend_mvh=" << backend_memview
                << " -> proxy_id=" << (next_proxy_memview_id_ - 1);
@@ -109,6 +131,8 @@ nixlProxyMemViewRegistry::unregisterProxyMemView(nixlMemViewH proxy_memview) {
         return NIXL_ERR_INVALID_PARAM;
     }
     entry->state = ProxyMemViewRegEntryState::ENTRY_RETIRED;
+    handle_to_id_.erase(proxy_memview);
+    releaseDeviceMemView(*entry);
     NIXL_DEBUG << "nixlProxyMemViewRegistry::unregister: proxy_id=" << entry->proxy_memview_id;
     return NIXL_SUCCESS;
 }
@@ -247,17 +271,29 @@ void
 nixlProxyMemViewRegistry::clear() noexcept {
     for (auto &entry : entries_) {
         entry.state = ProxyMemViewRegEntryState::ENTRY_RETIRED;
+        releaseDeviceMemView(entry);
+    }
+    handle_to_id_.clear();
+}
+
+void
+nixlProxyMemViewRegistry::releaseDeviceMemView(RegistryEntry &entry) noexcept {
+    if (entry.proxy_memview != nullptr) {
+        cudaFree(entry.proxy_memview);
+        entry.proxy_memview = nullptr;
     }
 }
 
 nixlProxyMemViewRegistry::RegistryEntry *
 nixlProxyMemViewRegistry::getEntryForHandle(nixlMemViewH proxy_memview) {
-    return getEntryForId(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(proxy_memview)));
+    const auto it = handle_to_id_.find(proxy_memview);
+    return it == handle_to_id_.end() ? nullptr : getEntryForId(it->second);
 }
 
 const nixlProxyMemViewRegistry::RegistryEntry *
 nixlProxyMemViewRegistry::getEntryForHandle(nixlMemViewH proxy_memview) const {
-    return getEntryForId(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(proxy_memview)));
+    const auto it = handle_to_id_.find(proxy_memview);
+    return it == handle_to_id_.end() ? nullptr : getEntryForId(it->second);
 }
 
 nixlProxyMemViewRegistry::RegistryEntry *
