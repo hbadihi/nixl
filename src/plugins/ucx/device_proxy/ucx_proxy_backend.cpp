@@ -52,6 +52,38 @@ nixlUcxProxyBackendAdapter::init(uint32_t, uint32_t channel_count, uint32_t peer
 }
 
 nixl_status_t
+nixlUcxProxyBackendAdapter::resolveDirectPointers(const nixl_remote_meta_dlist_t &dlist,
+                                                  std::vector<void *> &direct_ptrs) {
+
+    direct_ptrs.assign(dlist.descCount(), nullptr);
+    const size_t worker_id = engine_->getSharedWorkerId();
+
+    size_t index = 0;
+    for (const auto &desc : dlist) {
+        if (desc.remoteAgent == nixl_null_agent) {
+            ++index;
+            continue;
+        }
+
+        const auto *metadata = static_cast<const nixlUcxPublicMetadata *>(desc.metadataP);
+
+        void *direct_ptr = nullptr;
+        const ucs_status_t status = ucp_rkey_ptr(
+            metadata->getRkey(worker_id).get(), static_cast<uint64_t>(desc.addr), &direct_ptr);
+        if (status == UCS_OK) {
+            direct_ptrs[index] = direct_ptr;
+        } else {
+            NIXL_DEBUG << "nixlUcxProxyBackendAdapter::resolveDirectPointers: "
+                          "direct access unavailable for descriptor "
+                       << index << ": " << ucs_status_string(status);
+        }
+        ++index;
+    }
+
+    return NIXL_SUCCESS;
+}
+
+nixl_status_t
 nixlUcxProxyBackendAdapter::submit(const nixlBackendProxySubmission &submission,
                                    nixlBackendProxyRequest &request) {
     request = nixlBackendProxyRequest{};
