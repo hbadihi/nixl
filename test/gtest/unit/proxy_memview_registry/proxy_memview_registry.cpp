@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <vector>
 
 #include <gtest/gtest.h>
 #include <cuda_runtime.h>
@@ -67,6 +68,21 @@ namespace proxy_memview_registry {
             return device_memview;
         }
 
+        static std::vector<void *>
+        copyDirectPointers(nixlMemViewH proxy_memview, size_t count) {
+            std::vector<void *> direct_ptrs(count, nullptr);
+            if (count != 0) {
+                auto *direct_ptrs_dev = static_cast<void **>(
+                    static_cast<void *>(static_cast<nixlProxyDeviceMemView *>(proxy_memview) + 1));
+                EXPECT_EQ(cudaMemcpy(direct_ptrs.data(),
+                                     direct_ptrs_dev,
+                                     sizeof(void *) * count,
+                                     cudaMemcpyDeviceToHost),
+                          cudaSuccess);
+            }
+            return direct_ptrs;
+        }
+
         nixl_meta_dlist_t
         makeLocalMetadata(uintptr_t base_addr, uint64_t dev_id = 0) {
             nixl_meta_dlist_t dlist(DRAM_SEG);
@@ -98,6 +114,7 @@ namespace proxy_memview_registry {
 
         const nixlProxyDeviceMemView device_memview = copyDeviceMemView(proxy_handle);
         EXPECT_EQ(device_memview.proxy_memview_id, 1u);
+        EXPECT_EQ(device_memview.direct_ptr_count, 0u);
     }
 
     TEST_F(ProxyMemViewRegistryTest, RegisterNullOutputReturnsError) {
@@ -329,6 +346,31 @@ namespace proxy_memview_registry {
         EXPECT_EQ(prepared_submission.remote.desc.addr, 0x2008u);
         EXPECT_EQ(prepared_submission.remote.desc.len, 16u);
         EXPECT_EQ(prepared_submission.remote.desc.metadataP, &remote_md_);
+    }
+
+    TEST_F(ProxyMemViewRegistryTest, PrepRemoteMemViewStoresDirectPointers) {
+        nixl_remote_meta_dlist_t remote_dlist(VRAM_SEG);
+        nixlRemoteMetaDesc first("peer0");
+        first.addr = 0x2000;
+        first.len = 64;
+        first.devId = 0;
+        first.metadataP = &remote_md_;
+        remote_dlist.addDesc(first);
+        nixlRemoteMetaDesc second("peer1");
+        second.addr = 0x3000;
+        second.len = 64;
+        second.devId = 1;
+        second.metadataP = &remote_md_;
+        remote_dlist.addDesc(second);
+
+        std::vector<void *> direct_ptrs{reinterpret_cast<void *>(uintptr_t{0xfeed0000}), nullptr};
+        nixlMemViewH dst_proxy = nullptr;
+        ASSERT_EQ(registry_.prepMemView(remote_dlist, direct_ptrs, &dst_proxy), NIXL_SUCCESS);
+
+        const nixlProxyDeviceMemView device_memview = copyDeviceMemView(dst_proxy);
+        EXPECT_EQ(device_memview.proxy_memview_id, proxyMemViewId(dst_proxy));
+        EXPECT_EQ(device_memview.direct_ptr_count, direct_ptrs.size());
+        EXPECT_EQ(copyDirectPointers(dst_proxy, direct_ptrs.size()), direct_ptrs);
     }
 
     TEST_F(ProxyMemViewRegistryTest, PrepareSubmissionAllowsRangesEndingAtDescriptorBoundary) {
