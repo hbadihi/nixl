@@ -83,6 +83,34 @@ public:
     }
 };
 
+// Blocks inside backend shutdown so a test can observe the GPU shutdown word
+// after ProxyRuntime publishes it but before the runtime tears down GPU memory.
+class BlockingShutdownStubAdapter : public StubProxyBackendAdapter {
+public:
+    nixl_status_t
+    shutdown() override {
+        shutdown_entered_.store(true, std::memory_order_release);
+        while (!allow_shutdown_.load(std::memory_order_acquire)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        return NIXL_SUCCESS;
+    }
+
+    bool
+    shutdownEntered() const {
+        return shutdown_entered_.load(std::memory_order_acquire);
+    }
+
+    void
+    allowShutdown() {
+        allow_shutdown_.store(true, std::memory_order_release);
+    }
+
+private:
+    std::atomic<bool> shutdown_entered_{false};
+    std::atomic<bool> allow_shutdown_{false};
+};
+
 // ---------------------------------------------------------------------------
 // Controllable stub — lets the test thread decide when each submission
 // completes. submit() assigns unique monotonic requests; checkCompletion()
@@ -358,15 +386,6 @@ publishProxyContext(nixlProxyRuntime &runtime) {
 static void
 clearProxyContext() {
     ASSERT_EQ(nixlProxyClearContext(), cudaSuccess);
-}
-
-template<typename T>
-static T *
-hostAliasOf(T *device_alias) {
-    cudaPointerAttributes attrs{};
-    EXPECT_EQ(cudaPointerGetAttributes(&attrs, device_alias), cudaSuccess);
-    EXPECT_NE(attrs.hostPointer, nullptr);
-    return static_cast<T *>(attrs.hostPointer);
 }
 
 // ---------------------------------------------------------------------------
@@ -712,35 +731,6 @@ registerDummyMemViews(nixlProxyRuntime &runtime, uint32_t peer_count) {
     return handles;
 }
 
-static uint32_t *
-shutdownWordHostFromRuntime(nixlProxyRuntime &runtime) {
-    nixlProxyDeviceContextData device_ctx{};
-    if (runtime.deviceContext() == nullptr) {
-        return nullptr;
-    }
-    if (cudaMemcpy(
-            &device_ctx, runtime.deviceContext(), sizeof(device_ctx), cudaMemcpyDeviceToHost) !=
-        cudaSuccess) {
-        return nullptr;
-    }
-    if (device_ctx.shutdown_word == nullptr) {
-        return nullptr;
-    }
-
-    cudaPointerAttributes attrs{};
-    if (cudaPointerGetAttributes(&attrs, device_ctx.shutdown_word) != cudaSuccess) {
-        return nullptr;
-    }
-    return static_cast<uint32_t *>(attrs.hostPointer);
-}
-
-static void
-signalProxyShutdown(uint32_t *shutdown_host) {
-    __atomic_store_n(shutdown_host,
-                     static_cast<uint32_t>(nixl_proxy_control_state_t::SHUTDOWN),
-                     __ATOMIC_RELEASE);
-}
-
 // ---------------------------------------------------------------------------
 // Completion round-trip tests
 // ---------------------------------------------------------------------------
@@ -812,14 +802,19 @@ TEST_F(ProxyDeviceApiTest, CompletionNotVisibleUntilPublished) {
     publishProxyContext(runtime);
 
     const auto mvhs = registerDummyMemViews(runtime);
+    nixlProxyWorkRing ring{};
+    ASSERT_EQ(
+        cudaMemcpy(
+            &ring, runtime.deviceChannelViews()[0].work_ring, sizeof(ring), cudaMemcpyDeviceToHost),
+        cudaSuccess);
+
     nixl_status_t *d_put_status = deviceAlloc<nixl_status_t>();
     nixl_status_t *d_poll_status = deviceAlloc<nixl_status_t>();
 
     // Launch async — kernel will spin on pollXferStatus.
     proxyPutAndPollKernel<<<1, 1>>>(mvhs.src, mvhs.dst, 0, d_put_status, d_poll_status);
 
-    // Give the worker time to pick up and submit the request.
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    ASSERT_TRUE(waitForCondition([adapter]() { return adapter->pendingCount() == 1; }));
 
     // Kernel should still be running (spinning on completion).
     ASSERT_EQ(cudaStreamQuery(nullptr), cudaErrorNotReady);
@@ -832,6 +827,7 @@ TEST_F(ProxyDeviceApiTest, CompletionNotVisibleUntilPublished) {
 
     EXPECT_EQ(deviceGet(d_put_status), NIXL_IN_PROG);
     EXPECT_EQ(deviceGet(d_poll_status), NIXL_SUCCESS);
+    EXPECT_EQ(deviceGet(ring.consumer_idx), 1u);
 
     cudaFree(d_put_status);
     cudaFree(d_poll_status);
@@ -1184,9 +1180,7 @@ TEST_F(ProxyDeviceApiTest, RingSlotsAreReusedAfterWraparound) {
         cudaMemcpy(&producer_idx, ring.producer_idx, sizeof(producer_idx), cudaMemcpyDeviceToHost),
         cudaSuccess);
     EXPECT_EQ(producer_idx, kOps);
-    uint64_t *consumer_idx_host = hostAliasOf(ring.consumer_idx);
-    ASSERT_NE(consumer_idx_host, nullptr);
-    EXPECT_EQ(__atomic_load_n(consumer_idx_host, __ATOMIC_ACQUIRE), kOps);
+    EXPECT_EQ(deviceGet(ring.consumer_idx), kOps);
 
     cudaFree(d_poll_statuses);
     cudaFree(d_put_statuses);
@@ -1197,15 +1191,18 @@ TEST_F(ProxyDeviceApiTest, RingSlotsAreReusedAfterWraparound) {
 // When the ring is full and no worker can drain it, the next enqueue should
 // spin until shutdown is signalled and then return NIXL_ERR_BACKEND.
 TEST_F(ProxyDeviceApiTest, RingOverflowReturnsBackendErrorOnShutdown) {
-    auto adapter = std::make_unique<StubProxyBackendAdapter>();
+    auto adapter_owner = std::make_unique<BlockingShutdownStubAdapter>();
+    auto *adapter = adapter_owner.get();
     nixlProxyRuntime runtime;
 
-    ASSERT_EQ(runtime.init(std::move(adapter), 4, 1, 1), NIXL_SUCCESS);
+    ASSERT_EQ(runtime.init(std::move(adapter_owner),
+                           /*peer_capacity=*/4,
+                           /*channel_count=*/1,
+                           /*worker_count=*/1),
+              NIXL_SUCCESS);
     const auto mvhs = registerDummyMemViews(runtime);
     ASSERT_NE(mvhs.dst, nullptr);
     publishProxyContext(runtime);
-    uint32_t *shutdown_host = shutdownWordHostFromRuntime(runtime);
-    ASSERT_NE(shutdown_host, nullptr);
 
     constexpr uint32_t kBurstOps = kDefaultProxyRingDepth + 1;
     nixl_status_t *d_statuses = nullptr;
@@ -1216,10 +1213,20 @@ TEST_F(ProxyDeviceApiTest, RingOverflowReturnsBackendErrorOnShutdown) {
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     ASSERT_EQ(cudaStreamQuery(nullptr), cudaErrorNotReady);
 
-    signalProxyShutdown(shutdown_host);
+    std::atomic<nixl_status_t> shutdown_status{NIXL_IN_PROG};
+    std::thread shutdown_thread(
+        [&]() { shutdown_status.store(runtime.shutdown(), std::memory_order_release); });
+    const bool shutdown_entered =
+        waitForCondition([adapter]() { return adapter->shutdownEntered(); });
+    EXPECT_TRUE(shutdown_entered);
 
-    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
-    ASSERT_EQ(cudaGetLastError(), cudaSuccess);
+    const cudaError_t sync_status = cudaDeviceSynchronize();
+    const cudaError_t kernel_status = cudaGetLastError();
+    adapter->allowShutdown();
+    shutdown_thread.join();
+    EXPECT_EQ(sync_status, cudaSuccess);
+    EXPECT_EQ(kernel_status, cudaSuccess);
+    EXPECT_EQ(shutdown_status.load(std::memory_order_acquire), NIXL_SUCCESS);
 
     std::vector<nixl_status_t> statuses(kBurstOps);
     ASSERT_EQ(
@@ -1233,7 +1240,6 @@ TEST_F(ProxyDeviceApiTest, RingOverflowReturnsBackendErrorOnShutdown) {
 
     cudaFree(d_statuses);
     clearProxyContext();
-    ASSERT_EQ(runtime.shutdown(), NIXL_SUCCESS);
 }
 
 // Completions are tracked per-channel, so publishing one channel should not
