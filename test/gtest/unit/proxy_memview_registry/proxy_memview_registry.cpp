@@ -72,8 +72,8 @@ namespace proxy_memview_registry {
         copyDirectPointers(nixlMemViewH proxy_memview, size_t count) {
             std::vector<void *> direct_ptrs(count, nullptr);
             if (count != 0) {
-                auto *direct_ptrs_dev = static_cast<void **>(
-                    static_cast<void *>(static_cast<nixlProxyDeviceMemView *>(proxy_memview) + 1));
+                auto *direct_ptrs_dev =
+                    static_cast<nixlProxyDeviceMemView *>(proxy_memview)->direct_ptrs;
                 EXPECT_EQ(cudaMemcpy(direct_ptrs.data(),
                                      direct_ptrs_dev,
                                      sizeof(void *) * count,

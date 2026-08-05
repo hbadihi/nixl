@@ -133,8 +133,7 @@ get_ptr(nixlMemViewH mvh, size_t index) {
         return nullptr;
     }
 
-    const auto *direct_ptrs = reinterpret_cast<void *const *>(memview + 1);
-    return direct_ptrs[index];
+    return memview->direct_ptrs[index];
 }
 
 } // namespace nixl::gpu::proxy_impl
