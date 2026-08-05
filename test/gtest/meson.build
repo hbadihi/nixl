@@ -148,6 +148,7 @@ test_exe = executable('gtest',
     cuda_args : cuda_flags + gpu_device_api_cuda_args,
     dependencies : [nixl_dep, nixl_common_dep, gpu_dependencies, gpu_device_api_deps, gtest_dep, gmock_dep, absl_strings_dep, absl_time_dep, ucx_hw_warning_dep, file_utils_interface],
     link_with: [nixl_build_lib, gpu_device_api_link_with],
+    build_rpath: ucx_path != '' ? ucx_path + '/lib' : '',
     install : true
 )
 
