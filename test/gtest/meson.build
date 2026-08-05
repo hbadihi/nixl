@@ -197,8 +197,6 @@ if proxy_gtest_available
     proxy_gtest_sources = [
         'main.cpp',
         'mocks/gmock_engine.cpp',
-        'plugin_manager.cpp',
-        'error_handling.cpp',
         'common.cpp',
     ] + proxy_device_api_test_sources
 
