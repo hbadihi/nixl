@@ -19,6 +19,7 @@
 #include "common.h"
 
 #include <algorithm>
+#include <initializer_list>
 #include <memory>
 #include <gtest/gtest.h>
 
@@ -236,6 +237,30 @@ protected:
     }
 
     void
+    ensureAgentCount(size_t count) {
+        while (agents.size() < count) {
+            ASSERT_NO_FATAL_FAILURE(addAgent());
+        }
+    }
+
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    static void
+    resetSharedEnvironment() {
+        if (proxy_context_published) {
+            nixlProxyClearContext();
+            proxy_context_published = false;
+        }
+        agents.clear();
+        backend_handles.clear();
+    }
+
+    static void
+    TearDownTestSuite() {
+        resetSharedEnvironment();
+    }
+#endif
+
+    void
     SetUp() override {
         if (!hasCudaGpu()) {
             GTEST_SKIP() << "No CUDA-capable GPU is available, skipping test.";
@@ -247,25 +272,30 @@ protected:
         lig_ = std::make_unique<LogIgnoreGuard>(
             "IB device\\(s\\) were detected, but accelerated IB support was not found");
 
-        for (size_t i = 0; i < 2; i++) {
-            ASSERT_NO_FATAL_FAILURE(addAgent());
-        }
-
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-        auto *ctx = static_cast<nixlProxyDeviceContextData *>(
-            agents[SENDER_AGENT]->getProxyDeviceContext());
-        ASSERT_NE(ctx, nullptr) << "Proxy device context not available";
-        ASSERT_EQ(nixlProxyPublishContext(ctx), cudaSuccess);
+        ASSERT_NO_FATAL_FAILURE(ensureAgentCount(2));
+        if (!proxy_context_published) {
+            auto *ctx = static_cast<nixlProxyDeviceContextData *>(
+                agents[SENDER_AGENT]->getProxyDeviceContext());
+            ASSERT_NE(ctx, nullptr) << "Proxy device context not available";
+            ASSERT_EQ(nixlProxyPublishContext(ctx), cudaSuccess);
+            proxy_context_published = true;
+        }
+#else
+        ASSERT_NO_FATAL_FAILURE(ensureAgentCount(2));
 #endif
     }
 
     void
     TearDown() override {
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-        nixlProxyClearContext();
-#endif
+        if (HasFailure()) {
+            resetSharedEnvironment();
+        }
+#else
         agents.clear();
         backend_handles.clear();
+#endif
     }
 
     template<typename Desc>
@@ -297,13 +327,21 @@ protected:
     }
 
     void
-    exchangeMD(size_t from_agent, size_t to_agent) {
-        for (size_t i = 0; i < agents.size(); i++) {
+    deregisterMem(nixlAgent &agent,
+                  const std::vector<MemBuffer> &buffers,
+                  nixl_mem_t mem_type) {
+        const auto reg_list = makeDescList<nixlBlobDesc>(buffers, mem_type);
+        ASSERT_EQ(agent.deregisterMem(reg_list), NIXL_SUCCESS);
+    }
+
+    void
+    exchangeMD(std::initializer_list<size_t> agent_indices) {
+        for (const size_t i : agent_indices) {
             nixl_blob_t md;
             nixl_status_t status = agents[i]->getLocalMD(md);
             ASSERT_EQ(status, NIXL_SUCCESS);
 
-            for (size_t j = 0; j < agents.size(); j++) {
+            for (const size_t j : agent_indices) {
                 if (i == j) {
                     continue;
                 }
@@ -316,9 +354,9 @@ protected:
     }
 
     void
-    invalidateMD() {
-        for (size_t i = 0; i < agents.size(); i++) {
-            for (size_t j = 0; j < agents.size(); j++) {
+    invalidateMD(std::initializer_list<size_t> agent_indices) {
+        for (const size_t i : agent_indices) {
+            for (const size_t j : agent_indices) {
                 if (i == j) {
                     continue;
                 }
@@ -384,7 +422,7 @@ protected:
         constexpr uint32_t pattern = 0xDEADBEEF;
         cudaMemcpy(src_data, &pattern, sizeof(pattern), cudaMemcpyHostToDevice);
 
-        exchangeMD(SENDER_AGENT, RECEIVER_AGENT);
+        exchangeMD({SENDER_AGENT, RECEIVER_AGENT});
 
         nixlMemViewH src_mvh;
         auto status = getAgent(SENDER_AGENT)
@@ -424,7 +462,11 @@ protected:
 
         getAgent(SENDER_AGENT).releaseMemView(dst_mvh);
         getAgent(SENDER_AGENT).releaseMemView(src_mvh);
-        invalidateMD();
+        invalidateMD({SENDER_AGENT, RECEIVER_AGENT});
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+        deregisterMem(getAgent(SENDER_AGENT), src_buffers, mem_type);
+        deregisterMem(getAgent(RECEIVER_AGENT), dst_buffers, mem_type);
+#endif
     }
 
 protected:
@@ -446,8 +488,14 @@ private:
     static constexpr uint64_t DEV_ID = 0;
 
     std::unique_ptr<LogIgnoreGuard> lig_;
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    inline static std::vector<std::unique_ptr<nixlAgent>> agents;
+    inline static std::vector<nixlBackendH *> backend_handles;
+    inline static bool proxy_context_published{false};
+#else
     std::vector<std::unique_ptr<nixlAgent>> agents;
     std::vector<nixlBackendH *> backend_handles;
+#endif
 
     void
     initTiming(unsigned long long **start_time_ptr, unsigned long long **end_time_ptr) {
@@ -548,7 +596,7 @@ TEST_F(SingleWriteIntegrationTest, MultipleWorkersPut) {
                    cudaMemcpyHostToDevice);
     }
 
-    exchangeMD(SENDER_AGENT, RECEIVER_AGENT);
+    exchangeMD({SENDER_AGENT, RECEIVER_AGENT});
 
     std::vector<nixlMemViewH> src_mvhs(channel_count);
     std::vector<nixlMemViewH> dst_mvhs(channel_count);
@@ -606,12 +654,18 @@ TEST_F(SingleWriteIntegrationTest, MultipleWorkersPut) {
         getAgent(SENDER_AGENT).releaseMemView(dst_mvhs[channel_id]);
     }
 
-    invalidateMD();
+    invalidateMD({SENDER_AGENT, RECEIVER_AGENT});
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+    for (size_t channel_id = 0; channel_id < channel_count; channel_id++) {
+        deregisterMem(getAgent(SENDER_AGENT), src_buffers[channel_id], mem_type);
+        deregisterMem(getAgent(RECEIVER_AGENT), dst_buffers[channel_id], mem_type);
+    }
+#endif
 }
 
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
 TEST_F(SingleWriteIntegrationTest, MultiplePeersMultipleChannelsPut) {
-    ASSERT_NO_FATAL_FAILURE(addAgent());
+    ASSERT_NO_FATAL_FAILURE(ensureAgentCount(SECOND_RECEIVER_AGENT + 1));
 
     constexpr size_t size = 4 * 1024;
     constexpr size_t peer_count = 2;
@@ -646,7 +700,7 @@ TEST_F(SingleWriteIntegrationTest, MultiplePeersMultipleChannelsPut) {
         }
     }
 
-    exchangeMD(SENDER_AGENT, SECOND_RECEIVER_AGENT);
+    exchangeMD({SENDER_AGENT, RECEIVER_AGENT, SECOND_RECEIVER_AGENT});
 
     std::vector<std::vector<nixlMemViewH>> src_mvhs(peer_count);
     for (auto &peer_mvhs : src_mvhs) {
@@ -707,7 +761,16 @@ TEST_F(SingleWriteIntegrationTest, MultiplePeersMultipleChannelsPut) {
         getAgent(SENDER_AGENT).releaseMemView(dst_mvh);
     }
 
-    invalidateMD();
+    invalidateMD({SENDER_AGENT, RECEIVER_AGENT, SECOND_RECEIVER_AGENT});
+    for (size_t peer_slot = 0; peer_slot < peer_count; ++peer_slot) {
+        const size_t receiver_index = RECEIVER_AGENT + peer_slot;
+        for (size_t channel_id = 0; channel_id < channel_count; ++channel_id) {
+            deregisterMem(
+                getAgent(SENDER_AGENT), src_buffers[peer_slot][channel_id], mem_type);
+            deregisterMem(
+                getAgent(receiver_index), dst_buffers[peer_slot][channel_id], mem_type);
+        }
+    }
 }
 #endif
 
@@ -726,7 +789,7 @@ TEST_P(SingleWriteTest, SingleWorkerPutGap) {
     constexpr uint32_t pattern = 0xDEADBEEF;
     cudaMemcpy(src_data, &pattern, sizeof(pattern), cudaMemcpyHostToDevice);
 
-    exchangeMD(SENDER_AGENT, RECEIVER_AGENT);
+    exchangeMD({SENDER_AGENT, RECEIVER_AGENT});
 
     const auto local_dlist = makeDescList<nixlBasicDesc>(src_buffers, mem_type);
     nixlMemViewH src_mvh;
@@ -762,7 +825,7 @@ TEST_P(SingleWriteTest, SingleWorkerPutGap) {
 
     getAgent(SENDER_AGENT).releaseMemView(dst_mvh);
     getAgent(SENDER_AGENT).releaseMemView(src_mvh);
-    invalidateMD();
+    invalidateMD({SENDER_AGENT, RECEIVER_AGENT});
 }
 #endif
 } // namespace gtest::nixl::gpu::single_write
