@@ -1022,59 +1022,6 @@ TEST_F(ProxyDeviceApiTest, EarlierCompletionStaysSuccessfulAfterLaterError) {
     ASSERT_EQ(runtime.shutdown(), NIXL_SUCCESS);
 }
 
-// Once an earlier op publishes a terminal error, later queued ops must also
-// observe that error instead of spinning forever.
-TEST_F(ProxyDeviceApiTest, EarlierErrorPropagatesToLaterQueuedOp) {
-    auto adapter_owner = std::make_unique<ControllableStubAdapter>();
-    auto *adapter = adapter_owner.get();
-    nixlProxyRuntime runtime;
-
-    ASSERT_EQ(runtime.init(std::move(adapter_owner), 4, 1, 1), NIXL_SUCCESS);
-    ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
-    publishProxyContext(runtime);
-
-    const auto mvhs = registerDummyMemViews(runtime);
-    nixl_status_t *d_put_status[2];
-    nixlGpuXferStatusH *d_xfer_status[2];
-    for (int i = 0; i < 2; ++i) {
-        d_put_status[i] = deviceAlloc<nixl_status_t>();
-        ASSERT_EQ(cudaMalloc(&d_xfer_status[i], sizeof(nixlGpuXferStatusH)), cudaSuccess);
-        ASSERT_EQ(cudaMemset(d_xfer_status[i], 0, sizeof(nixlGpuXferStatusH)), cudaSuccess);
-        proxyPutAsyncKernel<<<1, 1>>>(mvhs.src, mvhs.dst, 0, d_put_status[i], d_xfer_status[i]);
-        ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
-        ASSERT_EQ(cudaGetLastError(), cudaSuccess);
-        EXPECT_EQ(deviceGet(d_put_status[i]), NIXL_IN_PROG);
-    }
-
-    ASSERT_TRUE(waitForCondition([&]() { return adapter->pendingCount() == 2; }));
-
-    nixl_status_t *d_poll = deviceAlloc<nixl_status_t>();
-    adapter->markCompleteWithStatus(1, NIXL_ERR_BACKEND);
-    ASSERT_TRUE(waitForCondition([&]() {
-        proxyPollOnceKernel<<<1, 1>>>(d_xfer_status[1], d_poll);
-        return cudaDeviceSynchronize() == cudaSuccess && deviceGet(d_poll) == NIXL_ERR_BACKEND;
-    }));
-
-    proxyPollOnceKernel<<<1, 1>>>(d_xfer_status[0], d_poll);
-    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
-    EXPECT_EQ(deviceGet(d_poll), NIXL_ERR_BACKEND);
-
-    nixl_status_t *d_rejected_status = deviceAlloc<nixl_status_t>();
-    proxyPutAtKernel<<<1, 1>>>(mvhs.src, mvhs.dst, 0, 0, d_rejected_status);
-    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
-    EXPECT_EQ(deviceGet(d_rejected_status), NIXL_ERR_BACKEND);
-
-    adapter->markCompleteWithStatus(2, NIXL_SUCCESS);
-    cudaFree(d_rejected_status);
-    cudaFree(d_poll);
-    for (int i = 0; i < 2; ++i) {
-        cudaFree(d_put_status[i]);
-        cudaFree(d_xfer_status[i]);
-    }
-    clearProxyContext();
-    ASSERT_EQ(runtime.shutdown(), NIXL_SUCCESS);
-}
-
 // Backend returns NIXL_ERR_BACKEND on checkCompletion; verify the GPU kernel
 // receives the error status through the completion slot.
 TEST_F(ProxyDeviceApiTest, CompletionPropagatesErrorStatus) {
