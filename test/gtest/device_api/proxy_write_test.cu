@@ -717,7 +717,7 @@ registerDummyMemViews(nixlProxyRuntime &runtime, uint32_t peer_count) {
     local_dlist.addDesc(nixlMetaDesc(0x1000, 64, 0, &local_md));
     EXPECT_EQ(runtime.storeMetadata(handles.src, local_dlist), NIXL_SUCCESS);
 
-    nixl_remote_meta_dlist_t remote_dlist(DRAM_SEG);
+    nixl_remote_meta_dlist_t remote_dlist(VRAM_SEG);
     for (uint32_t peer = 0; peer < peer_count; ++peer) {
         nixlRemoteMetaDesc remote_desc("peer" + std::to_string(peer));
         remote_desc.addr = 0x2000 + peer * 0x100;
