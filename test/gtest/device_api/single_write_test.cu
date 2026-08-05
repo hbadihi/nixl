@@ -204,7 +204,7 @@ protected:
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
         cfg.useProgThread = false;
         cfg.enableDeviceProxy = true;
-        cfg.proxyPeerCapacity = kProxyPeerCapacity;
+        cfg.proxyMaxPeers = kProxyPeerCapacity;
         cfg.proxyChannelCount = kTransferChannelCount;
         cfg.proxyWorkerCount = kProxyCpuWorkerCount;
 #endif
