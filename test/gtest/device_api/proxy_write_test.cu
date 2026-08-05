@@ -111,6 +111,30 @@ private:
     std::atomic<bool> allow_shutdown_{false};
 };
 
+// Ensures a failing assertion cannot leave shutdown() blocked in the adapter.
+class BlockingShutdownGuard {
+public:
+    BlockingShutdownGuard(BlockingShutdownStubAdapter &adapter, std::thread &shutdown_thread)
+        : adapter_(adapter), shutdown_thread_(shutdown_thread) {}
+
+    ~BlockingShutdownGuard() {
+        adapter_.allowShutdown();
+        if (shutdown_thread_.joinable()) {
+            shutdown_thread_.join();
+        }
+    }
+
+    void
+    allowAndJoin() {
+        adapter_.allowShutdown();
+        shutdown_thread_.join();
+    }
+
+private:
+    BlockingShutdownStubAdapter &adapter_;
+    std::thread &shutdown_thread_;
+};
+
 // ---------------------------------------------------------------------------
 // Controllable stub — lets the test thread decide when each submission
 // completes. submit() assigns unique monotonic requests; checkCompletion()
@@ -684,8 +708,12 @@ proxyAtomicAddAsyncKernel(nixlMemViewH counter_mvh,
 // Enqueues op_count puts on one channel and records each immediate enqueue
 // status. The final submission may block if the ring is full.
 __global__ void
-proxyPutBurstKernel(uint32_t op_count, uint32_t channel_id, nixl_status_t *out_put_statuses) {
-    nixlMemViewElem src{}, dst{};
+proxyPutBurstKernel(nixlMemViewH src_mvh,
+                    nixlMemViewH dst_mvh,
+                    uint32_t op_count,
+                    uint32_t channel_id,
+                    nixl_status_t *out_put_statuses) {
+    nixlMemViewElem src{src_mvh, 0, 0}, dst{dst_mvh, 0, 0};
     for (uint32_t i = 0; i < op_count; ++i) {
         out_put_statuses[i] = nixlPut(src, dst, /*size=*/0, channel_id);
     }
@@ -1156,21 +1184,21 @@ TEST_F(ProxyDeviceApiTest, RingOverflowReturnsBackendErrorOnShutdown) {
     ASSERT_EQ(cudaMalloc(&d_statuses, sizeof(nixl_status_t) * kBurstOps), cudaSuccess);
     ASSERT_EQ(cudaMemset(d_statuses, 0, sizeof(nixl_status_t) * kBurstOps), cudaSuccess);
 
-    proxyPutBurstKernel<<<1, 1>>>(kBurstOps, 0, d_statuses);
+    proxyPutBurstKernel<<<1, 1>>>(mvhs.src, mvhs.dst, kBurstOps, 0, d_statuses);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     ASSERT_EQ(cudaStreamQuery(nullptr), cudaErrorNotReady);
 
     std::atomic<nixl_status_t> shutdown_status{NIXL_IN_PROG};
     std::thread shutdown_thread(
         [&]() { shutdown_status.store(runtime.shutdown(), std::memory_order_release); });
+    BlockingShutdownGuard shutdown_guard(*adapter, shutdown_thread);
     const bool shutdown_entered =
         waitForCondition([adapter]() { return adapter->shutdownEntered(); });
     EXPECT_TRUE(shutdown_entered);
 
     const cudaError_t sync_status = cudaDeviceSynchronize();
     const cudaError_t kernel_status = cudaGetLastError();
-    adapter->allowShutdown();
-    shutdown_thread.join();
+    shutdown_guard.allowAndJoin();
     EXPECT_EQ(sync_status, cudaSuccess);
     EXPECT_EQ(kernel_status, cudaSuccess);
     EXPECT_EQ(shutdown_status.load(std::memory_order_acquire), NIXL_SUCCESS);
