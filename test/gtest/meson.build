@@ -206,6 +206,10 @@ if proxy_gtest_available
     ] + proxy_device_api_test_sources
 
     proxy_define = ['-DNIXL_GPU_DEVICE_BACKEND_PROXY']
+    proxy_gtest_deps = []
+    if ucx_dep.found() and is_variable('ucx_backend_lib')
+        proxy_gtest_deps += ucx_backend_lib
+    endif
 
     proxy_test_exe = executable('gtest_proxy',
         sources : proxy_gtest_sources,
@@ -221,7 +225,8 @@ if proxy_gtest_available
         link_with : [nixl_build_lib, nixl_gpu_proxy_lib],
         install : false)
 
-    test('gtest_proxy', proxy_test_exe, args: [plugin_dirs_arg], timeout: 300)
+    test('gtest_proxy', proxy_test_exe, args: [plugin_dirs_arg],
+         depends: proxy_gtest_deps, timeout: 300)
 endif
 
 if get_option('b_sanitize').split(',').contains('thread')
