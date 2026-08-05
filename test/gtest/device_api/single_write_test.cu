@@ -188,7 +188,7 @@ launchPutKernel(const putParams &put_params,
     return NIXL_SUCCESS;
 }
 
-class SingleWriteTest : public DeviceApiTestBase {
+class SingleWriteIntegrationTest : public ::testing::Test {
 protected:
     std::string
     getBackendName() const {
@@ -207,6 +207,7 @@ protected:
         cfg.proxyMaxPeers = kProxyPeerCapacity;
         cfg.proxyChannelCount = kTransferChannelCount;
         cfg.proxyWorkerCount = kProxyCpuWorkerCount;
+        cfg.pthrDelay = 1000;
 #endif
         return cfg;
     }
@@ -368,6 +369,64 @@ protected:
         }
     }
 
+    void
+    runSingleWorkerPut(const std::vector<nixl_gpu_level_t> &levels) {
+        std::vector<MemBuffer> src_buffers, dst_buffers;
+        constexpr size_t size = 4 * 1024;
+        constexpr size_t count = 1;
+        constexpr nixl_mem_t mem_type = VRAM_SEG;
+        createRegisteredMem(getAgent(SENDER_AGENT), size, count, mem_type, src_buffers);
+        createRegisteredMem(getAgent(RECEIVER_AGENT), size, count, mem_type, dst_buffers);
+
+        auto src_data = static_cast<uint32_t *>(static_cast<void *>(src_buffers[0]));
+        cudaMemset(src_data, 0, size);
+
+        constexpr uint32_t pattern = 0xDEADBEEF;
+        cudaMemcpy(src_data, &pattern, sizeof(pattern), cudaMemcpyHostToDevice);
+
+        exchangeMD(SENDER_AGENT, RECEIVER_AGENT);
+
+        nixlMemViewH src_mvh;
+        auto status = getAgent(SENDER_AGENT)
+                          .prepMemView(makeDescList<nixlBasicDesc>(src_buffers, mem_type), src_mvh);
+        ASSERT_EQ(status, NIXL_SUCCESS);
+
+        nixlMemViewH dst_mvh;
+        status = getAgent(SENDER_AGENT)
+                     .prepMemView(makeDescList<nixlRemoteDesc>(
+                                      dst_buffers, mem_type, getAgentName(RECEIVER_AGENT)),
+                                  dst_mvh);
+        ASSERT_EQ(status, NIXL_SUCCESS);
+
+        putParams put_params{{src_mvh, 0, 0}, {dst_mvh, 0, 0}, size};
+        constexpr size_t num_iters = 10;
+        for (const nixl_gpu_level_t level : levels) {
+            SCOPED_TRACE(::testing::Message()
+                         << "GPU transfer level: " << gtest::gpu::GetGpuXferLevelStr(level));
+            ASSERT_EQ(cudaMemset(static_cast<void *>(dst_buffers[0]), 0, size), cudaSuccess);
+
+            gpuTimer gpu_timer;
+            status = dispatchLaunchPutKernel(level, put_params, num_iters, &gpu_timer);
+            ASSERT_EQ(status, NIXL_SUCCESS);
+
+            Logger() << "SingleWorkerPut level: " << gtest::gpu::GetGpuXferLevelStr(level);
+            logResultsPublic(size, count, num_iters, *gpu_timer.start_, *gpu_timer.end_);
+
+            uint32_t dst_data;
+            cudaMemcpy(&dst_data,
+                       static_cast<uint32_t *>(static_cast<void *>(dst_buffers[0])),
+                       sizeof(uint32_t),
+                       cudaMemcpyDeviceToHost);
+            EXPECT_EQ(dst_data, pattern)
+                << "Data transfer verification failed. Expected: 0x" << std::hex << pattern
+                << ", Got: 0x" << dst_data;
+        }
+
+        getAgent(SENDER_AGENT).releaseMemView(dst_mvh);
+        getAgent(SENDER_AGENT).releaseMemView(src_mvh);
+        invalidateMD();
+    }
+
 protected:
     static constexpr size_t SENDER_AGENT = 0;
     static constexpr size_t RECEIVER_AGENT = 1;
@@ -446,56 +505,20 @@ public:
     }
 };
 
-TEST_P(SingleWriteTest, SingleWorkerPut) {
-    std::vector<MemBuffer> src_buffers, dst_buffers;
-    constexpr size_t size = 4 * 1024;
-    constexpr size_t count = 1;
-    constexpr nixl_mem_t mem_type = VRAM_SEG;
-    createRegisteredMem(getAgent(SENDER_AGENT), size, count, mem_type, src_buffers);
-    createRegisteredMem(getAgent(RECEIVER_AGENT), size, count, mem_type, dst_buffers);
+class SingleWriteTest : public SingleWriteIntegrationTest,
+                        public ::testing::WithParamInterface<nixl_gpu_level_t> {};
 
-    auto src_data = static_cast<uint32_t *>(static_cast<void *>(src_buffers[0]));
-    cudaMemset(src_data, 0, size);
-
-    constexpr uint32_t pattern = 0xDEADBEEF;
-    cudaMemcpy(src_data, &pattern, sizeof(pattern), cudaMemcpyHostToDevice);
-
-    exchangeMD(SENDER_AGENT, RECEIVER_AGENT);
-
-    nixlMemViewH src_mvh;
-    auto status = getAgent(SENDER_AGENT)
-                      .prepMemView(makeDescList<nixlBasicDesc>(src_buffers, mem_type), src_mvh);
-    ASSERT_EQ(status, NIXL_SUCCESS);
-
-    nixlMemViewH dst_mvh;
-    status = getAgent(SENDER_AGENT)
-                 .prepMemView(makeDescList<nixlRemoteDesc>(
-                                  dst_buffers, mem_type, getAgentName(RECEIVER_AGENT)),
-                              dst_mvh);
-    ASSERT_EQ(status, NIXL_SUCCESS);
-
-    putParams put_params{{src_mvh, 0, 0}, {dst_mvh, 0, 0}, size};
-    constexpr size_t num_iters = 10;
-    gpuTimer gpu_timer;
-    status = dispatchLaunchPutKernel(GetParam(), put_params, num_iters, &gpu_timer);
-    ASSERT_EQ(status, NIXL_SUCCESS);
-
-    logResultsPublic(size, count, num_iters, *gpu_timer.start_, *gpu_timer.end_);
-
-    uint32_t dst_data;
-    cudaMemcpy(&dst_data,
-               static_cast<uint32_t *>(static_cast<void *>(dst_buffers[0])),
-               sizeof(uint32_t),
-               cudaMemcpyDeviceToHost);
-    EXPECT_EQ(dst_data, pattern) << "Data transfer verification failed. Expected: 0x" << std::hex
-                                 << pattern << ", Got: 0x" << dst_data;
-
-    getAgent(SENDER_AGENT).releaseMemView(dst_mvh);
-    getAgent(SENDER_AGENT).releaseMemView(src_mvh);
-    invalidateMD();
+#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
+TEST_F(SingleWriteIntegrationTest, SingleWorkerPut) {
+    runSingleWorkerPut(gtest::gpu::_test_levels);
 }
+#else
+TEST_P(SingleWriteTest, SingleWorkerPut) {
+    runSingleWorkerPut({GetParam()});
+}
+#endif
 
-TEST_P(SingleWriteTest, MultipleWorkersPut) {
+TEST_F(SingleWriteIntegrationTest, MultipleWorkersPut) {
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
     GTEST_LOG_(INFO) << "Exercising " << kTransferChannelCount << " logical proxy channels with "
                      << kProxyCpuWorkerCount
@@ -587,11 +610,7 @@ TEST_P(SingleWriteTest, MultipleWorkersPut) {
 }
 
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-TEST_P(SingleWriteTest, MultiplePeersMultipleChannelsPut) {
-    if (GetParam() != nixl_gpu_level_t::THREAD) {
-        GTEST_SKIP() << "The peer/channel matrix needs one thread-level integration run";
-    }
-
+TEST_F(SingleWriteIntegrationTest, MultiplePeersMultipleChannelsPut) {
     ASSERT_NO_FATAL_FAILURE(addAgent());
 
     constexpr size_t size = 4 * 1024;
@@ -692,10 +711,8 @@ TEST_P(SingleWriteTest, MultiplePeersMultipleChannelsPut) {
 }
 #endif
 
+#ifndef NIXL_GPU_DEVICE_BACKEND_PROXY
 TEST_P(SingleWriteTest, SingleWorkerPutGap) {
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-    GTEST_SKIP() << "FIXME: get_ptr not implemented for proxy backend";
-#endif
     std::vector<MemBuffer> src_buffers, dst_buffers;
     constexpr size_t size = 4 * 1024;
     constexpr size_t count = 1;
@@ -747,19 +764,12 @@ TEST_P(SingleWriteTest, SingleWorkerPutGap) {
     getAgent(SENDER_AGENT).releaseMemView(src_mvh);
     invalidateMD();
 }
+#endif
 } // namespace gtest::nixl::gpu::single_write
 
+#ifndef NIXL_GPU_DEVICE_BACKEND_PROXY
 using gtest::nixl::gpu::single_write::SingleWriteTest;
 
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-INSTANTIATE_TEST_SUITE_P(
-    proxyDeviceApi,
-    SingleWriteTest,
-    testing::ValuesIn(gtest::gpu::_test_levels),
-    [](const testing::TestParamInfo<nixl_gpu_level_t> &info) {
-        return std::string("Proxy_") + gtest::gpu::GetGpuXferLevelStr(info.param);
-    });
-#else
 INSTANTIATE_TEST_SUITE_P(ucxDeviceApi,
                          SingleWriteTest,
                          testing::ValuesIn(gtest::gpu::_test_levels),
