@@ -60,8 +60,10 @@ nixlProxyMemViewRegistry::registerProxyMemView(nixlMemViewH backend_memview,
     cudaError_t cuda_status =
         cudaMemcpy(device_memview, &host_memview, sizeof(host_memview), cudaMemcpyHostToDevice);
     if (cuda_status == cudaSuccess && !direct_ptrs.empty()) {
-        cuda_status = cudaMemcpy(
-            device_memview + 1, direct_ptrs.data(), direct_ptr_bytes, cudaMemcpyHostToDevice);
+        cuda_status = cudaMemcpy(device_memview->direct_ptrs,
+                                 direct_ptrs.data(),
+                                 direct_ptr_bytes,
+                                 cudaMemcpyHostToDevice);
     }
     if (cuda_status != cudaSuccess) {
         NIXL_ERROR << "nixlProxyMemViewRegistry::register: failed to initialize device memview";
