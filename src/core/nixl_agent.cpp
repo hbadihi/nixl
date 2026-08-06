@@ -409,14 +409,29 @@ nixlAgentData::createProxyRuntime(nixlBackendEngine *engine,
                                 config_.proxyWorkerCount,
                                 config_.pthrDelay);
     if (status != NIXL_SUCCESS) {
-        proxyRuntime.reset();
+        if (proxyRuntime->unsafeToDestroy()) {
+            NIXL_ERROR << "Retaining proxy runtime after unsafe teardown during initialization";
+            (void)proxyRuntime.release();
+        } else {
+            proxyRuntime.reset();
+        }
         return status;
     }
 
     status = proxyRuntime->startWorkers();
     if (status != NIXL_SUCCESS) {
-        proxyRuntime->shutdown();
-        proxyRuntime.reset();
+        const nixl_status_t shutdown_status = proxyRuntime->shutdown();
+        if (proxyRuntime->unsafeToDestroy()) {
+            NIXL_ERROR << "Retaining proxy runtime after unsafe teardown following worker "
+                          "startup failure";
+            (void)proxyRuntime.release();
+        } else {
+            proxyRuntime.reset();
+        }
+        if (shutdown_status != NIXL_SUCCESS) {
+            NIXL_ERROR << "Proxy runtime shutdown after worker startup failure returned "
+                       << shutdown_status;
+        }
         return status;
     }
 
@@ -430,8 +445,17 @@ nixlAgentData::createProxyRuntime(nixlBackendEngine *engine,
 void
 nixlAgentData::shutdownProxyRuntime() {
     if (proxyRuntime) {
-        proxyRuntime->shutdown();
-        proxyRuntime.reset();
+        const nixl_status_t status = proxyRuntime->shutdown();
+        if (proxyRuntime->unsafeToDestroy()) {
+            NIXL_ERROR << "Retaining proxy runtime until process exit after unsafe CUDA "
+                          "quiescence failure";
+            (void)proxyRuntime.release();
+        } else {
+            if (status != NIXL_SUCCESS) {
+                NIXL_ERROR << "Proxy runtime shutdown returned " << status;
+            }
+            proxyRuntime.reset();
+        }
     }
     proxyTransportEngine = nullptr;
 }

@@ -318,6 +318,14 @@ class nixlProxyRuntime {
         nixl_status_t
         shutdown();
 
+        // True only after shutdown could not establish CUDA quiescence. Such a
+        // runtime must be retained until process exit; destroying its
+        // GPU-visible allocations could race an in-flight device call.
+        [[nodiscard]] bool
+        unsafeToDestroy() const noexcept {
+            return unsafe_teardown_;
+        }
+
         const nixlProxyMemViewRegistry &
         memviewRegistry() const { return memview_registry_; }
 
@@ -346,6 +354,7 @@ class nixlProxyRuntime {
         uint64_t *shutdown_word_dev_ = nullptr;
         uint32_t ring_depth_ = kDefaultProxyRingDepth;
         bool workers_started_ = false;
+        bool unsafe_teardown_ = false;
 };
 
 #endif // NIXL_SRC_CORE_DEVICE_PROXY_PROXY_RUNTIME_H

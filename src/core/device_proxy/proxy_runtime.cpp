@@ -640,7 +640,7 @@ nixlProxyChannelState::operator=(nixlProxyChannelState &&other) noexcept {
 nixlProxyRuntime::nixlProxyRuntime() = default;
 
 nixlProxyRuntime::~nixlProxyRuntime() {
-    if (backend_) {
+    if (backend_ && !unsafe_teardown_) {
         shutdown();
     }
 }
@@ -868,6 +868,12 @@ nixlProxyRuntime::joinWorkerThreads() noexcept {
 
 nixl_status_t
 nixlProxyRuntime::shutdown() {
+    if (unsafe_teardown_) {
+        NIXL_ERROR << "ProxyRuntime::shutdown: runtime was retained after an unsafe CUDA "
+                      "quiescence failure";
+        return NIXL_ERR_BACKEND;
+    }
+
     NIXL_INFO << "ProxyRuntime::shutdown: signalling workers to stop";
     nixl_status_t shutdown_signal_status = NIXL_SUCCESS;
     if (control_slots_.allocated()) {
@@ -883,6 +889,24 @@ nixlProxyRuntime::shutdown() {
     joinWorkerThreads();
     workers_started_ = false;
     NIXL_INFO << "ProxyRuntime::shutdown: all worker threads joined";
+
+    // Worker shutdown only proves that the CPU drain threads are gone. Device
+    // kernels may still hold memview-local copies of this runtime's pointers.
+    // Do not free any GPU-visible storage unless CUDA confirms they have all
+    // quiesced. A failed shutdown publication is itself unsafe: a full ring
+    // can leave a device kernel waiting for the control word that it never saw.
+    if (shutdown_signal_status != NIXL_SUCCESS) {
+        unsafe_teardown_ = true;
+        NIXL_ERROR << "ProxyRuntime::shutdown: retaining GPU-visible state because the "
+                      "device shutdown signal was not published";
+        return shutdown_signal_status;
+    }
+    if (control_slots_.allocated() && cudaDeviceSynchronize() != cudaSuccess) {
+        unsafe_teardown_ = true;
+        NIXL_ERROR << "ProxyRuntime::shutdown: retaining GPU-visible state because CUDA "
+                      "quiescence failed";
+        return NIXL_ERR_BACKEND;
+    }
 
     if (backend_ != nullptr) {
         size_t released = 0;
