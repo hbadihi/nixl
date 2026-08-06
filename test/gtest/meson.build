@@ -127,11 +127,7 @@ gtest_sources = [
     ]
 
 if gpu_device_api_supported
-    if gpu_device_api_is_proxy
-        gtest_sources += proxy_device_api_test_sources
-    else
-        gtest_sources += device_api_test_sources
-    endif
+    gtest_sources += device_api_test_sources
     device_api_inc = [nixl_gpu_device_api_inc_dirs, include_directories('device_api')]
 else
     device_api_inc = []
@@ -148,10 +144,10 @@ endif
 test_exe = executable('gtest',
     sources : gtest_sources,
     include_directories: [nixl_inc_dirs, utils_inc_dirs, device_api_inc, include_directories('../doca-telemetry'), include_directories('../../src/plugins/telemetry/common')],
-    cpp_args : cpp_flags + gpu_device_api_cpp_args,
-    cuda_args : cuda_flags + gpu_device_api_cuda_args,
+    cpp_args : cpp_flags,
+    cuda_args : cuda_flags,
     dependencies : [nixl_dep, nixl_common_dep, gpu_dependencies, gpu_device_api_deps, gtest_dep, gmock_dep, absl_strings_dep, absl_time_dep, ucx_hw_warning_dep, file_utils_interface],
-    link_with: [nixl_build_lib, gpu_device_api_link_with],
+    link_with: [nixl_build_lib],
     build_rpath: ucx_path != '' ? ucx_path + '/lib' : '',
     install : true
 )
@@ -194,37 +190,6 @@ if nixl_trace_nvtx_enabled
              is_parallel: false,
              timeout: 600)
     endif
-endif
-
-proxy_gtest_available = cuda_dep.found()
-
-if proxy_gtest_available
-    proxy_gtest_sources = [
-        'main.cpp',
-        'mocks/gmock_engine.cpp',
-        'common.cpp',
-    ] + proxy_device_api_test_sources
-
-    proxy_define = ['-DNIXL_GPU_DEVICE_BACKEND_PROXY']
-    proxy_gtest_deps = []
-    if ucx_dep.found() and is_variable('ucx_backend_lib')
-        proxy_gtest_deps += ucx_backend_lib
-    endif
-
-    proxy_test_exe = executable('gtest_proxy',
-        sources : proxy_gtest_sources,
-        include_directories : [nixl_inc_dirs, utils_inc_dirs, gtest_inc_dirs,
-                               nixl_gpu_proxy_inc_dirs, include_directories('device_api')],
-        cpp_args : cpp_flags + proxy_define,
-        cuda_args : cuda_flags + proxy_define,
-        dependencies : [nixl_dep, nixl_common_dep, cuda_dep,
-                        gtest_dep, gmock_dep, absl_strings_dep, absl_time_dep,
-                        file_utils_interface],
-        link_with : [nixl_build_lib],
-        install : false)
-
-    test('gtest_proxy', proxy_test_exe, args: [plugin_dirs_arg],
-         depends: proxy_gtest_deps, timeout: 300)
 endif
 
 if get_option('b_sanitize').split(',').contains('thread')
