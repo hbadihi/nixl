@@ -30,30 +30,7 @@
 
 #include <cuda_runtime.h>
 
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-#include <nixl_device.cuh>
-#endif
-
 namespace nixl_ep {
-
-cudaError_t
-publish_proxy_context(void *context) {
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-    return nixlProxyPublishContext(static_cast<nixlProxyDeviceContextData *>(context));
-#else
-    (void)context;
-    return cudaErrorNotSupported;
-#endif
-}
-
-cudaError_t
-clear_proxy_context() {
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-    return nixlProxyClearContext();
-#else
-    return cudaErrorNotSupported;
-#endif
-}
 
 namespace intranode {
 
