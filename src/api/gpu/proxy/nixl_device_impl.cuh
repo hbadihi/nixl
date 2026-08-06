@@ -28,15 +28,9 @@ get_xfer_status(nixlGpuXferStatusH &xfer_status) {
     uint32_t lane_id;
     nixlProxyExecInit<level>(lane_id);
 
-    ProxyDeviceContext *ctx = load_proxy_context();
-
     nixl_status_t status = NIXL_IN_PROG;
     if (lane_id == 0) {
-        if (ctx == nullptr) {
-            status = NIXL_ERR_BACKEND;
-        } else {
-            status = ctx->pollXferStatus(xfer_status);
-        }
+        status = ProxyDeviceContext::pollXferStatus(xfer_status);
     }
 
     if constexpr (level == nixl_gpu_level_t::WARP) {
@@ -63,14 +57,15 @@ put(const nixlMemViewElem &src,
     unsigned channel_id = 0,
     uint64_t flags = 0,
     nixlGpuXferStatusH *xfer_status = nullptr) {
-
     uint32_t lane_id;
     nixlProxyExecInit<level>(lane_id);
     nixl_status_t status = NIXL_IN_PROG;
     if (lane_id == 0) {
-        ProxyDeviceContext *ctx = load_proxy_context();
-        if (ctx == nullptr) {
-            status = NIXL_ERR_BACKEND;
+        const auto *src_memview = static_cast<const nixlProxyDeviceMemView *>(src.mvh);
+        const auto *dst_memview = static_cast<const nixlProxyDeviceMemView *>(dst.mvh);
+        const auto *ctx = reinterpret_cast<const ProxyDeviceContext *>(dst_memview->context);
+        if (ctx == nullptr || src_memview->context != dst_memview->context) {
+            status = NIXL_ERR_INVALID_PARAM;
         } else {
             status = ctx->enqueue(
                 nixlProxySubmission{.src_offset = static_cast<uint64_t>(src.offset),
@@ -101,9 +96,10 @@ atomic_add(uint64_t value,
     nixlProxyExecInit<level>(lane_id);
     nixl_status_t status = NIXL_IN_PROG;
     if (lane_id == 0) {
-        ProxyDeviceContext *ctx = load_proxy_context();
+        const auto *memview = static_cast<const nixlProxyDeviceMemView *>(counter.mvh);
+        const auto *ctx = reinterpret_cast<const ProxyDeviceContext *>(memview->context);
         if (ctx == nullptr) {
-            status = NIXL_ERR_BACKEND;
+            status = NIXL_ERR_INVALID_PARAM;
         } else {
             status = ctx->enqueue(
                 nixlProxySubmission{.value = value,
