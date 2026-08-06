@@ -618,6 +618,11 @@ if get_option('install_headers')
   install_headers('src/infra/mem_section.h', install_dir: prefix_inc)
   install_headers('src/core/telemetry/telemetry_event.h', install_dir: prefix_inc)
 
+  if cuda_dep.found()
+    install_headers('src/api/gpu/common/nixl_device_memview.cuh',
+                    install_dir: prefix_inc + '/gpu/common')
+  endif
+
   if ucx_gpu_device_api_available
     install_headers('src/api/gpu/ucx/nixl_device.cuh', install_dir: prefix_inc + '/gpu/ucx')
   endif
