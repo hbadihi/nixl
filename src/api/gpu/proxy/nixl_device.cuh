@@ -15,18 +15,12 @@
  * limitations under the License.
  */
 
-// Proxy-backend device API facade.  Self-contained: no backend-selection
-// macro required.  Include this header (or place src/api/gpu/proxy on the
-// include path so that <nixl_device.cuh> resolves here) when building CUDA
-// translation units that submit work through the CPU proxy runtime.
+// Compatibility facade. Backend selection is carried by each memview.
 
 #ifndef NIXL_SRC_API_GPU_PROXY_NIXL_DEVICE_CUH
 #define NIXL_SRC_API_GPU_PROXY_NIXL_DEVICE_CUH
 
-#include "nixl_device_impl.cuh"
-
-namespace nixl::gpu { namespace selected_impl = proxy_impl; }
-
+#include "../common/nixl_device_api.cuh"
 #include "../common/nixl_device_wrappers.cuh"
 
 #endif // NIXL_SRC_API_GPU_PROXY_NIXL_DEVICE_CUH

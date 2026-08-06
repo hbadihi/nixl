@@ -1942,6 +1942,7 @@ nixl_status_t
 nixlAgent::prepMemView(const nixl_remote_dlist_t &dlist,
                        nixlMemViewH &mvh,
                        const nixl_opt_args_t *extra_params) const {
+    mvh = nullptr;
     const auto desc_count = static_cast<size_t>(dlist.descCount());
     const auto mem_type = dlist.getType();
     NIXL_TRACE_SCOPE(
@@ -2005,18 +2006,38 @@ nixlAgent::prepMemView(const nixl_remote_dlist_t &dlist,
     }
 
     if (data->hasProxyRuntime() && (data->proxyTransportEngine == engine)) {
-        const auto status = data->proxyRuntime->prepMemView(remote_meta_dlist, &mvh);
+        nixlMemViewH backend_handle = nullptr;
+        const auto status = data->proxyRuntime->prepMemView(remote_meta_dlist, &backend_handle);
         if (status != NIXL_SUCCESS) {
             return status;
         }
+        nixlDeviceMemViewAllocation wrapper;
+        const auto wrapper_status = nixlDeviceMemViewAllocation::create(
+            nixlDeviceMemViewBackend::PROXY, backend_handle, wrapper);
+        if (wrapper_status != NIXL_SUCCESS) {
+            data->proxyRuntime->unregisterProxyMemView(backend_handle);
+            return wrapper_status;
+        }
+        mvh = wrapper.get();
+        data->memViewRecords.emplace(
+            mvh, ProxyMemViewRecord{engine, backend_handle, std::move(wrapper)});
     } else {
-        const auto status = engine->prepMemView(remote_meta_dlist, mvh, &opt_args);
+        nixlMemViewH backend_handle = nullptr;
+        const auto status = engine->prepMemView(remote_meta_dlist, backend_handle, &opt_args);
         if (status != NIXL_SUCCESS) {
             return status;
         }
+        nixlDeviceMemViewAllocation wrapper;
+        const auto wrapper_status = nixlDeviceMemViewAllocation::create(
+            nixlDeviceMemViewBackend::UCX, backend_handle, wrapper);
+        if (wrapper_status != NIXL_SUCCESS) {
+            engine->releaseMemView(backend_handle);
+            return wrapper_status;
+        }
+        mvh = wrapper.get();
+        data->memViewRecords.emplace(
+            mvh, DirectMemViewRecord{engine, backend_handle, std::move(wrapper)});
     }
-
-    data->mvhToEngine.emplace(mvh, *engine);
     return NIXL_SUCCESS;
 }
 
@@ -2024,6 +2045,7 @@ nixl_status_t
 nixlAgent::prepMemView(const nixl_local_dlist_t &dlist,
                        nixlMemViewH &mvh,
                        const nixl_opt_args_t *extra_params) const {
+    mvh = nullptr;
     const auto mem_type = dlist.getType();
     NIXL_TRACE_SCOPE(
         trace_span, data->tracer_.get(), "nixl::prepMemView", nixl::trace::Kind::MemoryR);
@@ -2055,18 +2077,38 @@ nixlAgent::prepMemView(const nixl_local_dlist_t &dlist,
     }
 
     if (data->hasProxyRuntime() && (data->proxyTransportEngine == engine)) {
-        const auto status = data->proxyRuntime->prepMemView(meta_dlist, &mvh);
+        nixlMemViewH backend_handle = nullptr;
+        const auto status = data->proxyRuntime->prepMemView(meta_dlist, &backend_handle);
         if (status != NIXL_SUCCESS) {
             return status;
         }
+        nixlDeviceMemViewAllocation wrapper;
+        const auto wrapper_status = nixlDeviceMemViewAllocation::create(
+            nixlDeviceMemViewBackend::PROXY, backend_handle, wrapper);
+        if (wrapper_status != NIXL_SUCCESS) {
+            data->proxyRuntime->unregisterProxyMemView(backend_handle);
+            return wrapper_status;
+        }
+        mvh = wrapper.get();
+        data->memViewRecords.emplace(
+            mvh, ProxyMemViewRecord{engine, backend_handle, std::move(wrapper)});
     } else {
-        const auto status = engine->prepMemView(meta_dlist, mvh, &opt_args);
+        nixlMemViewH backend_handle = nullptr;
+        const auto status = engine->prepMemView(meta_dlist, backend_handle, &opt_args);
         if (status != NIXL_SUCCESS) {
             return status;
         }
+        nixlDeviceMemViewAllocation wrapper;
+        const auto wrapper_status = nixlDeviceMemViewAllocation::create(
+            nixlDeviceMemViewBackend::UCX, backend_handle, wrapper);
+        if (wrapper_status != NIXL_SUCCESS) {
+            engine->releaseMemView(backend_handle);
+            return wrapper_status;
+        }
+        mvh = wrapper.get();
+        data->memViewRecords.emplace(
+            mvh, DirectMemViewRecord{engine, backend_handle, std::move(wrapper)});
     }
-
-    data->mvhToEngine.emplace(mvh, *engine);
     return NIXL_SUCCESS;
 }
 
@@ -2076,23 +2118,31 @@ nixlAgent::releaseMemView(nixlMemViewH mvh) const {
         trace_span, data->tracer_.get(), "nixl::releaseMemView", nixl::trace::Kind::Generic);
 
     const std::lock_guard lock_guard(data->lock);
-    const auto it = data->mvhToEngine.find(mvh);
-    if (it == data->mvhToEngine.end()) {
+    const auto it = data->memViewRecords.find(mvh);
+    if (it == data->memViewRecords.end()) {
         NIXL_WARN << "Invalid memory view handle: " << mvh;
         return;
     }
 
-    nixlMemViewH backend_mvh = mvh;
-    if (data->hasProxyRuntime()) {
+    if (const auto *proxy = std::get_if<ProxyMemViewRecord>(&it->second)) {
         nixlMemViewH resolved = nullptr;
-        if (data->proxyRuntime->resolveProxyMemView(mvh, resolved)) {
-            backend_mvh = resolved;
-            data->proxyRuntime->unregisterProxyMemView(mvh);
+        if (!data->hasProxyRuntime()) {
+            NIXL_ERROR << "Proxy memory view outlived its runtime: " << mvh;
+        } else {
+            data->proxyRuntime->resolveProxyMemView(proxy->backend_handle, resolved);
+            const auto status =
+                data->proxyRuntime->unregisterProxyMemView(proxy->backend_handle);
+            if (status != NIXL_SUCCESS) {
+                NIXL_ERROR << "Failed to release proxy memory view " << mvh
+                           << " with status " << status;
+            }
         }
+        if (resolved != nullptr) {
+            proxy->engine->releaseMemView(resolved);
+        }
+    } else {
+        const auto &direct = std::get<DirectMemViewRecord>(it->second);
+        direct.engine->releaseMemView(direct.backend_handle);
     }
-
-    if (backend_mvh != nullptr) {
-        it->second.releaseMemView(backend_mvh);
-    }
-    data->mvhToEngine.erase(it);
+    data->memViewRecords.erase(it);
 }

@@ -23,10 +23,7 @@
 #ifndef NIXL_SRC_API_GPU_UCX_NIXL_DEVICE_CUH
 #define NIXL_SRC_API_GPU_UCX_NIXL_DEVICE_CUH
 
-#include "nixl_device_impl.cuh"
-
-namespace nixl::gpu { namespace selected_impl = ucx_impl; }
-
+#include "../common/nixl_device_api.cuh"
 #include "../common/nixl_device_wrappers.cuh"
 
 #endif // NIXL_SRC_API_GPU_UCX_NIXL_DEVICE_CUH
