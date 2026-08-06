@@ -17,6 +17,8 @@
 #ifndef NIXL_SRC_API_GPU_COMMON_NIXL_DEVICE_API_CUH
 #define NIXL_SRC_API_GPU_COMMON_NIXL_DEVICE_API_CUH
 
+#include <cstring>
+
 #include <gpu/nixl_device_config.h>
 
 #include "nixl_device_memview.cuh"
@@ -107,6 +109,44 @@ decode_memview(nixlMemViewH handle) {
     const nixlMemViewH backend_handle = wrapper->backend_handle;
     return backend_handle == nullptr ? DecodedMemView{MemViewBackend::INVALID, nullptr} :
                                        DecodedMemView{backend, backend_handle};
+}
+
+template<nixl_gpu_level_t level>
+__device__ __forceinline__ bool
+execution_leader() {
+    if constexpr (level == nixl_gpu_level_t::THREAD) {
+        return true;
+    } else if constexpr (level == nixl_gpu_level_t::WARP) {
+        return threadIdx.x % warpSize == 0;
+    } else if constexpr (level == nixl_gpu_level_t::BLOCK) {
+        return threadIdx.x == 0;
+    } else {
+        return blockIdx.x == 0 && threadIdx.x == 0;
+    }
+}
+
+__device__ __forceinline__ nixlDeviceXferStatusFooter
+load_footer(const nixlGpuXferStatusH &status) {
+    nixlDeviceXferStatusFooter footer{};
+    memcpy(&footer, status.storage + NIXL_GPU_XFER_STATUS_PAYLOAD_SIZE, sizeof(footer));
+    return footer;
+}
+
+template<nixl_gpu_level_t level>
+__device__ __forceinline__ void
+write_footer(nixlGpuXferStatusH *status,
+             nixl_status_t submission_status,
+             nixlDeviceXferStatusBackend backend) {
+    if (status == nullptr || submission_status != NIXL_IN_PROG || !execution_leader<level>()) {
+        return;
+    }
+    const nixlDeviceXferStatusFooter footer{
+        NIXL_DEVICE_XFER_STATUS_MAGIC,
+        NIXL_DEVICE_XFER_STATUS_ABI_VERSION,
+        static_cast<uint8_t>(backend),
+        0,
+    };
+    memcpy(status->storage + NIXL_GPU_XFER_STATUS_PAYLOAD_SIZE, &footer, sizeof(footer));
 }
 
 } // namespace detail
