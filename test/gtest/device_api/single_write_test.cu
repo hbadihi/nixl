@@ -83,7 +83,6 @@ putKernel(putParams put_params,
     }
 }
 
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
 __global__ void
 timedPutKernel(putParams put_params, nixl_status_t *completion_status) {
     constexpr unsigned long long completion_timeout_ns = 30ULL * 1000 * 1000 * 1000;
@@ -102,7 +101,6 @@ timedPutKernel(putParams put_params, nixl_status_t *completion_status) {
     }
     *completion_status = status;
 }
-#endif
 
 __global__ void
 getPtrKernel(nixlMemViewH mvh, size_t index, void **ptr) {
@@ -143,7 +141,6 @@ private:
     std::unique_ptr<T, void (*)(T *)> ptr_;
 };
 
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
 static nixl_status_t
 launchTimedProxyPut(const putParams &put_params) {
     gpuVar<nixl_status_t> completion_status;
@@ -153,7 +150,6 @@ launchTimedProxyPut(const putParams &put_params) {
     }
     return *completion_status;
 }
-#endif
 
 struct gpuTimer {
     gpuVar<unsigned long long> start_;
@@ -191,43 +187,48 @@ launchPutKernel(const putParams &put_params,
 
 class SingleWriteIntegrationTest : public ::testing::Test {
 protected:
+    explicit SingleWriteIntegrationTest(bool use_proxy)
+        : use_proxy_(use_proxy),
+          agents(use_proxy ? shared_proxy_agents : local_agents),
+          backend_handles(use_proxy ? shared_proxy_backend_handles : local_backend_handles) {}
+
     std::string
     getBackendName() const {
         return "UCX";
     }
 
-    static nixlAgentConfig
-    getConfig() {
+    nixlAgentConfig
+    getConfig(bool proxy_owner) const {
         nixlAgentConfig cfg;
-        cfg.useProgThread = true;
+        cfg.useProgThread = !proxy_owner;
         cfg.syncMode = nixl_thread_sync_t::NIXL_THREAD_SYNC_RW;
-        cfg.pthrDelay = 100000;
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-        cfg.useProgThread = false;
-        cfg.enableDeviceProxy = true;
-        cfg.proxyMaxPeers = kProxyPeerCapacity;
-        cfg.proxyChannelCount = kTransferChannelCount;
-        cfg.proxyWorkerCount = kProxyCpuWorkerCount;
-        cfg.pthrDelay = 1000;
-#endif
+        cfg.pthrDelay = proxy_owner ? 1000 : 100000;
+        cfg.enableDeviceProxy = proxy_owner;
+        if (proxy_owner) {
+            cfg.proxyMaxPeers = kProxyPeerCapacity;
+            cfg.proxyChannelCount = kProxyTransferChannelCount;
+            cfg.proxyWorkerCount = kProxyCpuWorkerCount;
+        }
         return cfg;
     }
 
     nixl_b_params_t
-    getBackendParams() {
+    getBackendParams() const {
         nixl_b_params_t params;
 
         if (getBackendName() == "UCX") {
-            params["num_workers"] = std::to_string(kUcxWorkerCount);
+            params["num_workers"] =
+                std::to_string(useProxy() ? kProxyUcxWorkerCount : kDirectUcxWorkerCount);
         }
 
         return params;
     }
 
     void
-    addAgent() {
+    addAgent(bool proxy_owner = false) {
         const size_t agent_index = agents.size();
-        agents.emplace_back(std::make_unique<nixlAgent>(getAgentName(agent_index), getConfig()));
+        agents.emplace_back(
+            std::make_unique<nixlAgent>(getAgentName(agent_index), getConfig(proxy_owner)));
         nixlBackendH *backend_handle = nullptr;
         const nixl_status_t status =
             agents.back()->createBackend(getBackendName(), getBackendParams(), backend_handle);
@@ -239,22 +240,15 @@ protected:
     void
     ensureAgentCount(size_t count) {
         while (agents.size() < count) {
-            ASSERT_NO_FATAL_FAILURE(addAgent());
+            ASSERT_NO_FATAL_FAILURE(addAgent(useProxy() && agents.empty()));
         }
     }
 
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
     static void
     resetSharedEnvironment() {
-        agents.clear();
-        backend_handles.clear();
+        shared_proxy_agents.clear();
+        shared_proxy_backend_handles.clear();
     }
-
-    static void
-    TearDownTestSuite() {
-        resetSharedEnvironment();
-    }
-#endif
 
     void
     SetUp() override {
@@ -273,14 +267,14 @@ protected:
 
     void
     TearDown() override {
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-        if (HasFailure()) {
-            resetSharedEnvironment();
+        if (useProxy()) {
+            if (HasFailure()) {
+                resetSharedEnvironment();
+            }
+        } else {
+            agents.clear();
+            backend_handles.clear();
         }
-#else
-        agents.clear();
-        backend_handles.clear();
-#endif
     }
 
     template<typename Desc>
@@ -374,6 +368,11 @@ protected:
         return absl::StrFormat("agent_%d", idx);
     }
 
+    bool
+    useProxy() const {
+        return use_proxy_;
+    }
+
     nixl_status_t
     dispatchLaunchPutKernel(nixl_gpu_level_t level,
                             const putParams &put_params,
@@ -448,38 +447,49 @@ protected:
         getAgent(SENDER_AGENT).releaseMemView(dst_mvh);
         getAgent(SENDER_AGENT).releaseMemView(src_mvh);
         invalidateMD({SENDER_AGENT, RECEIVER_AGENT});
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-        deregisterMem(getAgent(SENDER_AGENT), src_buffers, mem_type);
-        deregisterMem(getAgent(RECEIVER_AGENT), dst_buffers, mem_type);
-#endif
+        if (useProxy()) {
+            deregisterMem(getAgent(SENDER_AGENT), src_buffers, mem_type);
+            deregisterMem(getAgent(RECEIVER_AGENT), dst_buffers, mem_type);
+        }
     }
+
+    void
+    runMultipleWorkersPut();
+
+    void
+    runSingleWorkerPutWithGetPtr(nixl_gpu_level_t level, size_t num_iters);
 
 protected:
     static constexpr size_t SENDER_AGENT = 0;
     static constexpr size_t RECEIVER_AGENT = 1;
     static constexpr size_t SECOND_RECEIVER_AGENT = 2;
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-    static constexpr size_t kTransferChannelCount = 4;
-    static constexpr uint32_t kProxyCpuWorkerCount = kTransferChannelCount;
+    static constexpr size_t kProxyTransferChannelCount = 4;
+    static constexpr uint32_t kProxyCpuWorkerCount = kProxyTransferChannelCount;
     static constexpr uint32_t kProxyPeerCapacity = 2;
-    static constexpr size_t kUcxWorkerCount =
-        kTransferChannelCount * static_cast<size_t>(kProxyPeerCapacity);
-#else
-    static constexpr size_t kTransferChannelCount = 32;
-    static constexpr size_t kUcxWorkerCount = kTransferChannelCount;
-#endif
+    // The UCX proxy adapter isolates one UCX worker per (channel, peer) pair -
+    // see nixlUcxProxyBackendAdapter::init(), which rejects any other count.
+    static constexpr size_t kProxyUcxWorkerCount =
+        kProxyTransferChannelCount * static_cast<size_t>(kProxyPeerCapacity);
+    static constexpr size_t kDirectTransferChannelCount = 32;
+    // Each logical transfer channel maps directly to one UCX worker.
+    static constexpr size_t kDirectUcxWorkerCount = kDirectTransferChannelCount;
+
+    size_t
+    transferChannelCount() const {
+        return useProxy() ? kProxyTransferChannelCount : kDirectTransferChannelCount;
+    }
 
 private:
     static constexpr uint64_t DEV_ID = 0;
 
     std::unique_ptr<LogIgnoreGuard> lig_;
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-    inline static std::vector<std::unique_ptr<nixlAgent>> agents;
-    inline static std::vector<nixlBackendH *> backend_handles;
-#else
-    std::vector<std::unique_ptr<nixlAgent>> agents;
-    std::vector<nixlBackendH *> backend_handles;
-#endif
+    bool use_proxy_;
+    std::vector<std::unique_ptr<nixlAgent>> local_agents;
+    std::vector<nixlBackendH *> local_backend_handles;
+    inline static std::vector<std::unique_ptr<nixlAgent>> shared_proxy_agents;
+    inline static std::vector<nixlBackendH *> shared_proxy_backend_handles;
+    std::vector<std::unique_ptr<nixlAgent>> &agents;
+    std::vector<nixlBackendH *> &backend_handles;
 
     void
     initTiming(unsigned long long **start_time_ptr, unsigned long long **end_time_ptr) {
@@ -537,28 +547,46 @@ public:
     }
 };
 
-class SingleWriteTest : public SingleWriteIntegrationTest,
-                        public ::testing::WithParamInterface<nixl_gpu_level_t> {};
+class ProxySingleWriteTest : public SingleWriteIntegrationTest {
+public:
+    ProxySingleWriteTest() : SingleWriteIntegrationTest(true) {}
 
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-TEST_F(SingleWriteIntegrationTest, SingleWorkerPut) {
+    static void
+    TearDownTestSuite() {
+        resetSharedEnvironment();
+    }
+};
+
+#if defined(NIXL_HAVE_UCX_GPU_DEVICE_API)
+class UcxSingleWriteIntegrationTest : public SingleWriteIntegrationTest {
+public:
+    UcxSingleWriteIntegrationTest() : SingleWriteIntegrationTest(false) {}
+};
+
+class UcxSingleWriteTest : public UcxSingleWriteIntegrationTest,
+                           public ::testing::WithParamInterface<nixl_gpu_level_t> {};
+#endif
+
+TEST_F(ProxySingleWriteTest, SingleWorkerPut) {
     runSingleWorkerPut(gtest::gpu::_test_levels);
 }
-#else
-TEST_P(SingleWriteTest, SingleWorkerPut) {
+
+#if defined(NIXL_HAVE_UCX_GPU_DEVICE_API)
+TEST_P(UcxSingleWriteTest, SingleWorkerPut) {
     runSingleWorkerPut({GetParam()});
 }
 #endif
 
-TEST_F(SingleWriteIntegrationTest, MultipleWorkersPut) {
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-    GTEST_LOG_(INFO) << "Exercising " << kTransferChannelCount << " logical proxy channels with "
-                     << kProxyCpuWorkerCount
-                     << " CPU proxy worker; each channel maps to one UCX worker";
-#endif
+void
+SingleWriteIntegrationTest::runMultipleWorkersPut() {
+    if (useProxy()) {
+        GTEST_LOG_(INFO) << "Exercising " << kProxyTransferChannelCount
+                         << " logical proxy channels with " << kProxyCpuWorkerCount
+                         << " CPU proxy workers";
+    }
     constexpr size_t size = 4 * 1024;
     constexpr nixl_mem_t mem_type = VRAM_SEG;
-    constexpr size_t channel_count = kTransferChannelCount;
+    const size_t channel_count = transferChannelCount();
 
     std::vector<std::vector<MemBuffer>> src_buffers(channel_count);
     std::vector<std::vector<MemBuffer>> dst_buffers(channel_count);
@@ -607,16 +635,16 @@ TEST_F(SingleWriteIntegrationTest, MultipleWorkersPut) {
 
     for (size_t channel_id = 0; channel_id < channel_count; channel_id++) {
         putParams put_params{{src_mvhs[channel_id], 0, 0}, {dst_mvhs[channel_id], 0, 0}, size};
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-        put_params.channelId = static_cast<unsigned>(channel_id);
-        ASSERT_EQ(launchTimedProxyPut(put_params), NIXL_SUCCESS)
-            << "Transfer failed or timed out for logical channel " << channel_id;
-#else
-        constexpr size_t num_iters = 1;
-        const auto status =
-            launchPutKernel<nixl_gpu_level_t::THREAD>(put_params, num_iters, nullptr, 1);
-        ASSERT_EQ(status, NIXL_SUCCESS) << "Kernel launch failed for worker " << channel_id;
-#endif
+        if (useProxy()) {
+            put_params.channelId = static_cast<unsigned>(channel_id);
+            ASSERT_EQ(launchTimedProxyPut(put_params), NIXL_SUCCESS)
+                << "Transfer failed or timed out for logical channel " << channel_id;
+        } else {
+            constexpr size_t num_iters = 1;
+            const auto status =
+                launchPutKernel<nixl_gpu_level_t::THREAD>(put_params, num_iters, nullptr, 1);
+            ASSERT_EQ(status, NIXL_SUCCESS) << "Kernel launch failed for worker " << channel_id;
+        }
     }
 
     for (size_t channel_id = 0; channel_id < channel_count; channel_id++) {
@@ -639,21 +667,30 @@ TEST_F(SingleWriteIntegrationTest, MultipleWorkersPut) {
     }
 
     invalidateMD({SENDER_AGENT, RECEIVER_AGENT});
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-    for (size_t channel_id = 0; channel_id < channel_count; channel_id++) {
-        deregisterMem(getAgent(SENDER_AGENT), src_buffers[channel_id], mem_type);
-        deregisterMem(getAgent(RECEIVER_AGENT), dst_buffers[channel_id], mem_type);
+    if (useProxy()) {
+        for (size_t channel_id = 0; channel_id < channel_count; channel_id++) {
+            deregisterMem(getAgent(SENDER_AGENT), src_buffers[channel_id], mem_type);
+            deregisterMem(getAgent(RECEIVER_AGENT), dst_buffers[channel_id], mem_type);
+        }
     }
-#endif
 }
 
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-TEST_F(SingleWriteIntegrationTest, MultiplePeersMultipleChannelsPut) {
+TEST_F(ProxySingleWriteTest, MultipleWorkersPut) {
+    runMultipleWorkersPut();
+}
+
+#if defined(NIXL_HAVE_UCX_GPU_DEVICE_API)
+TEST_F(UcxSingleWriteIntegrationTest, MultipleWorkersPut) {
+    runMultipleWorkersPut();
+}
+#endif
+
+TEST_F(ProxySingleWriteTest, MultiplePeersMultipleChannelsPut) {
     ASSERT_NO_FATAL_FAILURE(ensureAgentCount(SECOND_RECEIVER_AGENT + 1));
 
     constexpr size_t size = 4 * 1024;
     constexpr size_t peer_count = 2;
-    constexpr size_t channel_count = kTransferChannelCount;
+    constexpr size_t channel_count = kProxyTransferChannelCount;
     constexpr size_t num_elements = size / sizeof(uint32_t);
     constexpr nixl_mem_t mem_type = VRAM_SEG;
 
@@ -756,10 +793,10 @@ TEST_F(SingleWriteIntegrationTest, MultiplePeersMultipleChannelsPut) {
         }
     }
 }
-#endif
 
-#ifndef NIXL_GPU_DEVICE_BACKEND_PROXY
-TEST_P(SingleWriteTest, SingleWorkerPutGap) {
+void
+SingleWriteIntegrationTest::runSingleWorkerPutWithGetPtr(nixl_gpu_level_t level,
+                                                         size_t num_iters) {
     std::vector<MemBuffer> src_buffers, dst_buffers;
     constexpr size_t size = 4 * 1024;
     constexpr size_t count = 1;
@@ -788,14 +825,15 @@ TEST_P(SingleWriteTest, SingleWorkerPutGap) {
     ASSERT_EQ(status, NIXL_SUCCESS);
 
     putParams put_params{{src_mvh, 0, 0}, {dst_mvh, 0, 0}, size};
-    constexpr size_t num_iters = 1000;
     gpuTimer gpu_timer;
-    status = dispatchLaunchPutKernel(GetParam(), put_params, num_iters, &gpu_timer);
+    status = dispatchLaunchPutKernel(level, put_params, num_iters, &gpu_timer);
     ASSERT_EQ(status, NIXL_SUCCESS);
 
-    void *ptr;
-    getPtrKernel<<<1, 1>>>(dst_mvh, 0, &ptr);
-    ASSERT_NE(ptr, nullptr);
+    gpuVar<void *> ptr;
+    getPtrKernel<<<1, 1>>>(dst_mvh, 0, ptr.get());
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    ASSERT_EQ(cudaGetLastError(), cudaSuccess);
+    ASSERT_NE(*ptr, nullptr);
 
     logResultsPublic(size, count, num_iters, *gpu_timer.start_, *gpu_timer.end_);
 
@@ -810,15 +848,27 @@ TEST_P(SingleWriteTest, SingleWorkerPutGap) {
     getAgent(SENDER_AGENT).releaseMemView(dst_mvh);
     getAgent(SENDER_AGENT).releaseMemView(src_mvh);
     invalidateMD({SENDER_AGENT, RECEIVER_AGENT});
+    if (useProxy()) {
+        deregisterMem(getAgent(SENDER_AGENT), src_buffers, mem_type);
+        deregisterMem(getAgent(RECEIVER_AGENT), dst_buffers, mem_type);
+    }
+}
+
+#if defined(NIXL_HAVE_UCX_GPU_DEVICE_API)
+TEST_P(UcxSingleWriteTest, SingleWorkerPutGap) {
+    runSingleWorkerPutWithGetPtr(GetParam(), 1000);
 }
 #endif
+
+TEST_F(ProxySingleWriteTest, SingleWorkerPutAndGetPtr) {
+    runSingleWorkerPutWithGetPtr(nixl_gpu_level_t::THREAD, 1);
+}
 } // namespace gtest::nixl::gpu::single_write
 
-#ifndef NIXL_GPU_DEVICE_BACKEND_PROXY
-using gtest::nixl::gpu::single_write::SingleWriteTest;
-
+#if defined(NIXL_HAVE_UCX_GPU_DEVICE_API)
+using gtest::nixl::gpu::single_write::UcxSingleWriteTest;
 INSTANTIATE_TEST_SUITE_P(ucxDeviceApi,
-                         SingleWriteTest,
+                         UcxSingleWriteTest,
                          testing::ValuesIn(gtest::gpu::_test_levels),
                          [](const testing::TestParamInfo<nixl_gpu_level_t> &info) {
                              return std::string("UCX_") +
