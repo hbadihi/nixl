@@ -27,6 +27,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <cuda_runtime.h>
 #include <memory>
@@ -1393,28 +1394,30 @@ void Buffer::_nixl_agent_init() {
     std::string agent_name = std::to_string(rank);
     nixlAgentConfig cfg;
 
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-    const char *proxy_channels_env = std::getenv("NIXL_EP_NUM_CHANNELS");
-    const uint32_t proxy_channels =
-        proxy_channels_env ? static_cast<uint32_t>(std::stoul(proxy_channels_env)) : 4;
-    const char *proxy_workers_env = std::getenv("NIXL_EP_PROXY_WORKER_COUNT");
-    const uint32_t proxy_workers =
-        proxy_workers_env ? static_cast<uint32_t>(std::stoul(proxy_workers_env)) : proxy_channels;
-#else
-    constexpr uint32_t proxy_channels = 1;
-    constexpr uint32_t proxy_workers = 1;
-#endif
+    const char *device_proxy_env = std::getenv("NIXL_DEVICE_PROXY");
+    const bool use_proxy = device_proxy_env != nullptr && std::strcmp(device_proxy_env, "1") == 0;
+
+    uint32_t proxy_channels = 1;
+    uint32_t proxy_workers = 1;
+    if (use_proxy) {
+        const char *proxy_channels_env = std::getenv("NIXL_EP_NUM_CHANNELS");
+        proxy_channels =
+            proxy_channels_env ? static_cast<uint32_t>(std::stoul(proxy_channels_env)) : 4;
+        const char *proxy_workers_env = std::getenv("NIXL_EP_PROXY_WORKER_COUNT");
+        proxy_workers = proxy_workers_env ? static_cast<uint32_t>(std::stoul(proxy_workers_env)) :
+                                            proxy_channels;
+    }
 
     cfg.useProgThread = true;
     cfg.syncMode = nixl_thread_sync_t::NIXL_THREAD_SYNC_RW;
     cfg.etcdWatchTimeout = NIXL_ETCD_WATCH_TIMEOUT;
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-    cfg.enableDeviceProxy = true;
-    cfg.useProgThread = false;
-    cfg.proxyMaxPeers = static_cast<uint32_t>(max_num_ranks);
-    cfg.proxyChannelCount = proxy_channels;
-    cfg.proxyWorkerCount = proxy_workers;
-#endif
+    if (use_proxy) {
+        cfg.enableDeviceProxy = true;
+        cfg.useProgThread = false;
+        cfg.proxyMaxPeers = static_cast<uint32_t>(max_num_ranks);
+        cfg.proxyChannelCount = proxy_channels;
+        cfg.proxyWorkerCount = proxy_workers;
+    }
     auto agent = std::make_shared<nixlAgent>(agent_name, cfg);
 
     // Create UCX backend
@@ -1427,18 +1430,18 @@ void Buffer::_nixl_agent_init() {
                                 ", status: " + std::to_string(status));
     }
 
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-    init_params["ucx_num_device_channels"] = "1";
-    init_params["num_workers"] =
-        std::to_string(proxy_channels * static_cast<uint32_t>(max_num_ranks));
-    init_params["ucx_error_handling_mode"] = "none";
-#else
-    const char* num_channels_env = std::getenv("NIXL_EP_NUM_CHANNELS");
-    init_params["ucx_num_device_channels"] = num_channels_env ? num_channels_env : "4";
-    init_params["num_workers"] = std::to_string(1);
-    init_params["ucx_error_handling_mode"] = "peer";
-    init_params["ucx_ep_close_force"] = "yes";
-#endif
+    if (use_proxy) {
+        init_params["ucx_num_device_channels"] = "1";
+        init_params["num_workers"] =
+            std::to_string(proxy_channels * static_cast<uint32_t>(max_num_ranks));
+        init_params["ucx_error_handling_mode"] = "none";
+    } else {
+        const char* num_channels_env = std::getenv("NIXL_EP_NUM_CHANNELS");
+        init_params["ucx_num_device_channels"] = num_channels_env ? num_channels_env : "4";
+        init_params["num_workers"] = std::to_string(1);
+        init_params["ucx_error_handling_mode"] = "peer";
+        init_params["ucx_ep_close_force"] = "yes";
+    }
 
     nixlBackendH* ucx_backend = nullptr;
     status = agent->createBackend("UCX", init_params, ucx_backend);
