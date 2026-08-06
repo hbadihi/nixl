@@ -35,7 +35,7 @@ get_xfer_status(nixlGpuXferStatusH &xfer_status) {
         if (ctx == nullptr) {
             status = NIXL_ERR_BACKEND;
         } else {
-            status = ctx->pollXferStatus(xfer_status);
+            status = nixlProxyPollXferStatus(xfer_status);
         }
     }
 
@@ -57,7 +57,8 @@ get_xfer_status(nixlGpuXferStatusH &xfer_status) {
 
 template<nixl_gpu_level_t level = nixl_gpu_level_t::THREAD>
 __device__ __forceinline__ nixl_status_t
-put(const nixlMemViewElem &src,
+put(const nixlProxyDeviceContextData &context,
+    const nixlMemViewElem &src,
     const nixlMemViewElem &dst,
     size_t size,
     unsigned channel_id = 0,
@@ -68,26 +69,69 @@ put(const nixlMemViewElem &src,
     nixlProxyExecInit<level>(lane_id);
     nixl_status_t status = NIXL_IN_PROG;
     if (lane_id == 0) {
-        ProxyDeviceContext *ctx = load_proxy_context();
-        if (ctx == nullptr) {
-            status = NIXL_ERR_BACKEND;
-        } else {
-            status = ctx->enqueue(
-                nixlProxySubmission{.src_offset = static_cast<uint64_t>(src.offset),
-                                    .dst_offset = static_cast<uint64_t>(dst.offset),
-                                    .size = static_cast<uint64_t>(size),
-                                    .opcode = nixl_proxy_opcode_t::PUT,
-                                    .flags = static_cast<uint8_t>(flags),
-                                    .channel_id = static_cast<uint16_t>(channel_id),
-                                    .src_index = static_cast<uint32_t>(src.index),
-                                    .dst_index = static_cast<uint32_t>(dst.index),
-                                    .src_proxy_memview_id = proxyMemViewIdFromHandle(src.mvh),
-                                    .dst_proxy_memview_id = proxyMemViewIdFromHandle(dst.mvh)},
-                xfer_status);
-        }
+        status = nixlProxyEnqueue(
+            context,
+            nixlProxySubmission{.src_offset = static_cast<uint64_t>(src.offset),
+                                .dst_offset = static_cast<uint64_t>(dst.offset),
+                                .size = static_cast<uint64_t>(size),
+                                .opcode = nixl_proxy_opcode_t::PUT,
+                                .flags = static_cast<uint8_t>(flags),
+                                .channel_id = static_cast<uint16_t>(channel_id),
+                                .src_index = static_cast<uint32_t>(src.index),
+                                .dst_index = static_cast<uint32_t>(dst.index),
+                                .src_proxy_memview_id = proxyMemViewIdFromHandle(src.mvh),
+                                .dst_proxy_memview_id = proxyMemViewIdFromHandle(dst.mvh)},
+            xfer_status);
     }
     nixlProxySync<level>();
     return status;
+}
+
+template<nixl_gpu_level_t level = nixl_gpu_level_t::THREAD>
+__device__ __forceinline__ nixl_status_t
+atomic_add(const nixlProxyDeviceContextData &context,
+           uint64_t value,
+           const nixlMemViewElem &counter,
+           unsigned channel_id = 0,
+           uint64_t flags = 0,
+           nixlGpuXferStatusH *xfer_status = nullptr) {
+    uint32_t lane_id;
+    nixlProxyExecInit<level>(lane_id);
+    nixl_status_t status = NIXL_IN_PROG;
+    if (lane_id == 0) {
+        status = nixlProxyEnqueue(
+            context,
+            nixlProxySubmission{.value = value,
+                                .dst_offset = static_cast<uint64_t>(counter.offset),
+                                .size = static_cast<uint64_t>(sizeof(uint64_t)),
+                                .opcode = nixl_proxy_opcode_t::ATOMIC_ADD,
+                                .flags = static_cast<uint8_t>(flags),
+                                .channel_id = static_cast<uint16_t>(channel_id),
+                                .dst_index = static_cast<uint32_t>(counter.index),
+                                .dst_proxy_memview_id = proxyMemViewIdFromHandle(counter.mvh)},
+            xfer_status);
+    }
+    nixlProxySync<level>();
+    return status;
+}
+
+template<nixl_gpu_level_t level = nixl_gpu_level_t::THREAD>
+__device__ __forceinline__ nixl_status_t
+put(const nixlMemViewElem &src,
+    const nixlMemViewElem &dst,
+    size_t size,
+    unsigned channel_id = 0,
+    uint64_t flags = 0,
+    nixlGpuXferStatusH *xfer_status = nullptr) {
+    const ProxyDeviceContext *context = load_proxy_context();
+    return context == nullptr ? NIXL_ERR_BACKEND :
+                                put<level>(*context,
+                                           src,
+                                           dst,
+                                           size,
+                                           channel_id,
+                                           flags,
+                                           xfer_status);
 }
 
 template<nixl_gpu_level_t level = nixl_gpu_level_t::THREAD>
@@ -97,29 +141,10 @@ atomic_add(uint64_t value,
            unsigned channel_id = 0,
            uint64_t flags = 0,
            nixlGpuXferStatusH *xfer_status = nullptr) {
-    uint32_t lane_id;
-    nixlProxyExecInit<level>(lane_id);
-    nixl_status_t status = NIXL_IN_PROG;
-    if (lane_id == 0) {
-        ProxyDeviceContext *ctx = load_proxy_context();
-        if (ctx == nullptr) {
-            status = NIXL_ERR_BACKEND;
-        } else {
-            status = ctx->enqueue(
-                nixlProxySubmission{.value = value,
-                                    .dst_offset = static_cast<uint64_t>(counter.offset),
-                                    .size = static_cast<uint64_t>(sizeof(uint64_t)),
-                                    .opcode = nixl_proxy_opcode_t::ATOMIC_ADD,
-                                    .flags = static_cast<uint8_t>(flags),
-                                    .channel_id =
-                                        static_cast<uint16_t>(channel_id % ctx->num_channels),
-                                    .dst_index = static_cast<uint32_t>(counter.index),
-                                    .dst_proxy_memview_id = proxyMemViewIdFromHandle(counter.mvh)},
-                xfer_status);
-        }
-    }
-    nixlProxySync<level>();
-    return status;
+    const ProxyDeviceContext *context = load_proxy_context();
+    return context == nullptr ? NIXL_ERR_BACKEND :
+                                atomic_add<level>(
+                                    *context, value, counter, channel_id, flags, xfer_status);
 }
 
 __device__ __forceinline__ void *
