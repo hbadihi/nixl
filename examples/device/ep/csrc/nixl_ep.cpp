@@ -109,41 +109,6 @@ void Buffer::_refresh_active_rank_bound() {
     set_active_rank_bound(bound);
 }
 
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-void
-Buffer::_publish_proxy_context() {
-    if (proxy_context_published) {
-        throw std::runtime_error("NIXL EP proxy context is already published");
-    }
-
-    void *proxy_context = nixl_agent_info->agent->getProxyDeviceContext();
-    if (proxy_context == nullptr) {
-        return;
-    }
-
-    const cudaError_t status = publish_proxy_context(proxy_context);
-    if (status != cudaSuccess) {
-        throw std::runtime_error(std::string("Failed to publish NIXL EP proxy context: ") +
-                                 cudaGetErrorString(status));
-    }
-    proxy_context_published = true;
-}
-
-void
-Buffer::_clear_proxy_context() {
-    if (!proxy_context_published) {
-        return;
-    }
-
-    const cudaError_t status = clear_proxy_context();
-    if (status != cudaSuccess) {
-        throw std::runtime_error(std::string("Failed to clear NIXL EP proxy context: ") +
-                                 cudaGetErrorString(status));
-    }
-    proxy_context_published = false;
-}
-#endif
-
 void Buffer::init(int num_ranks, int num_experts_per_rank, int64_t num_nvl_bytes, int64_t num_rdma_bytes)
 {
     EP_HOST_ASSERT(num_ranks > 0);
@@ -263,9 +228,6 @@ void Buffer::init(int num_ranks, int num_experts_per_rank, int64_t num_nvl_bytes
     _nixl_agent_init();
 
     _nixl_ep_init();
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-    _publish_proxy_context();
-#endif
 }
 
 Buffer::~Buffer() noexcept {
@@ -338,10 +300,6 @@ void Buffer::destroy() {
 
     // Synchronize
     warn_cuda(cudaDeviceSynchronize(), "synchronize device");
-
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-    _clear_proxy_context();
-#endif
 
     _nixl_ep_destroy();
 
