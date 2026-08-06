@@ -180,9 +180,16 @@ atomic_add(uint64_t value,
 }
 
 __device__ inline void *
-get_ptr(nixlMemViewH mvh,
-        size_t index) {
-    return selected_impl::get_ptr(mvh, index);
+get_ptr(nixlMemViewH mvh, size_t index) {
+    const auto view = detail::decode_memview(mvh);
+    switch (view.backend) {
+    case detail::MemViewBackend::UCX:
+        return ucx_impl::get_ptr(view.backend_handle, index);
+    case detail::MemViewBackend::PROXY:
+        return proxy_impl::get_ptr(view.backend_handle, index);
+    default:
+        return nullptr;
+    }
 }
 
 } // namespace nixl::gpu::api
