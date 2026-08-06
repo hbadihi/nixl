@@ -17,6 +17,7 @@
 #ifndef NIXL_SRC_API_GPU_COMMON_NIXL_DEVICE_API_CUH
 #define NIXL_SRC_API_GPU_COMMON_NIXL_DEVICE_API_CUH
 
+#include "nixl_device_memview.cuh"
 #include "nixl_device_types.cuh"
 
 #if defined(NIXL_GPU_DEVICE_BACKEND_PROXY)
@@ -30,6 +31,43 @@ namespace nixl::gpu { namespace selected_impl = ucx_impl; }
 #endif
 
 namespace nixl::gpu::api {
+namespace detail {
+
+enum class MemViewBackend : uint8_t {
+    INVALID,
+    UCX,
+    PROXY,
+    UNSUPPORTED,
+};
+
+struct DecodedMemView {
+    MemViewBackend backend;
+    nixlMemViewH backend_handle;
+};
+
+__device__ __forceinline__ DecodedMemView
+decode_memview(nixlMemViewH handle) {
+    if (handle == nullptr) {
+        return {MemViewBackend::INVALID, nullptr};
+    }
+    const auto *wrapper = static_cast<const nixlDeviceMemView *>(handle);
+    MemViewBackend backend;
+    switch (wrapper->backend) {
+    case nixlDeviceMemViewBackend::UCX:
+        backend = MemViewBackend::UCX;
+        break;
+    case nixlDeviceMemViewBackend::PROXY:
+        backend = MemViewBackend::PROXY;
+        break;
+    default:
+        return {MemViewBackend::UNSUPPORTED, nullptr};
+    }
+    const nixlMemViewH backend_handle = wrapper->backend_handle;
+    return backend_handle == nullptr ? DecodedMemView{MemViewBackend::INVALID, nullptr} :
+                                       DecodedMemView{backend, backend_handle};
+}
+
+} // namespace detail
 
 template<nixl_gpu_level_t level = nixl_gpu_level_t::THREAD>
 __device__ inline nixl_status_t
