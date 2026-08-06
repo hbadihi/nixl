@@ -27,6 +27,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <cuda_runtime.h>
 #include <memory>
@@ -1396,21 +1397,16 @@ void Buffer::_nixl_agent_init() {
     std::string agent_name = std::to_string(rank);
     nixlAgentConfig cfg;
 
-    // Match agent-side selection: compile-time default, overridable by NIXL_DEVICE_PROXY.
-    bool enable_device_proxy =
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
-        true;
-#else
-        false;
-#endif
-    if (const char *proxy_override = std::getenv("NIXL_DEVICE_PROXY")) {
-        if (std::strcmp(proxy_override, "0") == 0) {
+    bool enable_device_proxy = false;
+    if (const char *mode_override = std::getenv("NIXL_EP_DEVICE_MODE")) {
+        if (std::strcmp(mode_override, "direct") == 0) {
             enable_device_proxy = false;
-        } else if (std::strcmp(proxy_override, "1") == 0) {
+        } else if (std::strcmp(mode_override, "proxy") == 0) {
             enable_device_proxy = true;
         } else {
-            throw std::invalid_argument("NIXL_DEVICE_PROXY must be exactly 0 or 1; got '" +
-                                        std::string(proxy_override) + "'");
+            throw std::invalid_argument(
+                "NIXL_EP_DEVICE_MODE must be exactly 'direct' or 'proxy'; got '" +
+                std::string(mode_override) + "'");
         }
     }
 
