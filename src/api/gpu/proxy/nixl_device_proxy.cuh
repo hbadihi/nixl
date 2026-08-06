@@ -119,7 +119,7 @@ struct ProxyDeviceContext : nixlProxyDeviceContextData {
     }
 
     __device__ inline nixl_status_t
-    enqueue(nixlProxySubmission submission, nixlGpuXferStatusH *xfer_status = nullptr) {
+    enqueue(nixlProxySubmission submission, nixlGpuXferStatusH *xfer_status = nullptr) const {
         if (submission.dst_index >= max_peers || num_channels == 0) {
             return NIXL_ERR_INVALID_PARAM;
         }
@@ -187,8 +187,8 @@ struct ProxyDeviceContext : nixlProxyDeviceContextData {
     // - completed_idx < op_idx  => this op is still pending, unless an earlier
     //                              completion published a terminal error and
     //                              latched the channel
-    __device__ inline nixl_status_t
-    pollXferStatus(const nixlGpuXferStatusH &xfer_status) const {
+    __device__ inline static nixl_status_t
+    pollXferStatus(const nixlGpuXferStatusH &xfer_status) {
         const ProxyXferStatus *pxs =
             reinterpret_cast<const ProxyXferStatus *>(xfer_status.storage);
         if (pxs->slot == nullptr) {
