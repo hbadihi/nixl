@@ -20,7 +20,7 @@
 #include <cuda/atomic>
 
 #include "../common/nixl_device_types.cuh"
-#include "../../../core/device_proxy/proxy_protocol.h"
+#include <device_proxy/proxy_protocol.h>
 
 // Overlay struct written into nixlGpuXferStatusH::storage by enqueue()
 // and read back by pollXferStatus().  Must fit within the 64-byte opaque blob.
