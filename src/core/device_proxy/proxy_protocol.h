@@ -32,9 +32,12 @@ enum class nixl_proxy_control_state_t : uint32_t {
     SHUTDOWN = 1,
 };
 
+struct nixlProxyDeviceContextData;
+
 struct nixlProxyDeviceMemView {
     uint32_t proxy_memview_id = 0;
     uint32_t direct_ptr_count = 0;
+    const nixlProxyDeviceContextData *context = nullptr;
     void *direct_ptrs[0];
 };
 

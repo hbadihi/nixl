@@ -102,6 +102,11 @@ class nixlProxyMemViewRegistry {
         nixlProxyMemViewRegistry &
         operator=(const nixlProxyMemViewRegistry &) = delete;
 
+        void
+        setDeviceContext(const nixlProxyDeviceContextData *context) {
+            device_context_ = context;
+        }
+
         nixl_status_t
         registerProxyMemView(nixlMemViewH backend_memview,
                              nixlMemViewH *proxy_memview);
@@ -242,6 +247,7 @@ class nixlProxyMemViewRegistry {
         std::vector<RegistryEntry> entries_;
         std::unordered_map<nixlMemViewH, uint32_t> handle_to_id_;
         uint64_t next_proxy_memview_id_ = 1;
+        const nixlProxyDeviceContextData *device_context_ = nullptr;
 };
 
 class nixlProxyRuntime {

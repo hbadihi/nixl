@@ -443,6 +443,15 @@ TEST_F(ProxyRuntimeTest, DeviceContextPopulated) {
     EXPECT_NE(ctx.shutdown_word, nullptr);
 }
 
+TEST_F(ProxyRuntimeTest, DeviceContextCarriedByMemView) {
+    DummyBackendMD remote_md;
+    ASSERT_EQ(initRuntime(3, 1), NIXL_SUCCESS);
+    nixlMemViewH remote_mvh = nullptr;
+    ASSERT_EQ(runtime_.prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &remote_mvh),
+              NIXL_SUCCESS);
+    EXPECT_EQ(copyDeviceMemView(remote_mvh).context, runtime_.deviceContext());
+}
+
 TEST_F(ProxyRuntimeTest, DeviceContextNullAfterShutdown) {
     ASSERT_EQ(initRuntime(2, 1), NIXL_SUCCESS);
     ASSERT_NE(runtime_.deviceContext(), nullptr);
