@@ -16,7 +16,7 @@
  */
 
 // Verifies that the proxy backend compiles, links, and that GPU kernels can
-// reach the ProxyDeviceContext published by ProxyRuntime::startWorkers().
+// select the proxy runtime from handle-local memviews.
 //
 // nixl_device.cuh resolves to proxy/nixl_device.cuh via the proxy include
 // path supplied by the build system - no backend macro is needed.
@@ -365,12 +365,6 @@ registerDummyMemViews(nixlProxyRuntime &runtime, uint32_t peer_count = 1);
 // Device kernels
 // ---------------------------------------------------------------------------
 
-// Writes true if load_proxy_context() returns a non-null pointer.
-__global__ void
-proxyContextKernel(bool *out_has_ctx) {
-    *out_has_ctx = (load_proxy_context() != nullptr);
-}
-
 // Calls nixlPut with zero-initialised operands and records the status.
 __global__ void
 proxyPutKernel(nixlMemViewH src_mvh, nixlMemViewH dst_mvh, nixl_status_t *out_status) {
@@ -395,21 +389,11 @@ proxyAtomicAddKernel(nixlMemViewH counter_mvh, uint64_t value, nixl_status_t *ou
 }
 
 static void
-publishProxyContext(nixlProxyRuntime &runtime) {
-    bool *d_warmup = nullptr;
-    ASSERT_EQ(cudaMalloc(&d_warmup, sizeof(bool)), cudaSuccess);
-    proxyContextKernel<<<1, 1>>>(d_warmup);
-    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
-    ASSERT_EQ(cudaGetLastError(), cudaSuccess);
-    ASSERT_EQ(cudaFree(d_warmup), cudaSuccess);
-
-    ASSERT_NE(runtime.deviceContext(), nullptr);
-    ASSERT_EQ(nixlProxyPublishContext(runtime.deviceContext()), cudaSuccess);
+publishProxyContext(nixlProxyRuntime &) {
 }
 
 static void
 clearProxyContext() {
-    ASSERT_EQ(nixlProxyClearContext(), cudaSuccess);
 }
 
 // ---------------------------------------------------------------------------
@@ -461,51 +445,6 @@ protected:
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
-
-// After startWorkers() the GPU should see a non-null proxy context.
-TEST_F(ProxyDeviceApiTest, ContextPublishedAfterStartWorkers) {
-    auto adapter = std::make_unique<StubProxyBackendAdapter>();
-    nixlProxyRuntime runtime;
-
-    ASSERT_EQ(runtime.init(std::move(adapter), 4, 1, 1), NIXL_SUCCESS);
-    ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
-    publishProxyContext(runtime);
-
-    bool *d_has_ctx = deviceAlloc<bool>();
-    proxyContextKernel<<<1, 1>>>(d_has_ctx);
-    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
-    ASSERT_EQ(cudaGetLastError(), cudaSuccess);
-
-    EXPECT_TRUE(deviceGet(d_has_ctx));
-    cudaFree(d_has_ctx);
-
-    clearProxyContext();
-    ASSERT_EQ(runtime.shutdown(), NIXL_SUCCESS);
-}
-
-// After shutdown() the GPU should no longer see a proxy context.
-TEST_F(ProxyDeviceApiTest, ContextClearedAfterShutdown) {
-    auto adapter = std::make_unique<StubProxyBackendAdapter>();
-    nixlProxyRuntime runtime;
-
-    ASSERT_EQ(runtime.init(std::move(adapter), 4, 1, 1), NIXL_SUCCESS);
-    ASSERT_EQ(runtime.startWorkers(), NIXL_SUCCESS);
-    publishProxyContext(runtime);
-    ASSERT_EQ(runtime.shutdown(), NIXL_SUCCESS);
-    clearProxyContext();
-
-    bool *d_has_ctx = deviceAlloc<bool>();
-    // Initialise to true so a no-op kernel would give a false pass.
-    bool init_val = true;
-    cudaMemcpy(d_has_ctx, &init_val, sizeof(bool), cudaMemcpyHostToDevice);
-
-    proxyContextKernel<<<1, 1>>>(d_has_ctx);
-    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
-    ASSERT_EQ(cudaGetLastError(), cudaSuccess);
-
-    EXPECT_FALSE(deviceGet(d_has_ctx));
-    cudaFree(d_has_ctx);
-}
 
 // nixlPut() via the proxy backend should report NIXL_IN_PROG once the
 // submission is accepted into the proxy ring.
