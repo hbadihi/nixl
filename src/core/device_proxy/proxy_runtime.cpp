@@ -56,7 +56,8 @@ nixlProxyMemViewRegistry::registerProxyMemView(nixlMemViewH backend_memview,
     }
 
     const nixlProxyDeviceMemView host_memview{entry.proxy_memview_id,
-                                              static_cast<uint32_t>(direct_ptrs.size())};
+                                              static_cast<uint32_t>(direct_ptrs.size()),
+                                              device_context_};
     cudaError_t cuda_status =
         cudaMemcpy(device_memview, &host_memview, sizeof(host_memview), cudaMemcpyHostToDevice);
     if (cuda_status == cudaSuccess && !direct_ptrs.empty()) {
@@ -722,6 +723,7 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
         shutdown();
         return NIXL_ERR_BACKEND;
     }
+    memview_registry_.setDeviceContext(device_context_);
 
     workers_.clear();
     workers_.reserve(effective_worker_count);
@@ -920,6 +922,7 @@ nixlProxyRuntime::shutdown() {
 
     workers_.clear();
     memview_registry_.clear();
+    memview_registry_.setDeviceContext(nullptr);
 
     if (device_context_) {
         cudaFree(device_context_);
