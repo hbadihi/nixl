@@ -18,12 +18,9 @@
 #define NIXL_SRC_API_GPU_PROXY_NIXL_DEVICE_PROXY_CUH
 
 #include <cuda/atomic>
-#include <stdio.h>
 
 #include "../common/nixl_device_types.cuh"
 #include "../../../core/device_proxy/proxy_protocol.h"
-
-struct ProxyDeviceContext;
 
 // Overlay struct written into nixlGpuXferStatusH::storage by enqueue()
 // and read back by pollXferStatus().  Must fit within the 64-byte opaque blob.
@@ -34,46 +31,9 @@ struct ProxyXferStatus {
 static_assert(sizeof(ProxyXferStatus) <= sizeof(nixlGpuXferStatusH),
               "ProxyXferStatus must fit in nixlGpuXferStatusH::storage");
 
-// Defined in nixl_device_proxy.cu and read by device kernels through
-// load_proxy_context().
-extern __device__ __constant__ ProxyDeviceContext *g_nixl_proxy_ctx;
-
-// Host-callable helpers. Keeping these inline in CUDA translation units avoids
-// cross-DSO symbol ownership issues for g_nixl_proxy_ctx.
-__host__ inline cudaError_t
-nixlProxyPublishContext(nixlProxyDeviceContextData *ctx) {
-    ProxyDeviceContext *device_ctx = reinterpret_cast<ProxyDeviceContext *>(ctx);
-    cudaError_t err = cudaMemcpyToSymbol(g_nixl_proxy_ctx, &device_ctx, sizeof(ProxyDeviceContext *));
-    if (err != cudaSuccess) {
-        fprintf(stderr,
-                "nixlProxyPublishContext: cudaMemcpyToSymbol failed: code=%d msg=%s\n",
-                static_cast<int>(err),
-                cudaGetErrorString(err));
-    }
-    return err;
-}
-
-__host__ inline cudaError_t
-nixlProxyClearContext() {
-    ProxyDeviceContext *null_ctx = nullptr;
-    cudaError_t err = cudaMemcpyToSymbol(g_nixl_proxy_ctx, &null_ctx, sizeof(ProxyDeviceContext *));
-    if (err != cudaSuccess) {
-        fprintf(stderr,
-                "nixlProxyClearContext: cudaMemcpyToSymbol failed: code=%d msg=%s\n",
-                static_cast<int>(err),
-                cudaGetErrorString(err));
-    }
-    return err;
-}
-
 __device__ __forceinline__ uint32_t
 proxyMemViewIdFromHandle(nixlMemViewH mvh) {
     return static_cast<const nixlProxyDeviceMemView *>(mvh)->proxy_memview_id;
-}
-
-__device__ __forceinline__  ProxyDeviceContext *
-load_proxy_context() {
-    return g_nixl_proxy_ctx;
 }
 
 static_assert(sizeof(*nixlProxyWorkRing{}.producer_idx) == 8,
