@@ -66,14 +66,6 @@ get_ptr(nixlMemViewH, size_t) {
 } // namespace nixl::gpu::ucx_impl
 #endif
 
-#if defined(NIXL_GPU_DEVICE_BACKEND_PROXY)
-namespace nixl::gpu { namespace selected_impl = proxy_impl; }
-#elif defined(NIXL_GPU_DEVICE_BACKEND_UCX)
-namespace nixl::gpu { namespace selected_impl = ucx_impl; }
-#else
-#error "No GPU device backend implementation selected"
-#endif
-
 namespace nixl::gpu::api {
 namespace detail {
 
@@ -154,7 +146,24 @@ write_footer(nixlGpuXferStatusH *status,
 template<nixl_gpu_level_t level = nixl_gpu_level_t::THREAD>
 __device__ inline nixl_status_t
 get_xfer_status(nixlGpuXferStatusH &xfer_status) {
-    return selected_impl::get_xfer_status<level>(xfer_status);
+    const auto footer = detail::load_footer(xfer_status);
+    if (footer.magic != NIXL_DEVICE_XFER_STATUS_MAGIC ||
+        footer.abi_version != NIXL_DEVICE_XFER_STATUS_ABI_VERSION || footer.reserved != 0) {
+        return NIXL_ERR_INVALID_PARAM;
+    }
+
+    switch (static_cast<nixlDeviceXferStatusBackend>(footer.backend)) {
+    case nixlDeviceXferStatusBackend::UCX:
+        return ucx_impl::get_xfer_status<level>(xfer_status);
+    case nixlDeviceXferStatusBackend::PROXY:
+        if constexpr (level == nixl_gpu_level_t::GRID) {
+            return NIXL_ERR_NOT_SUPPORTED;
+        } else {
+            return proxy_impl::get_xfer_status<level>(xfer_status);
+        }
+    default:
+        return NIXL_ERR_INVALID_PARAM;
+    }
 }
 
 template<nixl_gpu_level_t level = nixl_gpu_level_t::THREAD>
@@ -179,16 +188,23 @@ put(const nixlMemViewElem &src,
 
     const nixlMemViewElem backend_src{src_view.backend_handle, src.index, src.offset};
     const nixlMemViewElem backend_dst{dst_view.backend_handle, dst.index, dst.offset};
+    nixl_status_t status;
+    nixlDeviceXferStatusBackend status_backend;
     if (dst_view.backend == detail::MemViewBackend::UCX) {
-        return ucx_impl::put<level>(
+        status = ucx_impl::put<level>(
             backend_src, backend_dst, size, channel_id, flags, xfer_status);
-    }
-    if constexpr (level == nixl_gpu_level_t::GRID) {
-        return NIXL_ERR_NOT_SUPPORTED;
+        status_backend = nixlDeviceXferStatusBackend::UCX;
     } else {
-        return proxy_impl::put<level>(
-            backend_src, backend_dst, size, channel_id, flags, xfer_status);
+        if constexpr (level == nixl_gpu_level_t::GRID) {
+            return NIXL_ERR_NOT_SUPPORTED;
+        } else {
+            status = proxy_impl::put<level>(
+                backend_src, backend_dst, size, channel_id, flags, xfer_status);
+        }
+        status_backend = nixlDeviceXferStatusBackend::PROXY;
     }
+    detail::write_footer<level>(xfer_status, status, status_backend);
+    return status;
 }
 
 template<nixl_gpu_level_t level = nixl_gpu_level_t::THREAD>
@@ -207,16 +223,23 @@ atomic_add(uint64_t value,
     }
 
     const nixlMemViewElem backend_counter{view.backend_handle, counter.index, counter.offset};
+    nixl_status_t status;
+    nixlDeviceXferStatusBackend status_backend;
     if (view.backend == detail::MemViewBackend::UCX) {
-        return ucx_impl::atomic_add<level>(
+        status = ucx_impl::atomic_add<level>(
             value, backend_counter, channel_id, flags, xfer_status);
-    }
-    if constexpr (level == nixl_gpu_level_t::GRID) {
-        return NIXL_ERR_NOT_SUPPORTED;
+        status_backend = nixlDeviceXferStatusBackend::UCX;
     } else {
-        return proxy_impl::atomic_add<level>(
-            value, backend_counter, channel_id, flags, xfer_status);
+        if constexpr (level == nixl_gpu_level_t::GRID) {
+            return NIXL_ERR_NOT_SUPPORTED;
+        } else {
+            status = proxy_impl::atomic_add<level>(
+                value, backend_counter, channel_id, flags, xfer_status);
+        }
+        status_backend = nixlDeviceXferStatusBackend::PROXY;
     }
+    detail::write_footer<level>(xfer_status, status, status_backend);
+    return status;
 }
 
 __device__ inline void *
