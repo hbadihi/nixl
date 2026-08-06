@@ -431,23 +431,17 @@ TEST_F(ProxyRuntimeTest, WorkerCountClampedToChannelCount) {
     EXPECT_EQ(backend_->init_channel_count_, 2u);
 }
 
-TEST_F(ProxyRuntimeTest, DeviceContextPopulated) {
+TEST_F(ProxyRuntimeTest, DeviceContextCarriedByMemView) {
+    DummyBackendMD remote_md;
     ASSERT_EQ(initRuntime(3, 1), NIXL_SUCCESS);
-    auto *device_ctx = runtime_.deviceContext();
-    ASSERT_NE(device_ctx, nullptr);
-    nixlProxyDeviceContextData ctx{};
-    ASSERT_EQ(cudaMemcpy(&ctx, device_ctx, sizeof(ctx), cudaMemcpyDeviceToHost), cudaSuccess);
+    nixlMemViewH remote_mvh = nullptr;
+    ASSERT_EQ(runtime_.prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &remote_mvh),
+              NIXL_SUCCESS);
+    const nixlProxyDeviceContextData &ctx = copyDeviceMemView(remote_mvh).context;
     EXPECT_EQ(ctx.max_peers, 4u);
     EXPECT_EQ(ctx.num_channels, 3u);
     EXPECT_NE(ctx.channels, nullptr);
     EXPECT_NE(ctx.shutdown_word, nullptr);
-}
-
-TEST_F(ProxyRuntimeTest, DeviceContextNullAfterShutdown) {
-    ASSERT_EQ(initRuntime(2, 1), NIXL_SUCCESS);
-    ASSERT_NE(runtime_.deviceContext(), nullptr);
-    ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
-    EXPECT_EQ(runtime_.deviceContext(), nullptr);
 }
 
 TEST_F(ProxyRuntimeTest, StartWorkersAndShutdown) {

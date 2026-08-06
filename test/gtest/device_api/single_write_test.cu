@@ -246,10 +246,6 @@ protected:
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
     static void
     resetSharedEnvironment() {
-        if (proxy_context_published) {
-            nixlProxyClearContext();
-            proxy_context_published = false;
-        }
         agents.clear();
         backend_handles.clear();
     }
@@ -272,18 +268,7 @@ protected:
         lig_ = std::make_unique<LogIgnoreGuard>(
             "IB device\\(s\\) were detected, but accelerated IB support was not found");
 
-#ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
         ASSERT_NO_FATAL_FAILURE(ensureAgentCount(2));
-        if (!proxy_context_published) {
-            auto *ctx = static_cast<nixlProxyDeviceContextData *>(
-                agents[SENDER_AGENT]->getProxyDeviceContext());
-            ASSERT_NE(ctx, nullptr) << "Proxy device context not available";
-            ASSERT_EQ(nixlProxyPublishContext(ctx), cudaSuccess);
-            proxy_context_published = true;
-        }
-#else
-        ASSERT_NO_FATAL_FAILURE(ensureAgentCount(2));
-#endif
     }
 
     void
@@ -491,7 +476,6 @@ private:
 #ifdef NIXL_GPU_DEVICE_BACKEND_PROXY
     inline static std::vector<std::unique_ptr<nixlAgent>> agents;
     inline static std::vector<nixlBackendH *> backend_handles;
-    inline static bool proxy_context_published{false};
 #else
     std::vector<std::unique_ptr<nixlAgent>> agents;
     std::vector<nixlBackendH *> backend_handles;

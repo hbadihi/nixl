@@ -28,15 +28,9 @@ get_xfer_status(nixlGpuXferStatusH &xfer_status) {
     uint32_t lane_id;
     nixlProxyExecInit<level>(lane_id);
 
-    ProxyDeviceContext *ctx = load_proxy_context();
-
     nixl_status_t status = NIXL_IN_PROG;
     if (lane_id == 0) {
-        if (ctx == nullptr) {
-            status = NIXL_ERR_BACKEND;
-        } else {
-            status = nixlProxyPollXferStatus(xfer_status);
-        }
+        status = nixlProxyPollXferStatus(xfer_status);
     }
 
     if constexpr (level == nixl_gpu_level_t::WARP) {
@@ -123,15 +117,16 @@ put(const nixlMemViewElem &src,
     unsigned channel_id = 0,
     uint64_t flags = 0,
     nixlGpuXferStatusH *xfer_status = nullptr) {
-    const ProxyDeviceContext *context = load_proxy_context();
-    return context == nullptr ? NIXL_ERR_BACKEND :
-                                put<level>(*context,
-                                           src,
-                                           dst,
-                                           size,
-                                           channel_id,
-                                           flags,
-                                           xfer_status);
+    if (src.mvh == nullptr || dst.mvh == nullptr) {
+        return NIXL_ERR_INVALID_PARAM;
+    }
+    const auto *src_memview = static_cast<const nixlProxyDeviceMemView *>(src.mvh);
+    const auto *dst_memview = static_cast<const nixlProxyDeviceMemView *>(dst.mvh);
+    if (src_memview->context.shutdown_word == nullptr ||
+        src_memview->context.shutdown_word != dst_memview->context.shutdown_word) {
+        return NIXL_ERR_INVALID_PARAM;
+    }
+    return put<level>(dst_memview->context, src, dst, size, channel_id, flags, xfer_status);
 }
 
 template<nixl_gpu_level_t level = nixl_gpu_level_t::THREAD>
@@ -141,10 +136,12 @@ atomic_add(uint64_t value,
            unsigned channel_id = 0,
            uint64_t flags = 0,
            nixlGpuXferStatusH *xfer_status = nullptr) {
-    const ProxyDeviceContext *context = load_proxy_context();
-    return context == nullptr ? NIXL_ERR_BACKEND :
-                                atomic_add<level>(
-                                    *context, value, counter, channel_id, flags, xfer_status);
+    if (counter.mvh == nullptr) {
+        return NIXL_ERR_INVALID_PARAM;
+    }
+    const auto *memview = static_cast<const nixlProxyDeviceMemView *>(counter.mvh);
+    return atomic_add<level>(
+        memview->context, value, counter, channel_id, flags, xfer_status);
 }
 
 __device__ __forceinline__ void *

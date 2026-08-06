@@ -32,12 +32,6 @@ enum class nixl_proxy_control_state_t : uint32_t {
     SHUTDOWN = 1,
 };
 
-struct nixlProxyDeviceMemView {
-    uint32_t proxy_memview_id = 0;
-    uint32_t direct_ptr_count = 0;
-    void *direct_ptrs[0];
-};
-
 struct alignas(64) nixlProxySubmission {
     uint64_t op_idx = 0;
     uint64_t value = 0;
@@ -87,6 +81,15 @@ struct nixlProxyDeviceContextData {
     uint32_t max_peers = 0;
     uint32_t num_channels = 0;
     uint64_t *shutdown_word = nullptr;
+};
+
+// Existing per-handle proxy representation. Runtime state is copied inline so
+// device calls do not depend on module-global publication.
+struct nixlProxyDeviceMemView {
+    uint32_t proxy_memview_id = 0;
+    uint32_t direct_ptr_count = 0;
+    nixlProxyDeviceContextData context{};
+    void *direct_ptrs[0];
 };
 
 #endif // NIXL_SRC_CORE_DEVICE_PROXY_PROXY_PROTOCOL_H

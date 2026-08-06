@@ -56,7 +56,8 @@ nixlProxyMemViewRegistry::registerProxyMemView(nixlMemViewH backend_memview,
     }
 
     const nixlProxyDeviceMemView host_memview{entry.proxy_memview_id,
-                                              static_cast<uint32_t>(direct_ptrs.size())};
+                                              static_cast<uint32_t>(direct_ptrs.size()),
+                                              device_context_};
     cudaError_t cuda_status =
         cudaMemcpy(device_memview, &host_memview, sizeof(host_memview), cudaMemcpyHostToDevice);
     if (cuda_status == cudaSuccess && !direct_ptrs.empty()) {
@@ -708,20 +709,9 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
         return NIXL_ERR_BACKEND;
     }
 
-    nixlProxyDeviceContextData device_context{
+    const nixlProxyDeviceContextData device_context{
         device_channel_views_dev_, max_peers, channel_count, shutdown_word_dev_};
-    if (cudaMalloc(reinterpret_cast<void **>(&device_context_),
-                   sizeof(nixlProxyDeviceContextData)) != cudaSuccess ||
-        cudaMemcpy(
-            device_context_, &device_context, sizeof(device_context), cudaMemcpyHostToDevice) !=
-            cudaSuccess) {
-        if (device_context_) {
-            cudaFree(device_context_);
-            device_context_ = nullptr;
-        }
-        shutdown();
-        return NIXL_ERR_BACKEND;
-    }
+    memview_registry_.setDeviceContext(device_context);
 
     workers_.clear();
     workers_.reserve(effective_worker_count);
@@ -744,7 +734,7 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
 
     NIXL_INFO << "ProxyRuntime::init: complete — " << max_peers << " peers, " << channel_count
               << " channels (rings per dest), " << effective_worker_count
-              << " workers, device_context(dev)=" << device_context_;
+              << " workers, context carried by proxy memviews";
     return NIXL_SUCCESS;
 }
 
@@ -920,11 +910,7 @@ nixlProxyRuntime::shutdown() {
 
     workers_.clear();
     memview_registry_.clear();
-
-    if (device_context_) {
-        cudaFree(device_context_);
-        device_context_ = nullptr;
-    }
+    memview_registry_.setDeviceContext({});
     shutdown_word_dev_ = nullptr;
     if (device_channel_views_dev_) {
         cudaFree(device_channel_views_dev_);

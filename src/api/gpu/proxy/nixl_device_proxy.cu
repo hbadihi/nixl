@@ -15,8 +15,8 @@
  * limitations under the License.
  */
 
-// Defines the device-visible proxy context pointer. Device kernels read it
-// through load_proxy_context().
-#include "nixl_device_proxy.cuh"
-
-__device__ __constant__ ProxyDeviceContext *g_nixl_proxy_ctx = nullptr;
+// Compatibility archive anchor. Proxy runtime state is carried by memviews.
+namespace nixl::gpu::proxy_compat {
+void
+archive_anchor() {}
+} // namespace nixl::gpu::proxy_compat
