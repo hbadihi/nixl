@@ -411,14 +411,6 @@ nixlAgentData::shutdownProxyRuntime() {
     proxyTransportEngine = nullptr;
 }
 
-void *
-nixlAgent::getProxyDeviceContext() const {
-    if (data->proxyRuntime) {
-        return data->proxyRuntime->deviceContext();
-    }
-    return nullptr;
-}
-
 nixl_status_t
 nixlAgent::createBackend(const nixl_backend_t &type,
                          const nixl_b_params_t &params,
