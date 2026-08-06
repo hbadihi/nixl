@@ -16,7 +16,7 @@
  */
 
 // Verifies that the proxy backend compiles, links, and that GPU kernels can
-// select the proxy runtime from handle-local memviews.
+// select the proxy implementation from tagged, handle-local memviews.
 //
 // nixl_device.cuh resolves to proxy/nixl_device.cuh via the proxy include
 // path supplied by the build system - no backend macro is needed.
@@ -24,6 +24,8 @@
 #include <gtest/gtest.h>
 #include <cuda_runtime.h>
 #include <nixl_device.cuh>
+
+#include "device_api/device_memview.h"
 
 #include <atomic>
 #include <chrono>
@@ -332,6 +334,10 @@ public:
 struct DummyProxyMemViews {
     nixlMemViewH src = nullptr;
     nixlMemViewH dst = nullptr;
+    nixlMemViewH src_raw = nullptr;
+    nixlMemViewH dst_raw = nullptr;
+    nixlDeviceMemViewAllocation src_wrapper;
+    nixlDeviceMemViewAllocation dst_wrapper;
 };
 
 static DummyProxyMemViews
@@ -638,11 +644,11 @@ registerDummyMemViews(nixlProxyRuntime &runtime, uint32_t peer_count) {
     DummyProxyMemViews handles;
     nixlMemViewH dummy_local_backend = reinterpret_cast<nixlMemViewH>(uintptr_t{0xBEEF});
 
-    EXPECT_EQ(runtime.registerProxyMemView(dummy_local_backend, &handles.src), NIXL_SUCCESS);
+    EXPECT_EQ(runtime.registerProxyMemView(dummy_local_backend, &handles.src_raw), NIXL_SUCCESS);
 
     nixl_meta_dlist_t local_dlist(DRAM_SEG);
     local_dlist.addDesc(nixlMetaDesc(0x1000, 64, 0, &local_md));
-    EXPECT_EQ(runtime.storeMetadata(handles.src, local_dlist), NIXL_SUCCESS);
+    EXPECT_EQ(runtime.storeMetadata(handles.src_raw, local_dlist), NIXL_SUCCESS);
 
     nixl_remote_meta_dlist_t remote_dlist(VRAM_SEG);
     for (uint32_t peer = 0; peer < peer_count; ++peer) {
@@ -653,7 +659,16 @@ registerDummyMemViews(nixlProxyRuntime &runtime, uint32_t peer_count) {
         remote_desc.metadataP = &remote_md;
         remote_dlist.addDesc(remote_desc);
     }
-    EXPECT_EQ(runtime.prepMemView(remote_dlist, &handles.dst), NIXL_SUCCESS);
+    EXPECT_EQ(runtime.prepMemView(remote_dlist, &handles.dst_raw), NIXL_SUCCESS);
+
+    EXPECT_EQ(nixlDeviceMemViewAllocation::create(
+                  nixlDeviceMemViewBackend::PROXY, handles.src_raw, handles.src_wrapper),
+              NIXL_SUCCESS);
+    EXPECT_EQ(nixlDeviceMemViewAllocation::create(
+                  nixlDeviceMemViewBackend::PROXY, handles.dst_raw, handles.dst_wrapper),
+              NIXL_SUCCESS);
+    handles.src = handles.src_wrapper.get();
+    handles.dst = handles.dst_wrapper.get();
 
     return handles;
 }
