@@ -238,7 +238,7 @@ if proxy_gtest_available
         link_with : [nixl_build_lib, nixl_gpu_proxy_lib],
         install : false)
 
-    test('gtest_proxy', proxy_test_exe, args: [plugin_dirs_arg])
+    test('gtest_proxy', proxy_test_exe, args: [plugin_dirs_arg], timeout: 300)
 endif
 
 if get_option('b_sanitize').split(',').contains('thread')
