@@ -85,8 +85,8 @@ public:
     }
 };
 
-// Blocks inside backend shutdown so a test can observe the GPU shutdown word
-// after ProxyRuntime publishes it but before the runtime tears down GPU memory.
+// Blocks backend shutdown after device quiescence, so the test can verify that
+// a ring-full kernel observes the published shutdown state before teardown.
 class BlockingShutdownStubAdapter : public StubProxyBackendAdapter {
 public:
     nixl_status_t
@@ -1087,12 +1087,15 @@ TEST_F(ProxyDeviceApiTest, RingOverflowReturnsBackendErrorOnShutdown) {
     std::atomic<nixl_status_t> shutdown_status{NIXL_IN_PROG};
     std::thread shutdown_thread(
         [&]() { shutdown_status.store(runtime.shutdown(), std::memory_order_release); });
+
+    // shutdown() now quiesces CUDA before it calls backend::shutdown().  Wait
+    // for the ring-full kernel first, then verify that backend teardown is
+    // gated behind that quiescence point.
+    const cudaError_t sync_status = cudaDeviceSynchronize();
+    const cudaError_t kernel_status = cudaGetLastError();
     const bool shutdown_entered =
         waitForCondition([adapter]() { return adapter->shutdownEntered(); });
     EXPECT_TRUE(shutdown_entered);
-
-    const cudaError_t sync_status = cudaDeviceSynchronize();
-    const cudaError_t kernel_status = cudaGetLastError();
     adapter->allowShutdown();
     shutdown_thread.join();
     EXPECT_EQ(sync_status, cudaSuccess);
