@@ -36,6 +36,45 @@
 #include <asio.hpp>
 
 namespace {
+nixl_status_t
+wait_for_ucp_request(ucp_worker_h worker, ucs_status_ptr_t request) {
+    if (!UCS_PTR_IS_PTR(request)) {
+        return nixl::ucx::ucsToNixlStatus(UCS_PTR_STATUS(request));
+    }
+
+    ucs_status_t status;
+    do {
+        ucp_worker_progress(worker);
+        status = ucp_request_check_status(request);
+    } while (status == UCS_INPROGRESS);
+
+    ucp_request_free(request);
+    return nixl::ucx::ucsToNixlStatus(status);
+}
+
+nixl_status_t
+worker_fence(ucp_worker_h worker) {
+    return nixl::ucx::ucsToNixlStatus(ucp_worker_fence(worker));
+}
+
+nixl_status_t
+worker_flush(ucp_worker_h worker) {
+    const ucp_request_param_t param = {
+        .op_attr_mask = 0,
+    };
+
+    return wait_for_ucp_request(worker, ucp_worker_flush_nbx(worker, &param));
+}
+
+nixl_status_t
+ep_flush(ucp_ep_h ep, ucp_worker_h worker) {
+    const ucp_request_param_t param = {
+        .op_attr_mask = 0,
+    };
+
+    return wait_for_ucp_request(worker, ucp_ep_flush_nbx(ep, &param));
+}
+
 [[nodiscard]] uint32_t
 epCloseFlags(const nixl_b_params_t *custom_params) {
     return nixl::getBackendParamDefaulted(custom_params, "ucx_ep_close_force", false) ?
