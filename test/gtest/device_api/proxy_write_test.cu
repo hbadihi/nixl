@@ -607,8 +607,12 @@ proxyAtomicAddAsyncKernel(nixlMemViewH counter_mvh,
 // Enqueues op_count puts on one channel and records each immediate enqueue
 // status. The final submission may block if the ring is full.
 __global__ void
-proxyPutBurstKernel(uint32_t op_count, uint32_t channel_id, nixl_status_t *out_put_statuses) {
-    nixlMemViewElem src{}, dst{};
+proxyPutBurstKernel(nixlMemViewH src_mvh,
+                    nixlMemViewH dst_mvh,
+                    uint32_t op_count,
+                    uint32_t channel_id,
+                    nixl_status_t *out_put_statuses) {
+    nixlMemViewElem src{src_mvh, 0, 0}, dst{dst_mvh, 0, 0};
     for (uint32_t i = 0; i < op_count; ++i) {
         out_put_statuses[i] = nixlPut(src, dst, /*size=*/0, channel_id);
     }
@@ -1060,9 +1064,10 @@ TEST_F(ProxyDeviceApiTest, RingOverflowReturnsBackendErrorOnShutdown) {
     ASSERT_EQ(cudaMalloc(&d_statuses, sizeof(nixl_status_t) * kBurstOps), cudaSuccess);
     ASSERT_EQ(cudaMemset(d_statuses, 0, sizeof(nixl_status_t) * kBurstOps), cudaSuccess);
 
-    proxyPutBurstKernel<<<1, 1>>>(kBurstOps, 0, d_statuses);
+    proxyPutBurstKernel<<<1, 1>>>(mvhs.src, mvhs.dst, kBurstOps, 0, d_statuses);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    ASSERT_EQ(cudaStreamQuery(nullptr), cudaErrorNotReady);
+    // Keep going on failure so the blocking adapter is always released below.
+    EXPECT_EQ(cudaStreamQuery(nullptr), cudaErrorNotReady);
 
     std::atomic<nixl_status_t> shutdown_status{NIXL_IN_PROG};
     std::thread shutdown_thread(
