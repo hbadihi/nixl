@@ -35,6 +35,11 @@
 #include <asio.hpp>
 
 namespace {
+nixl_status_t
+worker_fence(ucp_worker_h worker) {
+    return nixl::ucx::ucsToNixlStatus(ucp_worker_fence(worker));
+}
+
 [[nodiscard]] uint32_t
 epCloseFlags(const nixl_b_params_t *custom_params) {
     return nixl::getBackendParamDefaulted(custom_params, "ucx_ep_close_force", false) ?
@@ -1151,6 +1156,11 @@ nixlUcxEngine::submitProxyAtomicAdd(const nixlMetaDesc &remote,
     auto *rmd = static_cast<nixlUcxPublicMetadata *>(remote.metadataP);
     if (rmd == nullptr || rmd->conn == nullptr) {
         return NIXL_ERR_INVALID_PARAM;
+    }
+
+    const auto status = worker_fence(getSharedWorker(worker_id)->get());
+    if (status != NIXL_SUCCESS) {
+        return status;
     }
 
     auto &ep = rmd->conn->getEp(worker_id);
