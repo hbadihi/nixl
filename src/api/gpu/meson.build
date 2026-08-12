@@ -12,3 +12,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+gpu_device_config = configuration_data()
+gpu_device_config.set('NIXL_HAVE_UCX_GPU_DEVICE_API', ucx_gpu_device_api_available)
+configure_file(
+    input: 'nixl_device_config.h.in',
+    output: 'nixl_device_config.h',
+    configuration: gpu_device_config,
+    install: get_option('install_headers'),
+    install_dir: prefix_inc + '/gpu',
+)
