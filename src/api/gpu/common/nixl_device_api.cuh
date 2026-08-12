@@ -17,6 +17,8 @@
 #ifndef NIXL_SRC_API_GPU_COMMON_NIXL_DEVICE_API_CUH
 #define NIXL_SRC_API_GPU_COMMON_NIXL_DEVICE_API_CUH
 
+#include <cstring>
+
 #include <gpu/nixl_device_config.h>
 
 #include "nixl_device_types.cuh"
@@ -74,9 +76,61 @@ namespace nixl::gpu { namespace selected_impl = ucx_impl; }
 namespace nixl::gpu::api {
 namespace detail {
 
+    constexpr uint32_t XFER_STATUS_MAGIC = 0x4e585346;
+    constexpr uint16_t XFER_STATUS_ABI_VERSION = 1;
+
+    struct XferStatusFooter {
+        uint32_t magic;
+        uint16_t abi_version;
+        uint8_t execution_mode;
+        uint8_t reserved;
+    };
+
+    static_assert(sizeof(XferStatusFooter) == 8);
+    static_assert(NIXL_GPU_XFER_STATUS_PAYLOAD_SIZE + sizeof(XferStatusFooter) ==
+                  sizeof(nixlGpuXferStatusH));
+
     __device__ __forceinline__ const nixlDeviceMemViewWrapper *
     as_device_memview(nixlMemViewH handle) {
         return static_cast<const nixlDeviceMemViewWrapper *>(handle);
+    }
+
+    template<nixl_gpu_level_t level>
+    __device__ __forceinline__ bool
+    execution_leader() {
+        if constexpr (level == nixl_gpu_level_t::THREAD) {
+            return true;
+        } else if constexpr (level == nixl_gpu_level_t::WARP) {
+            return threadIdx.x % warpSize == 0;
+        } else if constexpr (level == nixl_gpu_level_t::BLOCK) {
+            return threadIdx.x == 0;
+        } else if constexpr (level == nixl_gpu_level_t::GRID) {
+            return blockIdx.x == 0 && threadIdx.x == 0;
+        }
+    }
+
+    __device__ __forceinline__ XferStatusFooter
+    load_footer(const nixlGpuXferStatusH &status) {
+        XferStatusFooter footer{};
+        memcpy(&footer, status.storage + NIXL_GPU_XFER_STATUS_PAYLOAD_SIZE, sizeof(footer));
+        return footer;
+    }
+
+    template<nixl_gpu_level_t level>
+    __device__ __forceinline__ void
+    write_footer(nixlGpuXferStatusH *status,
+                 nixl_status_t submission_status,
+                 nixl_device_exec_mode_t execution_mode) {
+        if (status == nullptr || submission_status != NIXL_IN_PROG || !execution_leader<level>()) {
+            return;
+        }
+        const XferStatusFooter footer{
+            XFER_STATUS_MAGIC,
+            XFER_STATUS_ABI_VERSION,
+            static_cast<uint8_t>(execution_mode),
+            0,
+        };
+        memcpy(status->storage + NIXL_GPU_XFER_STATUS_PAYLOAD_SIZE, &footer, sizeof(footer));
     }
 
 } // namespace detail
