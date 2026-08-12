@@ -26,6 +26,11 @@ struct nixlGpuXferStatusH {
     alignas(16) unsigned char storage[64] = {};
 };
 
+constexpr size_t NIXL_GPU_XFER_STATUS_PAYLOAD_SIZE = 60;
+
+static_assert(NIXL_GPU_XFER_STATUS_PAYLOAD_SIZE < sizeof(nixlGpuXferStatusH));
+static_assert(sizeof(nixlGpuXferStatusH) - NIXL_GPU_XFER_STATUS_PAYLOAD_SIZE == 4);
+
 enum class nixl_gpu_level_t : uint64_t {
     THREAD = 0,
     WARP = 1,
@@ -41,6 +46,16 @@ struct nixlMemViewElem {
     nixlMemViewH mvh;
     size_t index;  /**< Index in the memory view */
     size_t offset; /**< Offset within the buffer */
+};
+
+enum class nixl_device_exec_mode_t : uint8_t {
+    UCX_DIRECT = 1,
+    PROXY = 2,
+};
+
+struct nixlDeviceMemViewWrapper {
+    nixl_device_exec_mode_t execution_mode;
+    nixlMemViewH backend_memview;
 };
 
 #endif // NIXL_SRC_API_GPU_COMMON_NIXL_DEVICE_TYPES_CUH
