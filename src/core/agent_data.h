@@ -36,6 +36,14 @@ class nixlProxyRuntime;
 
 using backend_list_t = std::vector<nixlBackendEngine*>;
 
+struct nixlDeviceProxyModeSelection {
+    bool enabled;
+    bool from_environment;
+};
+
+[[nodiscard]] nixlDeviceProxyModeSelection
+nixlResolveDeviceProxyMode(bool configured);
+
 enum class ProxyOrchestrationPhase : uint8_t {
     Disabled = 0,
     Registered,
@@ -53,6 +61,7 @@ class nixlAgentData final : public nixlMetadataContext {
     private:
         const std::string name_;
         const nixlAgentConfig config_;
+        const nixlDeviceProxyModeSelection proxyMode_;
         // Agent-owned metadata manager; always built (single metadata path).
         // It owns the pluggable backends, which own their own transport state
         // (sockets/listener for P2P, client for ETCD) and their own threads.
@@ -120,6 +129,8 @@ class nixlAgentData final : public nixlMetadataContext {
         proxyModeEnabled() const;
         [[nodiscard]] bool
         hasProxyRuntime() const;
+        [[nodiscard]] const char *
+        proxyModeSource() const;
         nixl_status_t
         createProxyRuntime(nixlBackendEngine *engine,
                            const nixl_backend_t &backend,
