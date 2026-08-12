@@ -15,7 +15,7 @@
 
 device_buffer_lib = library('nixl_device_buffer',
            ['device_buffer.cpp', 'device_buffer.h'],
-           include_directories: [nixl_inc_dirs, utils_inc_dirs, nixl_gpu_device_api_inc_dirs],
+           include_directories: [nixl_inc_dirs, utils_inc_dirs],
            dependencies: [cuda_dep, nixl_common_dep],
            install: true)
 
