@@ -30,6 +30,14 @@ namespace nixl::gpu { namespace selected_impl = ucx_impl; }
 #endif
 
 namespace nixl::gpu::api {
+namespace detail {
+
+    __device__ __forceinline__ const nixlDeviceMemViewWrapper *
+    as_device_memview(nixlMemViewH handle) {
+        return static_cast<const nixlDeviceMemViewWrapper *>(handle);
+    }
+
+} // namespace detail
 
 template<nixl_gpu_level_t level = nixl_gpu_level_t::THREAD>
 __device__ inline nixl_status_t
