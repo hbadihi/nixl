@@ -65,30 +65,8 @@ get_ptr(nixlMemViewH, size_t) {
 } // namespace nixl::gpu::ucx_impl
 #endif
 
-#if defined(NIXL_GPU_DEVICE_BACKEND_PROXY)
-namespace nixl::gpu { namespace selected_impl = proxy_impl; }
-#elif defined(NIXL_GPU_DEVICE_BACKEND_UCX)
-namespace nixl::gpu { namespace selected_impl = ucx_impl; }
-#else
-#error "No GPU device backend implementation selected"
-#endif
-
 namespace nixl::gpu::api {
 namespace detail {
-
-    constexpr uint32_t XFER_STATUS_MAGIC = 0x4e585346;
-    constexpr uint16_t XFER_STATUS_ABI_VERSION = 1;
-
-    struct XferStatusFooter {
-        uint32_t magic;
-        uint16_t abi_version;
-        uint8_t execution_mode;
-        uint8_t reserved;
-    };
-
-    static_assert(sizeof(XferStatusFooter) == 8);
-    static_assert(NIXL_GPU_XFER_STATUS_PAYLOAD_SIZE + sizeof(XferStatusFooter) ==
-                  sizeof(nixlGpuXferStatusH));
 
     __device__ __forceinline__ const nixlDeviceMemViewWrapper *
     as_device_memview(nixlMemViewH handle) {
@@ -109,28 +87,25 @@ namespace detail {
         }
     }
 
-    __device__ __forceinline__ XferStatusFooter
-    load_footer(const nixlGpuXferStatusH &status) {
-        XferStatusFooter footer{};
-        memcpy(&footer, status.storage + NIXL_GPU_XFER_STATUS_PAYLOAD_SIZE, sizeof(footer));
-        return footer;
+    __device__ __forceinline__ nixl_device_exec_mode_t
+    load_execution_mode(const nixlGpuXferStatusH &status) {
+        uint32_t execution_mode = 0;
+        memcpy(&execution_mode,
+               status.storage + NIXL_GPU_XFER_STATUS_PAYLOAD_SIZE,
+               sizeof(execution_mode));
+        return static_cast<nixl_device_exec_mode_t>(execution_mode);
     }
 
     template<nixl_gpu_level_t level>
     __device__ __forceinline__ void
-    write_footer(nixlGpuXferStatusH *status,
-                 nixl_status_t submission_status,
-                 nixl_device_exec_mode_t execution_mode) {
+    write_execution_mode(nixlGpuXferStatusH *status,
+                         nixl_status_t submission_status,
+                         nixl_device_exec_mode_t execution_mode) {
         if (status == nullptr || submission_status != NIXL_IN_PROG || !execution_leader<level>()) {
             return;
         }
-        const XferStatusFooter footer{
-            XFER_STATUS_MAGIC,
-            XFER_STATUS_ABI_VERSION,
-            static_cast<uint8_t>(execution_mode),
-            0,
-        };
-        memcpy(status->storage + NIXL_GPU_XFER_STATUS_PAYLOAD_SIZE, &footer, sizeof(footer));
+        const uint32_t mode = static_cast<uint32_t>(execution_mode);
+        memcpy(status->storage + NIXL_GPU_XFER_STATUS_PAYLOAD_SIZE, &mode, sizeof(mode));
     }
 
 } // namespace detail
@@ -138,7 +113,14 @@ namespace detail {
 template<nixl_gpu_level_t level = nixl_gpu_level_t::THREAD>
 __device__ inline nixl_status_t
 get_xfer_status(nixlGpuXferStatusH &xfer_status) {
-    return selected_impl::get_xfer_status<level>(xfer_status);
+    switch (detail::load_execution_mode(xfer_status)) {
+    case nixl_device_exec_mode_t::UCX_DIRECT:
+        return ucx_impl::get_xfer_status<level>(xfer_status);
+    case nixl_device_exec_mode_t::PROXY:
+        return proxy_impl::get_xfer_status<level>(xfer_status);
+    default:
+        return NIXL_ERR_INVALID_PARAM;
+    }
 }
 
 template<nixl_gpu_level_t level = nixl_gpu_level_t::THREAD>
@@ -153,18 +135,19 @@ put(const nixlMemViewElem &src,
     const auto *dst_view = detail::as_device_memview(dst.mvh);
     const nixlMemViewElem backend_src{src_view->backend_memview, src.index, src.offset};
     const nixlMemViewElem backend_dst{dst_view->backend_memview, dst.index, dst.offset};
+
+    nixl_status_t status;
     if (dst_view->execution_mode == nixl_device_exec_mode_t::UCX_DIRECT) {
-        return ucx_impl::put<level>(backend_src, backend_dst, size, channel_id, flags, xfer_status);
+        status =
+            ucx_impl::put<level>(backend_src, backend_dst, size, channel_id, flags, xfer_status);
     } else if (dst_view->execution_mode == nixl_device_exec_mode_t::PROXY) {
-        if constexpr (level == nixl_gpu_level_t::GRID) {
-            return NIXL_ERR_NOT_SUPPORTED;
-        } else {
-            return proxy_impl::put<level>(
-                backend_src, backend_dst, size, channel_id, flags, xfer_status);
-        }
+        status =
+            proxy_impl::put<level>(backend_src, backend_dst, size, channel_id, flags, xfer_status);
     } else {
-        return NIXL_ERR_INVALID_PARAM;
+        status = NIXL_ERR_INVALID_PARAM;
     }
+    detail::write_execution_mode<level>(xfer_status, status, dst_view->execution_mode);
+    return status;
 }
 
 template<nixl_gpu_level_t level = nixl_gpu_level_t::THREAD>
@@ -176,18 +159,19 @@ atomic_add(uint64_t value,
            nixlGpuXferStatusH *xfer_status = nullptr) {
     const auto *view = detail::as_device_memview(counter.mvh);
     const nixlMemViewElem backend_counter{view->backend_memview, counter.index, counter.offset};
+
+    nixl_status_t status;
     if (view->execution_mode == nixl_device_exec_mode_t::UCX_DIRECT) {
-        return ucx_impl::atomic_add<level>(value, backend_counter, channel_id, flags, xfer_status);
+        status =
+            ucx_impl::atomic_add<level>(value, backend_counter, channel_id, flags, xfer_status);
     } else if (view->execution_mode == nixl_device_exec_mode_t::PROXY) {
-        if constexpr (level == nixl_gpu_level_t::GRID) {
-            return NIXL_ERR_NOT_SUPPORTED;
-        } else {
-            return proxy_impl::atomic_add<level>(
-                value, backend_counter, channel_id, flags, xfer_status);
-        }
+        status =
+            proxy_impl::atomic_add<level>(value, backend_counter, channel_id, flags, xfer_status);
     } else {
-        return NIXL_ERR_INVALID_PARAM;
+        status = NIXL_ERR_INVALID_PARAM;
     }
+    detail::write_execution_mode<level>(xfer_status, status, view->execution_mode);
+    return status;
 }
 
 __device__ inline void *
