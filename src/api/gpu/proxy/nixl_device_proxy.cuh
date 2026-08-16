@@ -17,6 +17,7 @@
 #ifndef NIXL_SRC_API_GPU_PROXY_NIXL_DEVICE_PROXY_CUH
 #define NIXL_SRC_API_GPU_PROXY_NIXL_DEVICE_PROXY_CUH
 
+#include <cooperative_groups.h>
 #include <cuda/atomic>
 
 #include "../common/nixl_device_types.cuh"
@@ -46,28 +47,28 @@ static_assert(sizeof(nixlProxyCompletionSlot::completed_idx) == 8,
               "completed_idx must be 64-bit to match producer_idx");
 
 template<nixl_gpu_level_t level>
-__device__ inline void nixlProxyExecInit(uint32_t &lane_id) {
-    static_assert(level != nixl_gpu_level_t::GRID,
-                  "Proxy GPU backend does not support GRID-level operations");
-
+__device__ inline void
+nixlProxyExecInit(uint32_t &lane_id) {
     if constexpr (level == nixl_gpu_level_t::THREAD) {
         lane_id = 0;
     } else if constexpr (level == nixl_gpu_level_t::WARP) {
         lane_id = threadIdx.x % warpSize;
     } else if constexpr (level == nixl_gpu_level_t::BLOCK) {
         lane_id = threadIdx.x;
+    } else if constexpr (level == nixl_gpu_level_t::GRID) {
+        lane_id = threadIdx.x + blockIdx.x * blockDim.x;
     }
 }
 
 template<nixl_gpu_level_t level>
-__device__ inline void nixlProxySync() {
-    static_assert(level != nixl_gpu_level_t::GRID,
-                  "Proxy GPU backend does not support GRID-level operations");
-
+__device__ inline void
+nixlProxySync() {
     if constexpr (level == nixl_gpu_level_t::WARP) {
         __syncwarp();
     } else if constexpr (level == nixl_gpu_level_t::BLOCK) {
         __syncthreads();
+    } else if constexpr (level == nixl_gpu_level_t::GRID) {
+        cooperative_groups::this_grid().sync();
     }
 }
 
