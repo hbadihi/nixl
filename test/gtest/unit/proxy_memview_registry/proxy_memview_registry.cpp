@@ -40,6 +40,11 @@ namespace proxy_memview_registry {
         DummyBackendMD local_md_;
         DummyBackendMD remote_md_;
 
+        struct MemViewPair {
+            nixlMemViewH src = nullptr;
+            nixlMemViewH dst = nullptr;
+        };
+
         nixlMemViewH
         makeFakeBackendHandle(uint64_t id) {
             return reinterpret_cast<nixlMemViewH>(id);
@@ -84,9 +89,9 @@ namespace proxy_memview_registry {
         }
 
         nixl_meta_dlist_t
-        makeLocalMetadata(uintptr_t base_addr, uint64_t dev_id = 0) {
+        makeLocalMetadata(uintptr_t base_addr, uint64_t dev_id = 0, uint64_t len = 64) {
             nixl_meta_dlist_t dlist(DRAM_SEG);
-            dlist.addDesc(nixlMetaDesc(base_addr, 64, dev_id, &local_md_));
+            dlist.addDesc(nixlMetaDesc(base_addr, len, dev_id, &local_md_));
             return dlist;
         }
 
@@ -94,17 +99,126 @@ namespace proxy_memview_registry {
         makeRemoteMetadata(uintptr_t base_addr,
                            const std::string &remote_agent = "peer",
                            uint64_t dev_id = 0,
-                           nixl_mem_t mem_type = VRAM_SEG) {
+                           nixl_mem_t mem_type = VRAM_SEG,
+                           uint64_t len = 64) {
             nixl_remote_meta_dlist_t dlist(mem_type);
             nixlRemoteMetaDesc desc(remote_agent);
             desc.addr = base_addr;
-            desc.len = 64;
+            desc.len = len;
             desc.devId = dev_id;
             desc.metadataP = &remote_md_;
             dlist.addDesc(desc);
             return dlist;
         }
+
+        void
+        registerPair(MemViewPair *pair) {
+            ASSERT_NE(pair, nullptr);
+            ASSERT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(10), &pair->src),
+                      NIXL_SUCCESS);
+            ASSERT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(20), &pair->dst),
+                      NIXL_SUCCESS);
+        }
+
+        void
+        registerRemote(nixlMemViewH *dst_proxy) {
+            ASSERT_NE(dst_proxy, nullptr);
+            ASSERT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(20), dst_proxy),
+                      NIXL_SUCCESS);
+        }
+
+        void
+        storePair(const MemViewPair &pair,
+                  uintptr_t src_addr = 0x1000,
+                  uintptr_t dst_addr = 0x2000,
+                  const std::string &remote_agent = "peer",
+                  uint64_t src_dev_id = 0,
+                  uint64_t dst_dev_id = 0,
+                  uint64_t src_len = 64,
+                  uint64_t dst_len = 64) {
+            ASSERT_EQ(registry_.storeMetadata(pair.src,
+                                              makeLocalMetadata(src_addr, src_dev_id, src_len)),
+                      NIXL_SUCCESS);
+            ASSERT_EQ(registry_.storeMetadata(
+                          pair.dst,
+                          makeRemoteMetadata(dst_addr, remote_agent, dst_dev_id, VRAM_SEG, dst_len)),
+                      NIXL_SUCCESS);
+        }
+
+        MemViewPair
+        makeStoredPair(uintptr_t src_addr = 0x1000,
+                       uintptr_t dst_addr = 0x2000,
+                       const std::string &remote_agent = "peer",
+                       uint64_t src_dev_id = 0,
+                       uint64_t dst_dev_id = 0,
+                       uint64_t src_len = 64,
+                       uint64_t dst_len = 64) {
+            MemViewPair pair;
+            registerPair(&pair);
+            storePair(
+                pair, src_addr, dst_addr, remote_agent, src_dev_id, dst_dev_id, src_len, dst_len);
+            return pair;
+        }
+
+        static nixlProxySubmission
+        makePutSubmission(const MemViewPair &pair,
+                          uint64_t src_offset = 0,
+                          uint64_t dst_offset = 0,
+                          uint64_t size = 16) {
+            nixlProxySubmission submission{};
+            submission.opcode = nixl_proxy_opcode_t::PUT;
+            submission.src_proxy_memview_id = proxyMemViewId(pair.src);
+            submission.src_offset = src_offset;
+            submission.dst_proxy_memview_id = proxyMemViewId(pair.dst);
+            submission.dst_offset = dst_offset;
+            submission.size = size;
+            return submission;
+        }
+
+        static nixlProxySubmission
+        makeAtomicAddSubmission(nixlMemViewH dst_proxy, uint64_t dst_offset = 0) {
+            nixlProxySubmission submission{};
+            submission.opcode = nixl_proxy_opcode_t::ATOMIC_ADD;
+            submission.dst_proxy_memview_id = proxyMemViewId(dst_proxy);
+            submission.dst_offset = dst_offset;
+            return submission;
+        }
     };
+
+    struct InvalidRemoteAgentConfig {
+        const char *name;
+        std::string agent;
+    };
+
+    class ProxyMemViewRegistryInvalidRemoteAgentTest
+        : public ProxyMemViewRegistryTest,
+          public testing::WithParamInterface<InvalidRemoteAgentConfig> {};
+
+    struct PutRangeConfig {
+        const char *name;
+        uint64_t src_offset;
+        uint64_t dst_offset;
+        uint64_t size;
+        nixl_status_t expected_status;
+        bool preserves_output;
+    };
+
+    class ProxyMemViewRegistryPutRangeTest
+        : public ProxyMemViewRegistryTest,
+          public testing::WithParamInterface<PutRangeConfig> {};
+
+    struct LargePutConfig {
+        const char *name;
+        uint64_t metadata_len;
+        uint64_t src_offset;
+        uint64_t dst_offset;
+        uint64_t size;
+        bool check_offsets;
+    };
+
+    class ProxyMemViewRegistryLargePutTest
+        : public ProxyMemViewRegistryTest,
+          public testing::WithParamInterface<LargePutConfig> {};
 
     TEST_F(ProxyMemViewRegistryTest, RegisterSingle) {
         nixlMemViewH proxy_handle = nullptr;
@@ -133,7 +247,7 @@ namespace proxy_memview_registry {
         EXPECT_NE(h1, h3);
     }
 
-    TEST_F(ProxyMemViewRegistryTest, ResolveByHandle) {
+    TEST_F(ProxyMemViewRegistryTest, ResolveByHandleBeforeMetadataPublish) {
         auto backend = makeFakeBackendHandle(42);
         nixlMemViewH proxy_handle = nullptr;
         ASSERT_EQ(registry_.registerProxyMemView(backend, &proxy_handle), NIXL_SUCCESS);
@@ -173,16 +287,6 @@ namespace proxy_memview_registry {
         EXPECT_EQ(offsetof(nixlProxySubmission, op_idx), 0u);
     }
 
-    TEST_F(ProxyMemViewRegistryTest, AllocatedEntryIsResolvableBeforeMetadataPublish) {
-        nixlMemViewH proxy_handle = nullptr;
-        ASSERT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(42), &proxy_handle),
-                  NIXL_SUCCESS);
-
-        nixlMemViewH resolved = nullptr;
-        EXPECT_TRUE(registry_.resolveProxyMemView(proxy_handle, resolved));
-        EXPECT_EQ(resolved, makeFakeBackendHandle(42));
-    }
-
     TEST_F(ProxyMemViewRegistryTest, PrepareSubmissionRequiresReadyEntries) {
         nixlMemViewH src_proxy = nullptr;
         nixlMemViewH dst_proxy = nullptr;
@@ -202,25 +306,10 @@ namespace proxy_memview_registry {
     }
 
     TEST_F(ProxyMemViewRegistryTest, ReadyEntriesProducePreparedTransportDescriptors) {
-        nixlMemViewH src_proxy = nullptr;
-        nixlMemViewH dst_proxy = nullptr;
-        ASSERT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(10), &src_proxy),
-                  NIXL_SUCCESS);
-        ASSERT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(20), &dst_proxy),
-                  NIXL_SUCCESS);
-        ASSERT_EQ(registry_.storeMetadata(src_proxy, makeLocalMetadata(0x1000)), NIXL_SUCCESS);
-        ASSERT_EQ(registry_.storeMetadata(dst_proxy, makeRemoteMetadata(0x2000, "remote-agent")),
-                  NIXL_SUCCESS);
-
-        nixlProxySubmission submission{};
-        submission.opcode = nixl_proxy_opcode_t::PUT;
+        const MemViewPair pair = makeStoredPair(0x1000, 0x2000, "remote-agent");
+        auto submission = makePutSubmission(pair, 5, 9);
         submission.op_idx = 7;
         submission.channel_id = 3;
-        submission.src_proxy_memview_id = proxyMemViewId(src_proxy);
-        submission.src_offset = 5;
-        submission.dst_proxy_memview_id = proxyMemViewId(dst_proxy);
-        submission.dst_offset = 9;
-        submission.size = 16;
 
         nixlBackendProxySubmission prepared_submission;
         ASSERT_EQ(registry_.prepareSubmission(submission, prepared_submission), NIXL_SUCCESS);
@@ -237,78 +326,40 @@ namespace proxy_memview_registry {
         EXPECT_EQ(prepared_submission.remote_agent, "remote-agent");
     }
 
-    TEST_F(ProxyMemViewRegistryTest, PrepareSubmissionAccepts64BitOffsets) {
-        nixlMemViewH src_proxy = nullptr;
-        nixlMemViewH dst_proxy = nullptr;
-        ASSERT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(10), &src_proxy),
-                  NIXL_SUCCESS);
-        ASSERT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(20), &dst_proxy),
-                  NIXL_SUCCESS);
-
-        constexpr uint64_t kLargeOffset = (uint64_t{1} << 32) + 16;
-        nixl_meta_dlist_t local_dlist(DRAM_SEG);
-        local_dlist.addDesc(nixlMetaDesc(0x1000, kLargeOffset + 64, 0, &local_md_));
-        nixl_remote_meta_dlist_t remote_dlist(VRAM_SEG);
-        nixlRemoteMetaDesc remote_desc("peer");
-        remote_desc.addr = 0x2000;
-        remote_desc.len = kLargeOffset + 64;
-        remote_desc.devId = 0;
-        remote_desc.metadataP = &remote_md_;
-        remote_dlist.addDesc(remote_desc);
-
-        ASSERT_EQ(registry_.storeMetadata(src_proxy, local_dlist), NIXL_SUCCESS);
-        ASSERT_EQ(registry_.storeMetadata(dst_proxy, remote_dlist), NIXL_SUCCESS);
-
-        nixlProxySubmission submission{};
-        submission.opcode = nixl_proxy_opcode_t::PUT;
-        submission.src_proxy_memview_id = proxyMemViewId(src_proxy);
-        submission.src_offset = kLargeOffset;
-        submission.dst_proxy_memview_id = proxyMemViewId(dst_proxy);
-        submission.dst_offset = kLargeOffset;
-        submission.size = 32;
+    TEST_P(ProxyMemViewRegistryLargePutTest, PrepareSubmissionAcceptsLargeValues) {
+        const auto &config = GetParam();
+        const MemViewPair pair =
+            makeStoredPair(0x1000, 0x2000, "peer", 0, 0, config.metadata_len, config.metadata_len);
+        const auto submission =
+            makePutSubmission(pair, config.src_offset, config.dst_offset, config.size);
 
         nixlBackendProxySubmission prepared_submission;
         ASSERT_EQ(registry_.prepareSubmission(submission, prepared_submission), NIXL_SUCCESS);
-        EXPECT_EQ(prepared_submission.local.desc.addr, uintptr_t{0x1000} + kLargeOffset);
-        EXPECT_EQ(prepared_submission.remote.desc.addr, uintptr_t{0x2000} + kLargeOffset);
-        EXPECT_EQ(prepared_submission.local.desc.len, 32u);
-        EXPECT_EQ(prepared_submission.remote.desc.len, 32u);
+        EXPECT_EQ(prepared_submission.size, config.size);
+        EXPECT_EQ(prepared_submission.local.desc.len, config.size);
+        EXPECT_EQ(prepared_submission.remote.desc.len, config.size);
+        if (config.check_offsets) {
+            EXPECT_EQ(prepared_submission.local.desc.addr, uintptr_t{0x1000} + config.src_offset);
+            EXPECT_EQ(prepared_submission.remote.desc.addr, uintptr_t{0x2000} + config.dst_offset);
+        }
     }
 
-    TEST_F(ProxyMemViewRegistryTest, PrepareSubmissionAccepts64BitSize) {
-        nixlMemViewH src_proxy = nullptr;
-        nixlMemViewH dst_proxy = nullptr;
-        ASSERT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(10), &src_proxy),
-                  NIXL_SUCCESS);
-        ASSERT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(20), &dst_proxy),
-                  NIXL_SUCCESS);
-
-        constexpr uint64_t kLargeSize = (uint64_t{1} << 32) + 64;
-        nixl_meta_dlist_t local_dlist(DRAM_SEG);
-        local_dlist.addDesc(nixlMetaDesc(0x1000, kLargeSize, 0, &local_md_));
-        nixl_remote_meta_dlist_t remote_dlist(VRAM_SEG);
-        nixlRemoteMetaDesc remote_desc("peer");
-        remote_desc.addr = 0x2000;
-        remote_desc.len = kLargeSize;
-        remote_desc.devId = 0;
-        remote_desc.metadataP = &remote_md_;
-        remote_dlist.addDesc(remote_desc);
-
-        ASSERT_EQ(registry_.storeMetadata(src_proxy, local_dlist), NIXL_SUCCESS);
-        ASSERT_EQ(registry_.storeMetadata(dst_proxy, remote_dlist), NIXL_SUCCESS);
-
-        nixlProxySubmission submission{};
-        submission.opcode = nixl_proxy_opcode_t::PUT;
-        submission.src_proxy_memview_id = proxyMemViewId(src_proxy);
-        submission.dst_proxy_memview_id = proxyMemViewId(dst_proxy);
-        submission.size = kLargeSize;
-
-        nixlBackendProxySubmission prepared_submission;
-        ASSERT_EQ(registry_.prepareSubmission(submission, prepared_submission), NIXL_SUCCESS);
-        EXPECT_EQ(prepared_submission.size, kLargeSize);
-        EXPECT_EQ(prepared_submission.local.desc.len, kLargeSize);
-        EXPECT_EQ(prepared_submission.remote.desc.len, kLargeSize);
-    }
+    INSTANTIATE_TEST_SUITE_P(
+        LargeValues,
+        ProxyMemViewRegistryLargePutTest,
+        testing::Values(LargePutConfig{"PrepareSubmissionAccepts64BitOffsets",
+                                       (uint64_t{1} << 32) + 80,
+                                       (uint64_t{1} << 32) + 16,
+                                       (uint64_t{1} << 32) + 16,
+                                       32,
+                                       true},
+                        LargePutConfig{"PrepareSubmissionAccepts64BitSize",
+                                       (uint64_t{1} << 32) + 64,
+                                       0,
+                                       0,
+                                       (uint64_t{1} << 32) + 64,
+                                       false}),
+        [](const testing::TestParamInfo<LargePutConfig> &info) { return info.param.name; });
 
     TEST_F(ProxyMemViewRegistryTest, StoreRemoteMetadataRejectsNonVram) {
         nixlMemViewH dst_proxy = nullptr;
@@ -373,99 +424,35 @@ namespace proxy_memview_registry {
         EXPECT_EQ(copyDirectPointers(dst_proxy, direct_ptrs.size()), direct_ptrs);
     }
 
-    TEST_F(ProxyMemViewRegistryTest, PrepareSubmissionAllowsRangesEndingAtDescriptorBoundary) {
-        nixlMemViewH src_proxy = nullptr;
-        nixlMemViewH dst_proxy = nullptr;
-        ASSERT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(10), &src_proxy),
-                  NIXL_SUCCESS);
-        ASSERT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(20), &dst_proxy),
-                  NIXL_SUCCESS);
-        ASSERT_EQ(registry_.storeMetadata(src_proxy, makeLocalMetadata(0x1000)), NIXL_SUCCESS);
-        ASSERT_EQ(registry_.storeMetadata(dst_proxy, makeRemoteMetadata(0x2000)), NIXL_SUCCESS);
-
-        nixlProxySubmission submission{};
-        submission.opcode = nixl_proxy_opcode_t::PUT;
-        submission.src_proxy_memview_id = proxyMemViewId(src_proxy);
-        submission.src_offset = 48;
-        submission.dst_proxy_memview_id = proxyMemViewId(dst_proxy);
-        submission.dst_offset = 48;
-        submission.size = 16;
-
-        nixlBackendProxySubmission prepared_submission;
-        ASSERT_EQ(registry_.prepareSubmission(submission, prepared_submission), NIXL_SUCCESS);
-        EXPECT_EQ(prepared_submission.local.desc.addr, 0x1030u);
-        EXPECT_EQ(prepared_submission.local.desc.len, 16u);
-        EXPECT_EQ(prepared_submission.remote.desc.addr, 0x2030u);
-        EXPECT_EQ(prepared_submission.remote.desc.len, 16u);
-    }
-
-    TEST_F(ProxyMemViewRegistryTest, PrepareSubmissionRejectsSourceRangeOutsideDescriptor) {
-        nixlMemViewH src_proxy = nullptr;
-        nixlMemViewH dst_proxy = nullptr;
-        ASSERT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(10), &src_proxy),
-                  NIXL_SUCCESS);
-        ASSERT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(20), &dst_proxy),
-                  NIXL_SUCCESS);
-        ASSERT_EQ(registry_.storeMetadata(src_proxy, makeLocalMetadata(0x1000)), NIXL_SUCCESS);
-        ASSERT_EQ(registry_.storeMetadata(dst_proxy, makeRemoteMetadata(0x2000)), NIXL_SUCCESS);
-
-        nixlProxySubmission submission{};
-        submission.opcode = nixl_proxy_opcode_t::PUT;
-        submission.src_proxy_memview_id = proxyMemViewId(src_proxy);
-        submission.src_offset = 60;
-        submission.dst_proxy_memview_id = proxyMemViewId(dst_proxy);
-        submission.size = 8;
+    TEST_P(ProxyMemViewRegistryPutRangeTest, PrepareSubmissionValidatesPutRanges) {
+        const MemViewPair pair = makeStoredPair();
+        const auto &config = GetParam();
+        const auto submission =
+            makePutSubmission(pair, config.src_offset, config.dst_offset, config.size);
 
         nixlBackendProxySubmission prepared_submission;
         prepared_submission.op_idx = 123;
-        EXPECT_EQ(registry_.prepareSubmission(submission, prepared_submission),
-                  NIXL_ERR_INVALID_PARAM);
-        EXPECT_EQ(prepared_submission.op_idx, 123u);
+        ASSERT_EQ(registry_.prepareSubmission(submission, prepared_submission), config.expected_status);
+        if (config.expected_status == NIXL_SUCCESS) {
+            EXPECT_EQ(prepared_submission.local.desc.addr, 0x1000u + config.src_offset);
+            EXPECT_EQ(prepared_submission.local.desc.len, config.size);
+            EXPECT_EQ(prepared_submission.remote.desc.addr, 0x2000u + config.dst_offset);
+            EXPECT_EQ(prepared_submission.remote.desc.len, config.size);
+        } else if (config.preserves_output) {
+            EXPECT_EQ(prepared_submission.op_idx, 123u);
+        }
     }
 
-    TEST_F(ProxyMemViewRegistryTest, PrepareSubmissionRejectsDestinationRangeOutsideDescriptor) {
-        nixlMemViewH src_proxy = nullptr;
-        nixlMemViewH dst_proxy = nullptr;
-        ASSERT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(10), &src_proxy),
-                  NIXL_SUCCESS);
-        ASSERT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(20), &dst_proxy),
-                  NIXL_SUCCESS);
-        ASSERT_EQ(registry_.storeMetadata(src_proxy, makeLocalMetadata(0x1000)), NIXL_SUCCESS);
-        ASSERT_EQ(registry_.storeMetadata(dst_proxy, makeRemoteMetadata(0x2000)), NIXL_SUCCESS);
-
-        nixlProxySubmission submission{};
-        submission.opcode = nixl_proxy_opcode_t::PUT;
-        submission.src_proxy_memview_id = proxyMemViewId(src_proxy);
-        submission.dst_proxy_memview_id = proxyMemViewId(dst_proxy);
-        submission.dst_offset = 60;
-        submission.size = 8;
-
-        nixlBackendProxySubmission prepared_submission;
-        EXPECT_EQ(registry_.prepareSubmission(submission, prepared_submission),
-                  NIXL_ERR_INVALID_PARAM);
-    }
-
-    TEST_F(ProxyMemViewRegistryTest, PrepareSubmissionRejectsOverflowingRange) {
-        nixlMemViewH src_proxy = nullptr;
-        nixlMemViewH dst_proxy = nullptr;
-        ASSERT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(10), &src_proxy),
-                  NIXL_SUCCESS);
-        ASSERT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(20), &dst_proxy),
-                  NIXL_SUCCESS);
-        ASSERT_EQ(registry_.storeMetadata(src_proxy, makeLocalMetadata(0x1000)), NIXL_SUCCESS);
-        ASSERT_EQ(registry_.storeMetadata(dst_proxy, makeRemoteMetadata(0x2000)), NIXL_SUCCESS);
-
-        nixlProxySubmission submission{};
-        submission.opcode = nixl_proxy_opcode_t::PUT;
-        submission.src_proxy_memview_id = proxyMemViewId(src_proxy);
-        submission.dst_proxy_memview_id = proxyMemViewId(dst_proxy);
-        submission.dst_offset = std::numeric_limits<uint32_t>::max();
-        submission.size = 1;
-
-        nixlBackendProxySubmission prepared_submission;
-        EXPECT_EQ(registry_.prepareSubmission(submission, prepared_submission),
-                  NIXL_ERR_INVALID_PARAM);
-    }
+    INSTANTIATE_TEST_SUITE_P(
+        RangeCases,
+        ProxyMemViewRegistryPutRangeTest,
+        testing::Values(PutRangeConfig{"AtDescriptorBoundary", 48, 48, 16, NIXL_SUCCESS, false},
+                        PutRangeConfig{"SourceOutsideDescriptor", 60, 0, 8, NIXL_ERR_INVALID_PARAM, true},
+                        PutRangeConfig{"DestinationOutsideDescriptor", 0, 60, 8, NIXL_ERR_INVALID_PARAM, false},
+                        PutRangeConfig{"Overflow", 0,
+                                       std::numeric_limits<uint32_t>::max(), 1,
+                                       NIXL_ERR_INVALID_PARAM, false}),
+        [](const testing::TestParamInfo<PutRangeConfig> &info) { return info.param.name; });
 
     TEST_F(ProxyMemViewRegistryTest, PrepareSubmissionRejectsUnsupportedOpcode) {
         nixlMemViewH dst_proxy = nullptr;
@@ -485,21 +472,8 @@ namespace proxy_memview_registry {
     }
 
     TEST_F(ProxyMemViewRegistryTest, PreparedDescriptorsPreserveDeviceIds) {
-        nixlMemViewH src_proxy = nullptr;
-        nixlMemViewH dst_proxy = nullptr;
-        ASSERT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(10), &src_proxy),
-                  NIXL_SUCCESS);
-        ASSERT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(20), &dst_proxy),
-                  NIXL_SUCCESS);
-        ASSERT_EQ(registry_.storeMetadata(src_proxy, makeLocalMetadata(0x1000, 7)), NIXL_SUCCESS);
-        ASSERT_EQ(registry_.storeMetadata(dst_proxy, makeRemoteMetadata(0x2000, "peer", 11)),
-                  NIXL_SUCCESS);
-
-        nixlProxySubmission submission{};
-        submission.opcode = nixl_proxy_opcode_t::PUT;
-        submission.src_proxy_memview_id = proxyMemViewId(src_proxy);
-        submission.dst_proxy_memview_id = proxyMemViewId(dst_proxy);
-        submission.size = 8;
+        const MemViewPair pair = makeStoredPair(0x1000, 0x2000, "peer", 7, 11);
+        const auto submission = makePutSubmission(pair, 0, 0, 8);
 
         nixlBackendProxySubmission prepared_submission;
         ASSERT_EQ(registry_.prepareSubmission(submission, prepared_submission), NIXL_SUCCESS);
@@ -509,14 +483,9 @@ namespace proxy_memview_registry {
 
     TEST_F(ProxyMemViewRegistryTest, AtomicAddUsesCounterSizeForDestinationBounds) {
         nixlMemViewH dst_proxy = nullptr;
-        ASSERT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(20), &dst_proxy),
-                  NIXL_SUCCESS);
+        registerRemote(&dst_proxy);
         ASSERT_EQ(registry_.storeMetadata(dst_proxy, makeRemoteMetadata(0x2000)), NIXL_SUCCESS);
-
-        nixlProxySubmission submission{};
-        submission.opcode = nixl_proxy_opcode_t::ATOMIC_ADD;
-        submission.dst_proxy_memview_id = proxyMemViewId(dst_proxy);
-        submission.dst_offset = 56;
+        auto submission = makeAtomicAddSubmission(dst_proxy, 56);
 
         nixlBackendProxySubmission prepared_submission;
         ASSERT_EQ(registry_.prepareSubmission(submission, prepared_submission), NIXL_SUCCESS);
@@ -531,17 +500,12 @@ namespace proxy_memview_registry {
 
     TEST_F(ProxyMemViewRegistryTest, ReadyRemoteEntryProducesAtomicPreparedDescriptor) {
         nixlMemViewH dst_proxy = nullptr;
-        ASSERT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(20), &dst_proxy),
-                  NIXL_SUCCESS);
+        registerRemote(&dst_proxy);
         ASSERT_EQ(registry_.storeMetadata(dst_proxy, makeRemoteMetadata(0x2000, "remote-agent")),
                   NIXL_SUCCESS);
-
-        nixlProxySubmission submission{};
-        submission.opcode = nixl_proxy_opcode_t::ATOMIC_ADD;
+        auto submission = makeAtomicAddSubmission(dst_proxy, 9);
         submission.op_idx = 7;
         submission.channel_id = 3;
-        submission.dst_proxy_memview_id = proxyMemViewId(dst_proxy);
-        submission.dst_offset = 9;
         submission.size = sizeof(uint64_t);
         submission.value = 42;
 
@@ -558,36 +522,26 @@ namespace proxy_memview_registry {
         EXPECT_EQ(prepared_submission.value, 42u);
     }
 
-    TEST_F(ProxyMemViewRegistryTest, PrepareSubmissionRejectsEmptyRemoteAgent) {
+    TEST_P(ProxyMemViewRegistryInvalidRemoteAgentTest, PrepareSubmissionRejectsInvalidRemoteAgent) {
         nixlMemViewH dst_proxy = nullptr;
-        ASSERT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(20), &dst_proxy),
+        registerRemote(&dst_proxy);
+        ASSERT_EQ(registry_.storeMetadata(dst_proxy, makeRemoteMetadata(0x2000, GetParam().agent)),
                   NIXL_SUCCESS);
-        ASSERT_EQ(registry_.storeMetadata(dst_proxy, makeRemoteMetadata(0x2000, "")), NIXL_SUCCESS);
-
-        nixlProxySubmission submission{};
-        submission.opcode = nixl_proxy_opcode_t::ATOMIC_ADD;
-        submission.dst_proxy_memview_id = proxyMemViewId(dst_proxy);
+        const auto submission = makeAtomicAddSubmission(dst_proxy);
 
         nixlBackendProxySubmission prepared_submission;
         EXPECT_EQ(registry_.prepareSubmission(submission, prepared_submission),
                   NIXL_ERR_INVALID_PARAM);
     }
 
-    TEST_F(ProxyMemViewRegistryTest, PrepareSubmissionRejectsNullRemoteAgent) {
-        nixlMemViewH dst_proxy = nullptr;
-        ASSERT_EQ(registry_.registerProxyMemView(makeFakeBackendHandle(20), &dst_proxy),
-                  NIXL_SUCCESS);
-        ASSERT_EQ(registry_.storeMetadata(dst_proxy, makeRemoteMetadata(0x2000, nixl_null_agent)),
-                  NIXL_SUCCESS);
-
-        nixlProxySubmission submission{};
-        submission.opcode = nixl_proxy_opcode_t::ATOMIC_ADD;
-        submission.dst_proxy_memview_id = proxyMemViewId(dst_proxy);
-
-        nixlBackendProxySubmission prepared_submission;
-        EXPECT_EQ(registry_.prepareSubmission(submission, prepared_submission),
-                  NIXL_ERR_INVALID_PARAM);
-    }
+    INSTANTIATE_TEST_SUITE_P(
+        InvalidAgents,
+        ProxyMemViewRegistryInvalidRemoteAgentTest,
+        testing::Values(InvalidRemoteAgentConfig{"Empty", ""},
+                        InvalidRemoteAgentConfig{"Null", nixl_null_agent}),
+        [](const testing::TestParamInfo<InvalidRemoteAgentConfig> &info) {
+            return info.param.name;
+        });
 
     TEST_F(ProxyMemViewRegistryTest, MetadataKindMustMatchSubmissionRole) {
         nixlMemViewH src_proxy = nullptr;
