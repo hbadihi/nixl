@@ -35,24 +35,24 @@ namespace agent {
     static constexpr const char *remote_agent_name = "RemoteAgent";
     static constexpr const char *nonexisting_plugin = "NonExistingPlugin";
 
-    class ScopedProxyEnv {
+    class ScopedDeviceModeEnv {
     public:
-        explicit ScopedProxyEnv(const char *value) {
-            if (const char *current = std::getenv("NIXL_DEVICE_PROXY")) {
+        explicit ScopedDeviceModeEnv(const char *value) {
+            if (const char *current = std::getenv("NIXL_DEVICE_MODE")) {
                 previous_ = current;
             }
             if (value == nullptr) {
-                ::unsetenv("NIXL_DEVICE_PROXY");
+                ::unsetenv("NIXL_DEVICE_MODE");
             } else {
-                ::setenv("NIXL_DEVICE_PROXY", value, 1);
+                ::setenv("NIXL_DEVICE_MODE", value, 1);
             }
         }
 
-        ~ScopedProxyEnv() {
+        ~ScopedDeviceModeEnv() {
             if (previous_) {
-                ::setenv("NIXL_DEVICE_PROXY", previous_->c_str(), 1);
+                ::setenv("NIXL_DEVICE_MODE", previous_->c_str(), 1);
             } else {
-                ::unsetenv("NIXL_DEVICE_PROXY");
+                ::unsetenv("NIXL_DEVICE_MODE");
             }
         }
 
@@ -61,7 +61,7 @@ namespace agent {
     };
 
     TEST(DeviceProxyModeSelection, ConfigurationIsDefaultWhenEnvironmentIsAbsent) {
-        ScopedProxyEnv env(nullptr);
+        ScopedDeviceModeEnv env(nullptr);
         const auto disabled = nixlResolveDeviceProxyMode(false);
         EXPECT_FALSE(disabled.enabled);
         EXPECT_FALSE(disabled.from_environment);
@@ -71,16 +71,16 @@ namespace agent {
         EXPECT_FALSE(enabled.from_environment);
     }
 
-    TEST(DeviceProxyModeSelection, EnvironmentOverridesConfigurationWithZeroOrOne) {
+    TEST(DeviceProxyModeSelection, EnvironmentOverridesConfigurationWithDirectOrProxy) {
         {
-            ScopedProxyEnv env("0");
+            ScopedDeviceModeEnv env("direct");
             const auto selection = nixlResolveDeviceProxyMode(true);
             EXPECT_FALSE(selection.enabled);
             EXPECT_TRUE(selection.from_environment);
         }
 
         {
-            ScopedProxyEnv env("1");
+            ScopedDeviceModeEnv env("proxy");
             const auto selection = nixlResolveDeviceProxyMode(false);
             EXPECT_TRUE(selection.enabled);
             EXPECT_TRUE(selection.from_environment);
@@ -88,8 +88,8 @@ namespace agent {
     }
 
     TEST(DeviceProxyModeSelection, EnvironmentRejectsEveryOtherValue) {
-        for (const char *value : {"", "2", "01", "true", " 1", "1 "}) {
-            ScopedProxyEnv env(value);
+        for (const char *value : {"", "0", "1", "true", "DIRECT", "Proxy", " direct", "proxy "}) {
+            ScopedDeviceModeEnv env(value);
             EXPECT_THROW((void)nixlResolveDeviceProxyMode(false), std::invalid_argument)
                 << "value: '" << value << "'";
         }
