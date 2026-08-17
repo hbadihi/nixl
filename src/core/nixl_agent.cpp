@@ -189,18 +189,18 @@ makeAgentTracer(const std::string &name) {
 
 nixlDeviceProxyModeSelection
 nixlResolveDeviceProxyMode(bool configured) {
-    const char *proxy_override = std::getenv("NIXL_DEVICE_PROXY");
-    if (proxy_override == nullptr) {
+    const char *mode_override = std::getenv("NIXL_DEVICE_MODE");
+    if (mode_override == nullptr) {
         return {configured, false};
     }
-    if (std::strcmp(proxy_override, "0") == 0) {
+    if (std::strcmp(mode_override, "direct") == 0) {
         return {false, true};
     }
-    if (std::strcmp(proxy_override, "1") == 0) {
+    if (std::strcmp(mode_override, "proxy") == 0) {
         return {true, true};
     }
-    throw std::invalid_argument("NIXL_DEVICE_PROXY must be exactly 0 or 1; got '" +
-                                std::string(proxy_override) + "'");
+    throw std::invalid_argument("NIXL_DEVICE_MODE must be exactly 'direct' or 'proxy'; got '" +
+                                std::string(mode_override) + "'");
 }
 
 nixlAgentData::nixlAgentData(const std::string &name, const nixlAgentConfig &config)
@@ -376,7 +376,7 @@ nixlAgentData::proxyModeEnabled() const {
 
 const char *
 nixlAgentData::proxyModeSource() const {
-    return proxyMode_.from_environment ? "NIXL_DEVICE_PROXY environment override" :
+    return proxyMode_.from_environment ? "NIXL_DEVICE_MODE environment override" :
                                          "nixlAgentConfig";
 }
 
