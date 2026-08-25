@@ -34,21 +34,15 @@ nixlProxyControlBuffer::allocate(size_t count) {
     const size_t data_size = sizeof(uint64_t) * count;
     nixlDeviceAllocator &allocator = nixlGetDeviceAllocator();
 #ifdef HAVE_GDRCOPY
-    if (allocator.getActiveDevice(device_id_) != NIXL_SUCCESS) {
-        NIXL_ERROR << "Failed to query active device for proxy control buffer";
-        return NIXL_ERR_BACKEND;
-    }
-
     mapping_size_ = (data_size + GPU_PAGE_SIZE - 1) & ~(GPU_PAGE_SIZE - 1);
     const size_t allocation_size = mapping_size_ + GPU_PAGE_SIZE - 1;
-    if (allocator.allocDeviceMem(reinterpret_cast<void **>(&allocation_dev_), allocation_size) !=
-        NIXL_SUCCESS) {
+    if (allocator.allocDeviceMem(allocation_size, allocation_mem_) != NIXL_SUCCESS) {
         NIXL_ERROR << "Failed to allocate HBM proxy control buffer";
         deallocate();
         return NIXL_ERR_BACKEND;
     }
 
-    const uintptr_t allocation_addr = reinterpret_cast<uintptr_t>(allocation_dev_);
+    const uintptr_t allocation_addr = reinterpret_cast<uintptr_t>(allocation_mem_.get());
     const uintptr_t aligned_addr =
         (allocation_addr + GPU_PAGE_SIZE - 1) & ~(static_cast<uintptr_t>(GPU_PAGE_SIZE) - 1);
     slots_dev_ = reinterpret_cast<uint64_t *>(aligned_addr);
@@ -86,15 +80,13 @@ nixlProxyControlBuffer::allocate(size_t count) {
     }
     cpu_write_ptr_ = static_cast<uint64_t *>(cpu_write_ptr);
 #else
-    void *host_ptr = nullptr;
-    void *device_ptr = nullptr;
-    if (allocator.allocMappedHostMem(&host_ptr, &device_ptr, data_size) != NIXL_SUCCESS) {
+    if (allocator.allocMappedHostMem(data_size, control_mem_) != NIXL_SUCCESS) {
         NIXL_ERROR << "Failed to allocate host-mapped proxy control buffer";
         deallocate();
         return NIXL_ERR_BACKEND;
     }
-    cpu_write_ptr_ = static_cast<uint64_t *>(host_ptr);
-    slots_dev_ = static_cast<uint64_t *>(device_ptr);
+    cpu_write_ptr_ = control_mem_.asHost<uint64_t>();
+    slots_dev_ = control_mem_.asDev<uint64_t>();
     std::fill_n(cpu_write_ptr_, count, uint64_t{0});
 #endif
 
@@ -117,21 +109,11 @@ nixlProxyControlBuffer::deallocate() noexcept {
         gdr_close(gdr_);
         gdr_ = nullptr;
     }
-    if (allocation_dev_ != nullptr) {
-        nixlDeviceAllocator &allocator = nixlGetDeviceAllocator();
-        if (allocator.setActiveDevice(device_id_) != NIXL_SUCCESS) {
-            NIXL_WARN << "Failed to restore device " << device_id_
-                      << " before freeing proxy control buffer";
-        }
-        allocator.freeDeviceMem(allocation_dev_);
-        allocation_dev_ = nullptr;
-    }
+    allocation_mem_.reset();
     mapping_size_ = 0;
 #else
-    if (cpu_write_ptr_ != nullptr) {
-        nixlGetDeviceAllocator().freeMappedHostMem(cpu_write_ptr_);
-        cpu_write_ptr_ = nullptr;
-    }
+    control_mem_.reset();
+    cpu_write_ptr_ = nullptr;
 #endif
     slots_dev_ = nullptr;
     count_ = 0;

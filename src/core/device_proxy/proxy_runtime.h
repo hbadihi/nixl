@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "backend_aux.h"
+#include "device/device_allocator.h"
 #include "proxy_protocol.h"
 #include "backend_adapter.h"
 #include "proxy_control_buffer.h"
@@ -54,27 +55,27 @@ struct alignas(64) nixlProxyChannelState {
     /** Host shadow of the authoritative GPU-visible consumer index. */
     uint64_t consumer_idx_shadow_ = 0;
 
-    nixlProxyWorkRing *work_ring_dev_ = nullptr;
-    nixlProxySubmission *records_host_ = nullptr;
+    /** Device-resident ring descriptor. */
+    nixlDeviceMem work_ring_mem_;
+    /** Mapped pinned host records; GPU writes via device alias, worker reads host alias. */
+    nixlMappedHostMem records_mem_;
     /** Device-resident producer index; only the GPU updates it. */
-    uint64_t *producer_idx_dev_ = nullptr;
+    nixlDeviceMem producer_idx_mem_;
     /** Authoritative consumer count; CPU publishes through GDRCopy or mapped host memory. */
     uint64_t *consumer_idx_dev_ = nullptr;
     /** Device-resident cache of consumer_idx_dev_ used by GPU enqueue backpressure. */
-    uint64_t *consumer_idx_cache_dev_ = nullptr;
+    nixlDeviceMem consumer_idx_cache_mem_;
     nixlProxyControlBuffer *control_slots_ = nullptr;
     size_t control_slot_index_ = 0;
     /** Host-side ring depth for the CPU worker; nixlProxyWorkRing itself is device-only. */
     uint32_t         ring_depth_         = 0;
-    /** Mapped pinned host memory; proxy worker writes directly via host alias. */
-    nixlProxyCompletionSlot  *completion_slot_host_ = nullptr;
-    /** Device-mapped alias of completion_slot_host_ for nixlProxyChannelView. */
-    nixlProxyCompletionSlot  *completion_slot_dev_  = nullptr;
+    /** Mapped pinned host completion slot; worker writes host alias, GPU polls device alias. */
+    nixlMappedHostMem completion_slot_mem_;
 
     nixlProxyChannelState() = default;
-    ~nixlProxyChannelState();
-    nixlProxyChannelState(nixlProxyChannelState &&) noexcept;
-    nixlProxyChannelState &operator=(nixlProxyChannelState &&) noexcept;
+    ~nixlProxyChannelState() = default;
+    nixlProxyChannelState(nixlProxyChannelState &&) noexcept = default;
+    nixlProxyChannelState &operator=(nixlProxyChannelState &&) noexcept = default;
     nixlProxyChannelState(const nixlProxyChannelState &) = delete;
     nixlProxyChannelState &operator=(const nixlProxyChannelState &) = delete;
 
@@ -84,9 +85,19 @@ struct alignas(64) nixlProxyChannelState {
     nixl_status_t
     publishConsumerIdx(uint64_t value) noexcept;
 
+    nixlProxySubmission *
+    recordsHost() const noexcept {
+        return records_mem_.asHost<nixlProxySubmission>();
+    }
+
+    nixlProxyCompletionSlot *
+    completionSlotHost() const noexcept {
+        return completion_slot_mem_.asHost<nixlProxyCompletionSlot>();
+    }
+
     bool
     allocated() const {
-        return work_ring_dev_ != nullptr;
+        return static_cast<bool>(work_ring_mem_);
     }
 
     void
@@ -193,6 +204,8 @@ class nixlProxyMemViewRegistry {
         struct RegistryEntry {
             uint32_t proxy_memview_id = 0;
             nixlMemViewH proxy_memview = nullptr;
+            /** Owns the device-resident nixlProxyDeviceMemView behind proxy_memview. */
+            nixlDeviceMem proxy_memview_mem;
             nixlMemViewH backend_memview = nullptr;
             ProxyMemViewRegEntryState state = ProxyMemViewRegEntryState::ENTRY_ALLOCATED;
             ProxyMemViewRegMetadataKind metadata_kind = ProxyMemViewRegMetadataKind::METADATA_KIND_NONE;
@@ -327,7 +340,7 @@ class nixlProxyRuntime {
         }
 
         nixlProxyDeviceContextData *
-        deviceContext() const { return device_context_; }
+        deviceContext() const { return device_context_mem_.as<nixlProxyDeviceContextData>(); }
 
     private:
         void
@@ -336,8 +349,8 @@ class nixlProxyRuntime {
         std::vector<nixlProxyChannelState> channels_;
         nixlProxyControlBuffer control_slots_;
         std::vector<nixlProxyChannelView> device_channel_views_;
-        nixlProxyChannelView *device_channel_views_dev_ = nullptr;
-        nixlProxyDeviceContextData *device_context_ = nullptr;
+        nixlDeviceMem device_channel_views_mem_;
+        nixlDeviceMem device_context_mem_;
         std::vector<std::unique_ptr<ProxyWorker>> workers_;
         nixlProxyMemViewRegistry memview_registry_;
         std::unique_ptr<nixlDeviceProxyBackendAdapter> backend_;

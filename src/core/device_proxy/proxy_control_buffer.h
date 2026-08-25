@@ -25,6 +25,7 @@
 #include <optional>
 #endif
 
+#include "device/device_allocator.h"
 #include "nixl_types.h"
 
 class nixlProxyControlBuffer {
@@ -58,11 +59,14 @@ private:
     uint64_t *cpu_write_ptr_ = nullptr;
     size_t count_ = 0;
 #ifdef HAVE_GDRCOPY
-    uint64_t *allocation_dev_ = nullptr;
+    /** Owns the padded HBM slab; slots_dev_ is the page-aligned view into it. */
+    nixlDeviceMem allocation_mem_;
     size_t mapping_size_ = 0;
-    int device_id_ = 0;
     gdr_t gdr_ = nullptr;
     std::optional<gdr_mh_t> mapping_handle_;
+#else
+    /** Owns the mapped host slab behind cpu_write_ptr_ / slots_dev_. */
+    nixlMappedHostMem control_mem_;
 #endif
 };
 

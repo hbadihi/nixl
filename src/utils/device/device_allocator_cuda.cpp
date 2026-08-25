@@ -25,7 +25,7 @@ namespace {
 class nixlCudaDeviceAllocator final : public nixlDeviceAllocator {
     public:
         nixl_status_t
-        allocDeviceMem(void **ptr, size_t size) noexcept override {
+        doAllocDeviceMem(void **ptr, size_t size) noexcept override {
             if (ptr == nullptr || size == 0) {
                 return NIXL_ERR_INVALID_PARAM;
             }
@@ -38,7 +38,7 @@ class nixlCudaDeviceAllocator final : public nixlDeviceAllocator {
         }
 
         void
-        freeDeviceMem(void *ptr) noexcept override {
+        doFreeDeviceMem(void *ptr) noexcept override {
             if (ptr == nullptr) {
                 return;
             }
@@ -48,7 +48,7 @@ class nixlCudaDeviceAllocator final : public nixlDeviceAllocator {
         }
 
         nixl_status_t
-        allocMappedHostMem(void **host_ptr, void **dev_ptr, size_t size) noexcept override {
+        doAllocMappedHostMem(void **host_ptr, void **dev_ptr, size_t size) noexcept override {
             if (host_ptr == nullptr || dev_ptr == nullptr || size == 0) {
                 return NIXL_ERR_INVALID_PARAM;
             }
@@ -69,7 +69,7 @@ class nixlCudaDeviceAllocator final : public nixlDeviceAllocator {
         }
 
         void
-        freeMappedHostMem(void *host_ptr) noexcept override {
+        doFreeMappedHostMem(void *host_ptr) noexcept override {
             if (host_ptr == nullptr) {
                 return;
             }

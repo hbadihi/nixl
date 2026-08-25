@@ -109,15 +109,15 @@ ProxyWorker::submitReady(nixlProxyChannelState &channel, uint32_t peer) {
     }
 
     const uint32_t slot = static_cast<uint32_t>(submit_idx % channel.ring_depth_);
-    const uint64_t op_idx = __atomic_load_n(&channel.records_host_[slot].op_idx, __ATOMIC_ACQUIRE);
+    const uint64_t op_idx = __atomic_load_n(&channel.recordsHost()[slot].op_idx, __ATOMIC_ACQUIRE);
     if (op_idx == 0) {
         return;
     }
 
-    nixlProxySubmission submission = channel.records_host_[slot];
+    nixlProxySubmission submission = channel.recordsHost()[slot];
     submission.op_idx = op_idx;
 
-    __atomic_store_n(&channel.records_host_[slot].op_idx, 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&channel.recordsHost()[slot].op_idx, 0, __ATOMIC_RELAXED);
     channel.submit_idx_ = submit_idx + 1;
 
     NIXL_DEBUG << "ProxyWorker::submitReady: channel=" << submission.channel_id
@@ -203,10 +203,10 @@ ProxyWorker::publishCompletions(nixlProxyChannelState &channel) {
                    << " token=" << front.backend_request.token
                    << " context=" << front.backend_request.context;
 
-        if (channel.completion_slot_host_->next_status >= 0) {
-            channel.completion_slot_host_->next_status = st;
+        if (channel.completionSlotHost()->next_status >= 0) {
+            channel.completionSlotHost()->next_status = st;
             __atomic_store_n(
-                &channel.completion_slot_host_->completed_idx, front.op_idx, __ATOMIC_RELEASE);
+                &channel.completionSlotHost()->completed_idx, front.op_idx, __ATOMIC_RELEASE);
         }
         if (channel.publishConsumerIdx(consumer_idx + 1) != NIXL_SUCCESS) {
             NIXL_ERROR << "ProxyWorker::publishCompletions: failed to publish CI"

@@ -921,19 +921,19 @@ TEST_F(ProxyRuntimeTest, ConsumerIndexAdvancesOnlyAfterBackendCompletion) {
         static_cast<uint64_t>(nixl_proxy_control_state_t::RUNNING)};
     auto worker = makeDirectWorker(&backend, &registry, &shutdown_state, &channel);
 
-    publishRecord(channel.records_host_, 0, makeAtomicAddSubmission(dst_proxy), 1);
+    publishRecord(channel.recordsHost(), 0, makeAtomicAddSubmission(dst_proxy), 1);
 
     worker->runOnce();
     ASSERT_EQ(backend.submissions_.size(), 1u);
     EXPECT_EQ(deviceConsumerIdx(channel), 0u);
-    EXPECT_EQ(__atomic_load_n(&channel.completion_slot_host_->completed_idx, __ATOMIC_ACQUIRE), 0u);
+    EXPECT_EQ(__atomic_load_n(&channel.completionSlotHost()->completed_idx, __ATOMIC_ACQUIRE), 0u);
 
     backend.setCompletionStatus(1, NIXL_SUCCESS);
     worker->runOnce();
 
     EXPECT_EQ(deviceConsumerIdx(channel), 1u);
-    EXPECT_EQ(__atomic_load_n(&channel.completion_slot_host_->completed_idx, __ATOMIC_ACQUIRE), 1u);
-    EXPECT_EQ(channel.completion_slot_host_->next_status, NIXL_SUCCESS);
+    EXPECT_EQ(__atomic_load_n(&channel.completionSlotHost()->completed_idx, __ATOMIC_ACQUIRE), 1u);
+    EXPECT_EQ(channel.completionSlotHost()->next_status, NIXL_SUCCESS);
 }
 
 TEST_F(ProxyRuntimeTest, InFlightRequestsAreBoundedByRingDepth) {
@@ -955,15 +955,15 @@ TEST_F(ProxyRuntimeTest, InFlightRequestsAreBoundedByRingDepth) {
     auto worker = makeDirectWorker(&backend, &registry, &shutdown_state, &channel);
 
     const auto submission = makeAtomicAddSubmission(dst_proxy);
-    publishRecord(channel.records_host_, 0, submission, 1);
-    publishRecord(channel.records_host_, 1, submission, 2);
+    publishRecord(channel.recordsHost(), 0, submission, 1);
+    publishRecord(channel.recordsHost(), 1, submission, 2);
 
     worker->runOnce();
     worker->runOnce();
     ASSERT_EQ(backend.submissions_.size(), 2u);
     EXPECT_EQ(deviceConsumerIdx(channel), 0u);
 
-    publishRecord(channel.records_host_, 0, submission, 3);
+    publishRecord(channel.recordsHost(), 0, submission, 3);
     worker->runOnce();
     EXPECT_EQ(backend.submissions_.size(), 2u);
 
@@ -996,8 +996,8 @@ TEST_F(ProxyRuntimeTest, CompletionsPublishInSubmissionOrder) {
     auto worker = makeDirectWorker(&backend, &registry, &shutdown_state, &channel);
 
     const auto submission = makeAtomicAddSubmission(dst_proxy);
-    publishRecord(channel.records_host_, 0, submission, 1);
-    publishRecord(channel.records_host_, 1, submission, 2);
+    publishRecord(channel.recordsHost(), 0, submission, 1);
+    publishRecord(channel.recordsHost(), 1, submission, 2);
 
     worker->runOnce();
     worker->runOnce();
@@ -1006,12 +1006,12 @@ TEST_F(ProxyRuntimeTest, CompletionsPublishInSubmissionOrder) {
     backend.setCompletionStatus(2, NIXL_SUCCESS);
     worker->runOnce();
     EXPECT_EQ(deviceConsumerIdx(channel), 0u);
-    EXPECT_EQ(__atomic_load_n(&channel.completion_slot_host_->completed_idx, __ATOMIC_ACQUIRE), 0u);
+    EXPECT_EQ(__atomic_load_n(&channel.completionSlotHost()->completed_idx, __ATOMIC_ACQUIRE), 0u);
 
     backend.setCompletionStatus(1, NIXL_SUCCESS);
     worker->runOnce();
     EXPECT_EQ(deviceConsumerIdx(channel), 2u);
-    EXPECT_EQ(__atomic_load_n(&channel.completion_slot_host_->completed_idx, __ATOMIC_ACQUIRE), 2u);
+    EXPECT_EQ(__atomic_load_n(&channel.completionSlotHost()->completed_idx, __ATOMIC_ACQUIRE), 2u);
 }
 
 TEST_F(ProxyRuntimeTest, PreparationErrorLatchesStatusButLaterWorkIsReclaimed) {
@@ -1032,16 +1032,16 @@ TEST_F(ProxyRuntimeTest, PreparationErrorLatchesStatusButLaterWorkIsReclaimed) {
         static_cast<uint64_t>(nixl_proxy_control_state_t::RUNNING)};
     auto worker = makeDirectWorker(&backend, &registry, &shutdown_state, &channel);
 
-    publishRecord(channel.records_host_, 0, makeInvalidAtomicAddSubmission(), 1);
+    publishRecord(channel.recordsHost(), 0, makeInvalidAtomicAddSubmission(), 1);
     worker->runOnce();
     EXPECT_EQ(deviceConsumerIdx(channel), 1u);
-    EXPECT_EQ(__atomic_load_n(&channel.completion_slot_host_->completed_idx, __ATOMIC_ACQUIRE), 1u);
-    EXPECT_LT(channel.completion_slot_host_->next_status, 0);
+    EXPECT_EQ(__atomic_load_n(&channel.completionSlotHost()->completed_idx, __ATOMIC_ACQUIRE), 1u);
+    EXPECT_LT(channel.completionSlotHost()->next_status, 0);
 
-    publishRecord(channel.records_host_, 1, makeAtomicAddSubmission(dst_proxy), 2);
+    publishRecord(channel.recordsHost(), 1, makeAtomicAddSubmission(dst_proxy), 2);
     worker->runOnce();
     EXPECT_EQ(deviceConsumerIdx(channel), 2u);
-    EXPECT_EQ(__atomic_load_n(&channel.completion_slot_host_->completed_idx, __ATOMIC_ACQUIRE), 1u);
+    EXPECT_EQ(__atomic_load_n(&channel.completionSlotHost()->completed_idx, __ATOMIC_ACQUIRE), 1u);
     ASSERT_EQ(backend.submissions_.size(), 1u);
     EXPECT_EQ(backend.submissions_.front().op_idx, 2u);
 }
@@ -1065,14 +1065,14 @@ TEST_F(ProxyRuntimeTest, SubmitAndCompletionErrorsLatchFirstStatusAndRetireWork)
     auto worker = makeDirectWorker(&backend, &registry, &shutdown_state, &channel);
 
     const auto submission = makeAtomicAddSubmission(dst_proxy);
-    publishRecord(channel.records_host_, 0, submission, 1);
-    publishRecord(channel.records_host_, 1, submission, 2);
-    publishRecord(channel.records_host_, 2, submission, 3);
+    publishRecord(channel.recordsHost(), 0, submission, 1);
+    publishRecord(channel.recordsHost(), 1, submission, 2);
+    publishRecord(channel.recordsHost(), 2, submission, 3);
 
     worker->runOnce();
     EXPECT_EQ(deviceConsumerIdx(channel), 1u);
-    EXPECT_EQ(__atomic_load_n(&channel.completion_slot_host_->completed_idx, __ATOMIC_ACQUIRE), 1u);
-    const nixl_status_t first_error = channel.completion_slot_host_->next_status;
+    EXPECT_EQ(__atomic_load_n(&channel.completionSlotHost()->completed_idx, __ATOMIC_ACQUIRE), 1u);
+    const nixl_status_t first_error = channel.completionSlotHost()->next_status;
     EXPECT_LT(first_error, 0);
 
     worker->runOnce();
@@ -1080,14 +1080,14 @@ TEST_F(ProxyRuntimeTest, SubmitAndCompletionErrorsLatchFirstStatusAndRetireWork)
     backend.setCompletionStatus(1, NIXL_ERR_BACKEND);
     worker->runOnce();
     EXPECT_EQ(deviceConsumerIdx(channel), 2u);
-    EXPECT_EQ(channel.completion_slot_host_->next_status, first_error);
-    EXPECT_EQ(__atomic_load_n(&channel.completion_slot_host_->completed_idx, __ATOMIC_ACQUIRE), 1u);
+    EXPECT_EQ(channel.completionSlotHost()->next_status, first_error);
+    EXPECT_EQ(__atomic_load_n(&channel.completionSlotHost()->completed_idx, __ATOMIC_ACQUIRE), 1u);
 
     backend.setCompletionStatus(2, NIXL_SUCCESS);
     worker->runOnce();
     EXPECT_EQ(deviceConsumerIdx(channel), 3u);
-    EXPECT_EQ(channel.completion_slot_host_->next_status, first_error);
-    EXPECT_EQ(__atomic_load_n(&channel.completion_slot_host_->completed_idx, __ATOMIC_ACQUIRE), 1u);
+    EXPECT_EQ(channel.completionSlotHost()->next_status, first_error);
+    EXPECT_EQ(__atomic_load_n(&channel.completionSlotHost()->completed_idx, __ATOMIC_ACQUIRE), 1u);
 }
 
 TEST_F(ProxyRuntimeTest, ShutdownReleasesAllPendingBackendRequests) {

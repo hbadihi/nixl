@@ -6,7 +6,7 @@
 
 #include <gpu/common/nixl_device_types.cuh>
 
-#include "device/device_buffer.h"
+#include "device/device_allocator.h"
 
 static_assert(sizeof(nixl_device_exec_mode_t) == 1);
 
@@ -22,8 +22,9 @@ nixlDeviceMemViewAllocate(bool use_proxy,
     const nixl_device_exec_mode_t execution_mode =
         use_proxy ? nixl_device_exec_mode_t::PROXY : nixl_device_exec_mode_t::UCX_DIRECT;
 
-    void *device_wrapper = nullptr;
-    auto status = nixlDeviceBufferAllocate(&device_wrapper, sizeof(nixlDeviceMemViewWrapper));
+    nixlDeviceAllocator &allocator = nixlGetDeviceAllocator();
+    nixlDeviceMem wrapper_mem;
+    auto status = allocator.allocDeviceMem(sizeof(nixlDeviceMemViewWrapper), wrapper_mem);
     if (status != NIXL_SUCCESS) {
         return status;
     }
@@ -32,13 +33,14 @@ nixlDeviceMemViewAllocate(bool use_proxy,
         execution_mode,
         backend_memview,
     };
-    status = nixlDeviceBufferCopyHostToDevice(device_wrapper, &host_wrapper, sizeof(host_wrapper));
+    status = allocator.copyHostToDevice(wrapper_mem.get(), &host_wrapper, sizeof(host_wrapper));
     if (status != NIXL_SUCCESS) {
-        nixlDeviceBufferFree(device_wrapper);
         return status;
     }
 
-    wrapper_out = device_wrapper;
+    /* Ownership crosses the public handle boundary; reclaimed in
+     * nixlDeviceMemViewFree. */
+    wrapper_out = wrapper_mem.release();
     return NIXL_SUCCESS;
 }
 
@@ -51,7 +53,7 @@ nixlDeviceMemViewGetBackend(nixlMemViewH wrapper, nixlMemViewH &backend_out) noe
 
     nixlDeviceMemViewWrapper host_wrapper{};
     const auto status =
-        nixlDeviceBufferCopyDeviceToHost(&host_wrapper, wrapper, sizeof(host_wrapper));
+        nixlGetDeviceAllocator().copyDeviceToHost(&host_wrapper, wrapper, sizeof(host_wrapper));
     if (status != NIXL_SUCCESS) {
         return status;
     }
@@ -62,5 +64,5 @@ nixlDeviceMemViewGetBackend(nixlMemViewH wrapper, nixlMemViewH &backend_out) noe
 
 void
 nixlDeviceMemViewFree(nixlMemViewH wrapper) noexcept {
-    nixlDeviceBufferFree(wrapper);
+    nixlGetDeviceAllocator().freeDeviceMem(wrapper);
 }

@@ -51,12 +51,12 @@ nixlProxyMemViewRegistry::registerProxyMemView(nixlMemViewH backend_memview,
     const size_t allocation_size = sizeof(nixlProxyDeviceMemView) + direct_ptr_bytes;
 
     nixlDeviceAllocator &allocator = nixlGetDeviceAllocator();
-    nixlProxyDeviceMemView *device_memview = nullptr;
-    if (allocator.allocDeviceMem(reinterpret_cast<void **>(&device_memview), allocation_size) !=
-        NIXL_SUCCESS) {
+    nixlDeviceMem device_memview_mem;
+    if (allocator.allocDeviceMem(allocation_size, device_memview_mem) != NIXL_SUCCESS) {
         NIXL_ERROR << "nixlProxyMemViewRegistry::register: failed to allocate device memview";
         return NIXL_ERR_BACKEND;
     }
+    auto *device_memview = device_memview_mem.as<nixlProxyDeviceMemView>();
 
     const nixlProxyDeviceMemView host_memview{
         entry.proxy_memview_id, static_cast<uint32_t>(direct_ptrs.size()), device_context_};
@@ -68,15 +68,17 @@ nixlProxyMemViewRegistry::registerProxyMemView(nixlMemViewH backend_memview,
     }
     if (copy_status != NIXL_SUCCESS) {
         NIXL_ERROR << "nixlProxyMemViewRegistry::register: failed to initialize device memview";
-        allocator.freeDeviceMem(device_memview);
         return NIXL_ERR_BACKEND;
     }
 
     entry.proxy_memview = device_memview;
-    entries_.push_back(entry);
-    handle_to_id_.emplace(entry.proxy_memview, entry.proxy_memview_id);
+    entry.proxy_memview_mem = std::move(device_memview_mem);
+    const nixlMemViewH handle = entry.proxy_memview;
+    const uint32_t handle_id = entry.proxy_memview_id;
+    entries_.push_back(std::move(entry));
+    handle_to_id_.emplace(handle, handle_id);
 
-    *proxy_memview = entry.proxy_memview;
+    *proxy_memview = handle;
     ++next_proxy_memview_id_;
     NIXL_DEBUG << "nixlProxyMemViewRegistry::register: backend_mvh=" << backend_memview
                << " -> proxy_id=" << (next_proxy_memview_id_ - 1);
@@ -320,10 +322,8 @@ nixlProxyMemViewRegistry::clear() noexcept {
 
 void
 nixlProxyMemViewRegistry::releaseDeviceMemView(RegistryEntry &entry) noexcept {
-    if (entry.proxy_memview != nullptr) {
-        nixlGetDeviceAllocator().freeDeviceMem(entry.proxy_memview);
-        entry.proxy_memview = nullptr;
-    }
+    entry.proxy_memview_mem.reset();
+    entry.proxy_memview = nullptr;
 }
 
 nixlProxyMemViewRegistry::RegistryEntry *
@@ -483,36 +483,24 @@ nixlProxyChannelState::allocate(uint32_t depth,
     consumer_idx_shadow_ = 0;
 
     nixlDeviceAllocator &allocator = nixlGetDeviceAllocator();
-    void *records_host = nullptr;
-    void *records_dev = nullptr;
-    void *completion_host = nullptr;
-    void *completion_dev = nullptr;
-    const bool alloc_ok =
-        allocator.allocDeviceMem(reinterpret_cast<void **>(&work_ring_dev_),
-                              sizeof(nixlProxyWorkRing)) == NIXL_SUCCESS &&
-        allocator.allocDeviceMem(reinterpret_cast<void **>(&producer_idx_dev_), sizeof(uint64_t)) ==
-            NIXL_SUCCESS &&
-        allocator.allocDeviceMem(reinterpret_cast<void **>(&consumer_idx_cache_dev_),
-                              sizeof(uint64_t)) == NIXL_SUCCESS &&
-        allocator.allocMappedHostMem(
-            &records_host, &records_dev, sizeof(nixlProxySubmission) * depth) == NIXL_SUCCESS &&
-        allocator.allocMappedHostMem(
-            &completion_host, &completion_dev, sizeof(nixlProxyCompletionSlot)) == NIXL_SUCCESS;
-    records_host_ = static_cast<nixlProxySubmission *>(records_host);
-    completion_slot_host_ = static_cast<nixlProxyCompletionSlot *>(completion_host);
-    completion_slot_dev_ = static_cast<nixlProxyCompletionSlot *>(completion_dev);
-    if (!alloc_ok) {
+    if (allocator.allocDeviceMem(sizeof(nixlProxyWorkRing), work_ring_mem_) != NIXL_SUCCESS ||
+        allocator.allocDeviceMem(sizeof(uint64_t), producer_idx_mem_) != NIXL_SUCCESS ||
+        allocator.allocDeviceMem(sizeof(uint64_t), consumer_idx_cache_mem_) != NIXL_SUCCESS ||
+        allocator.allocMappedHostMem(sizeof(nixlProxySubmission) * depth, records_mem_) !=
+            NIXL_SUCCESS ||
+        allocator.allocMappedHostMem(sizeof(nixlProxyCompletionSlot), completion_slot_mem_) !=
+            NIXL_SUCCESS) {
         NIXL_ERROR << "nixlProxyChannelState::allocate: device allocation failed";
         deallocate();
         return NIXL_ERR_BACKEND;
     }
-    auto *records_dev_ptr = static_cast<nixlProxySubmission *>(records_dev);
 
+    nixlProxySubmission *records_host = recordsHost();
     for (uint32_t i = 0; i < depth; ++i) {
-        records_host_[i] = nixlProxySubmission{};
+        records_host[i] = nixlProxySubmission{};
     }
-    if (allocator.memsetDeviceMem(producer_idx_dev_, 0, sizeof(*producer_idx_dev_)) != NIXL_SUCCESS ||
-        allocator.memsetDeviceMem(consumer_idx_cache_dev_, 0, sizeof(*consumer_idx_cache_dev_)) !=
+    if (allocator.memsetDeviceMem(producer_idx_mem_.get(), 0, sizeof(uint64_t)) != NIXL_SUCCESS ||
+        allocator.memsetDeviceMem(consumer_idx_cache_mem_.get(), 0, sizeof(uint64_t)) !=
             NIXL_SUCCESS) {
         deallocate();
         return NIXL_ERR_BACKEND;
@@ -522,31 +510,33 @@ nixlProxyChannelState::allocate(uint32_t depth,
         return NIXL_ERR_BACKEND;
     }
     submit_idx_ = 0;
-    completion_slot_host_->next_status = NIXL_IN_PROG;
-    __atomic_store_n(&completion_slot_host_->completed_idx, uint64_t{0}, __ATOMIC_RELEASE);
+    completionSlotHost()->next_status = NIXL_IN_PROG;
+    __atomic_store_n(&completionSlotHost()->completed_idx, uint64_t{0}, __ATOMIC_RELEASE);
     nixlProxyWorkRing work_ring{
-        records_dev_ptr,
-        producer_idx_dev_,
+        records_mem_.asDev<nixlProxySubmission>(),
+        producer_idx_mem_.as<uint64_t>(),
         consumer_idx_dev_,
-        consumer_idx_cache_dev_,
+        consumer_idx_cache_mem_.as<uint64_t>(),
         depth,
     };
-    if (allocator.copyHostToDevice(work_ring_dev_, &work_ring, sizeof(work_ring)) !=
+    if (allocator.copyHostToDevice(work_ring_mem_.get(), &work_ring, sizeof(work_ring)) !=
         NIXL_SUCCESS) {
         deallocate();
         return NIXL_ERR_BACKEND;
     }
-    device_view = nixlProxyChannelView{work_ring_dev_, completion_slot_dev_};
+    device_view = nixlProxyChannelView{work_ring_mem_.as<nixlProxyWorkRing>(),
+                                       completion_slot_mem_.asDev<nixlProxyCompletionSlot>()};
 
     inflight_slots_.assign(depth, nixlProxyRequestState{});
     NIXL_INFO << "nixlProxyChannelState::allocate: ready"
-              << " work_ring(dev)=" << work_ring_dev_ << " records=" << records_host_
-              << " records(dev)=" << records_dev_ptr << " producer_idx(dev)=" << producer_idx_dev_
+              << " work_ring(dev)=" << work_ring_mem_.get() << " records=" << recordsHost()
+              << " records(dev)=" << records_mem_.devPtr()
+              << " producer_idx(dev)=" << producer_idx_mem_.get()
               << " consumer_idx(shadow)=" << consumer_idx_shadow_
               << " consumer_idx(dev)=" << consumer_idx_dev_
-              << " consumer_idx_cache(dev)=" << consumer_idx_cache_dev_
-              << " completion_slot(host)=" << completion_slot_host_
-              << " completion_slot(dev)=" << completion_slot_dev_;
+              << " consumer_idx_cache(dev)=" << consumer_idx_cache_mem_.get()
+              << " completion_slot(host)=" << completionSlotHost()
+              << " completion_slot(dev)=" << completion_slot_mem_.devPtr();
     return NIXL_SUCCESS;
 }
 
@@ -564,79 +554,19 @@ nixlProxyChannelState::publishConsumerIdx(uint64_t value) noexcept {
 
 void
 nixlProxyChannelState::deallocate() noexcept {
-    nixlDeviceAllocator &allocator = nixlGetDeviceAllocator();
-    if (completion_slot_host_) {
-        allocator.freeMappedHostMem(completion_slot_host_);
-        completion_slot_host_ = nullptr;
-        completion_slot_dev_ = nullptr;
-    }
-    if (producer_idx_dev_) {
-        allocator.freeDeviceMem(producer_idx_dev_);
-        producer_idx_dev_ = nullptr;
-    }
-    if (consumer_idx_cache_dev_) {
-        allocator.freeDeviceMem(consumer_idx_cache_dev_);
-        consumer_idx_cache_dev_ = nullptr;
-    }
+    completion_slot_mem_.reset();
+    records_mem_.reset();
+    producer_idx_mem_.reset();
+    consumer_idx_cache_mem_.reset();
+    work_ring_mem_.reset();
     consumer_idx_dev_ = nullptr;
     control_slots_ = nullptr;
     control_slot_index_ = 0;
     consumer_idx_shadow_ = 0;
-    if (records_host_) {
-        allocator.freeMappedHostMem(records_host_);
-        records_host_ = nullptr;
-    }
-    if (work_ring_dev_) {
-        allocator.freeDeviceMem(work_ring_dev_);
-        work_ring_dev_ = nullptr;
-    }
     inflight_slots_.clear();
     submit_idx_ = 0;
     ring_depth_ = 0;
     device_view = nixlProxyChannelView{};
-}
-
-nixlProxyChannelState::~nixlProxyChannelState() {
-    deallocate();
-}
-
-nixlProxyChannelState::nixlProxyChannelState(nixlProxyChannelState &&other) noexcept {
-    *this = std::move(other);
-}
-
-nixlProxyChannelState &
-nixlProxyChannelState::operator=(nixlProxyChannelState &&other) noexcept {
-    if (this != &other) {
-        deallocate();
-        device_view = other.device_view;
-        inflight_slots_ = std::move(other.inflight_slots_);
-        submit_idx_ = other.submit_idx_;
-        work_ring_dev_ = other.work_ring_dev_;
-        records_host_ = other.records_host_;
-        producer_idx_dev_ = other.producer_idx_dev_;
-        consumer_idx_dev_ = other.consumer_idx_dev_;
-        consumer_idx_cache_dev_ = other.consumer_idx_cache_dev_;
-        control_slots_ = other.control_slots_;
-        control_slot_index_ = other.control_slot_index_;
-        consumer_idx_shadow_ = other.consumer_idx_shadow_;
-        ring_depth_ = other.ring_depth_;
-        completion_slot_host_ = other.completion_slot_host_;
-        completion_slot_dev_ = other.completion_slot_dev_;
-        other.work_ring_dev_ = nullptr;
-        other.records_host_ = nullptr;
-        other.producer_idx_dev_ = nullptr;
-        other.consumer_idx_dev_ = nullptr;
-        other.consumer_idx_cache_dev_ = nullptr;
-        other.control_slots_ = nullptr;
-        other.control_slot_index_ = 0;
-        other.consumer_idx_shadow_ = 0;
-        other.ring_depth_ = 0;
-        other.submit_idx_ = 0;
-        other.completion_slot_host_ = nullptr;
-        other.completion_slot_dev_ = nullptr;
-        other.device_view = nixlProxyChannelView{};
-    }
-    return *this;
 }
 
 nixlProxyRuntime::nixlProxyRuntime() = default;
@@ -701,29 +631,27 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
     }
 
     nixlDeviceAllocator &allocator = nixlGetDeviceAllocator();
-    if (allocator.allocDeviceMem(reinterpret_cast<void **>(&device_channel_views_dev_),
-                              sizeof(nixlProxyChannelView) * channel_slots) != NIXL_SUCCESS ||
-        allocator.copyHostToDevice(device_channel_views_dev_,
+    if (allocator.allocDeviceMem(sizeof(nixlProxyChannelView) * channel_slots,
+                                 device_channel_views_mem_) != NIXL_SUCCESS ||
+        allocator.copyHostToDevice(device_channel_views_mem_.get(),
                                    device_channel_views_.data(),
                                    sizeof(nixlProxyChannelView) * channel_slots) != NIXL_SUCCESS) {
         shutdown();
         return NIXL_ERR_BACKEND;
     }
 
-    nixlProxyDeviceContextData device_context{
-        device_channel_views_dev_, max_peers, channel_count, shutdown_word_dev_};
-    if (allocator.allocDeviceMem(reinterpret_cast<void **>(&device_context_),
-                              sizeof(nixlProxyDeviceContextData)) != NIXL_SUCCESS ||
-        allocator.copyHostToDevice(device_context_, &device_context, sizeof(device_context)) !=
-            NIXL_SUCCESS) {
-        if (device_context_) {
-            allocator.freeDeviceMem(device_context_);
-            device_context_ = nullptr;
-        }
+    nixlProxyDeviceContextData device_context{device_channel_views_mem_.as<nixlProxyChannelView>(),
+                                              max_peers,
+                                              channel_count,
+                                              shutdown_word_dev_};
+    if (allocator.allocDeviceMem(sizeof(nixlProxyDeviceContextData), device_context_mem_) !=
+            NIXL_SUCCESS ||
+        allocator.copyHostToDevice(
+            device_context_mem_.get(), &device_context, sizeof(device_context)) != NIXL_SUCCESS) {
         shutdown();
         return NIXL_ERR_BACKEND;
     }
-    memview_registry_.setDeviceContext(device_context_);
+    memview_registry_.setDeviceContext(deviceContext());
 
     workers_.clear();
     workers_.reserve(effective_worker_count);
@@ -746,7 +674,7 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
 
     NIXL_INFO << "ProxyRuntime::init: complete — " << max_peers << " peers, " << channel_count
               << " channels (rings per dest), " << effective_worker_count
-              << " workers, device_context(dev)=" << device_context_;
+              << " workers, device_context(dev)=" << deviceContext();
     return NIXL_SUCCESS;
 }
 
@@ -924,15 +852,9 @@ nixlProxyRuntime::shutdown() {
     memview_registry_.clear();
     memview_registry_.setDeviceContext(nullptr);
 
-    if (device_context_) {
-        nixlGetDeviceAllocator().freeDeviceMem(device_context_);
-        device_context_ = nullptr;
-    }
+    device_context_mem_.reset();
     shutdown_word_dev_ = nullptr;
-    if (device_channel_views_dev_) {
-        nixlGetDeviceAllocator().freeDeviceMem(device_channel_views_dev_);
-        device_channel_views_dev_ = nullptr;
-    }
+    device_channel_views_mem_.reset();
     device_channel_views_.clear();
 
     channels_.clear();
