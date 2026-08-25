@@ -14,7 +14,8 @@
 # limitations under the License.
 
 device_buffer_lib = library('nixl_device_buffer',
-           ['device_buffer.cpp', 'device_buffer.h'],
+           ['device_buffer.cpp', 'device_buffer.h',
+            'device_allocator_cuda.cpp', 'device_allocator.h'],
            include_directories: [nixl_inc_dirs, utils_inc_dirs],
            dependencies: [cuda_dep, nixl_common_dep],
            install: true)

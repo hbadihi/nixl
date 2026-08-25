@@ -22,7 +22,8 @@
 #include <algorithm>
 #include <cstdint>
 #include <utility>
-#include <cuda_runtime.h>
+
+#include "device/device_allocator.h"
 
 nixlProxyMemViewRegistry::~nixlProxyMemViewRegistry() {
     clear();
@@ -49,25 +50,25 @@ nixlProxyMemViewRegistry::registerProxyMemView(nixlMemViewH backend_memview,
     const size_t direct_ptr_bytes = direct_ptrs.size() * sizeof(void *);
     const size_t allocation_size = sizeof(nixlProxyDeviceMemView) + direct_ptr_bytes;
 
+    nixlDeviceAllocator &allocator = nixlGetDeviceAllocator();
     nixlProxyDeviceMemView *device_memview = nullptr;
-    if (cudaMalloc(reinterpret_cast<void **>(&device_memview), allocation_size) != cudaSuccess) {
+    if (allocator.allocDeviceMem(reinterpret_cast<void **>(&device_memview), allocation_size) !=
+        NIXL_SUCCESS) {
         NIXL_ERROR << "nixlProxyMemViewRegistry::register: failed to allocate device memview";
         return NIXL_ERR_BACKEND;
     }
 
     const nixlProxyDeviceMemView host_memview{
         entry.proxy_memview_id, static_cast<uint32_t>(direct_ptrs.size()), device_context_};
-    cudaError_t cuda_status =
-        cudaMemcpy(device_memview, &host_memview, sizeof(host_memview), cudaMemcpyHostToDevice);
-    if (cuda_status == cudaSuccess && !direct_ptrs.empty()) {
-        cuda_status = cudaMemcpy(device_memview->direct_ptrs,
-                                 direct_ptrs.data(),
-                                 direct_ptr_bytes,
-                                 cudaMemcpyHostToDevice);
+    nixl_status_t copy_status =
+        allocator.copyHostToDevice(device_memview, &host_memview, sizeof(host_memview));
+    if (copy_status == NIXL_SUCCESS && !direct_ptrs.empty()) {
+        copy_status = allocator.copyHostToDevice(
+            device_memview->direct_ptrs, direct_ptrs.data(), direct_ptr_bytes);
     }
-    if (cuda_status != cudaSuccess) {
+    if (copy_status != NIXL_SUCCESS) {
         NIXL_ERROR << "nixlProxyMemViewRegistry::register: failed to initialize device memview";
-        cudaFree(device_memview);
+        allocator.freeDeviceMem(device_memview);
         return NIXL_ERR_BACKEND;
     }
 
@@ -320,7 +321,7 @@ nixlProxyMemViewRegistry::clear() noexcept {
 void
 nixlProxyMemViewRegistry::releaseDeviceMemView(RegistryEntry &entry) noexcept {
     if (entry.proxy_memview != nullptr) {
-        cudaFree(entry.proxy_memview);
+        nixlGetDeviceAllocator().freeDeviceMem(entry.proxy_memview);
         entry.proxy_memview = nullptr;
     }
 }
@@ -481,38 +482,38 @@ nixlProxyChannelState::allocate(uint32_t depth,
     consumer_idx_dev_ = control_slots_->devicePtr(control_slot_index_);
     consumer_idx_shadow_ = 0;
 
-    if (cudaMalloc(reinterpret_cast<void **>(&work_ring_dev_), sizeof(nixlProxyWorkRing)) !=
-            cudaSuccess ||
-        cudaMalloc(reinterpret_cast<void **>(&producer_idx_dev_), sizeof(uint64_t)) !=
-            cudaSuccess ||
-        cudaMalloc(reinterpret_cast<void **>(&consumer_idx_cache_dev_), sizeof(uint64_t)) !=
-            cudaSuccess ||
-        cudaMallocHost(&records_host_, sizeof(nixlProxySubmission) * depth) != cudaSuccess ||
-        cudaMallocHost(&completion_slot_host_, sizeof(nixlProxyCompletionSlot)) != cudaSuccess) {
-        NIXL_ERROR << "nixlProxyChannelState::allocate: CUDA allocation failed";
-        deallocate();
-        return NIXL_ERR_BACKEND;
-    }
-
+    nixlDeviceAllocator &allocator = nixlGetDeviceAllocator();
+    void *records_host = nullptr;
     void *records_dev = nullptr;
-    if (cudaHostGetDevicePointer(&records_dev, records_host_, 0) != cudaSuccess) {
+    void *completion_host = nullptr;
+    void *completion_dev = nullptr;
+    const bool alloc_ok =
+        allocator.allocDeviceMem(reinterpret_cast<void **>(&work_ring_dev_),
+                              sizeof(nixlProxyWorkRing)) == NIXL_SUCCESS &&
+        allocator.allocDeviceMem(reinterpret_cast<void **>(&producer_idx_dev_), sizeof(uint64_t)) ==
+            NIXL_SUCCESS &&
+        allocator.allocDeviceMem(reinterpret_cast<void **>(&consumer_idx_cache_dev_),
+                              sizeof(uint64_t)) == NIXL_SUCCESS &&
+        allocator.allocMappedHostMem(
+            &records_host, &records_dev, sizeof(nixlProxySubmission) * depth) == NIXL_SUCCESS &&
+        allocator.allocMappedHostMem(
+            &completion_host, &completion_dev, sizeof(nixlProxyCompletionSlot)) == NIXL_SUCCESS;
+    records_host_ = static_cast<nixlProxySubmission *>(records_host);
+    completion_slot_host_ = static_cast<nixlProxyCompletionSlot *>(completion_host);
+    completion_slot_dev_ = static_cast<nixlProxyCompletionSlot *>(completion_dev);
+    if (!alloc_ok) {
+        NIXL_ERROR << "nixlProxyChannelState::allocate: device allocation failed";
         deallocate();
         return NIXL_ERR_BACKEND;
     }
     auto *records_dev_ptr = static_cast<nixlProxySubmission *>(records_dev);
 
-    void *completion_dev = nullptr;
-    if (cudaHostGetDevicePointer(&completion_dev, completion_slot_host_, 0) != cudaSuccess) {
-        deallocate();
-        return NIXL_ERR_BACKEND;
-    }
-    completion_slot_dev_ = static_cast<nixlProxyCompletionSlot *>(completion_dev);
-
     for (uint32_t i = 0; i < depth; ++i) {
         records_host_[i] = nixlProxySubmission{};
     }
-    if (cudaMemset(producer_idx_dev_, 0, sizeof(*producer_idx_dev_)) != cudaSuccess ||
-        cudaMemset(consumer_idx_cache_dev_, 0, sizeof(*consumer_idx_cache_dev_)) != cudaSuccess) {
+    if (allocator.memsetDeviceMem(producer_idx_dev_, 0, sizeof(*producer_idx_dev_)) != NIXL_SUCCESS ||
+        allocator.memsetDeviceMem(consumer_idx_cache_dev_, 0, sizeof(*consumer_idx_cache_dev_)) !=
+            NIXL_SUCCESS) {
         deallocate();
         return NIXL_ERR_BACKEND;
     }
@@ -530,8 +531,8 @@ nixlProxyChannelState::allocate(uint32_t depth,
         consumer_idx_cache_dev_,
         depth,
     };
-    if (cudaMemcpy(work_ring_dev_, &work_ring, sizeof(work_ring), cudaMemcpyHostToDevice) !=
-        cudaSuccess) {
+    if (allocator.copyHostToDevice(work_ring_dev_, &work_ring, sizeof(work_ring)) !=
+        NIXL_SUCCESS) {
         deallocate();
         return NIXL_ERR_BACKEND;
     }
@@ -563,17 +564,18 @@ nixlProxyChannelState::publishConsumerIdx(uint64_t value) noexcept {
 
 void
 nixlProxyChannelState::deallocate() noexcept {
+    nixlDeviceAllocator &allocator = nixlGetDeviceAllocator();
     if (completion_slot_host_) {
-        cudaFreeHost(completion_slot_host_);
+        allocator.freeMappedHostMem(completion_slot_host_);
         completion_slot_host_ = nullptr;
         completion_slot_dev_ = nullptr;
     }
     if (producer_idx_dev_) {
-        cudaFree(producer_idx_dev_);
+        allocator.freeDeviceMem(producer_idx_dev_);
         producer_idx_dev_ = nullptr;
     }
     if (consumer_idx_cache_dev_) {
-        cudaFree(consumer_idx_cache_dev_);
+        allocator.freeDeviceMem(consumer_idx_cache_dev_);
         consumer_idx_cache_dev_ = nullptr;
     }
     consumer_idx_dev_ = nullptr;
@@ -581,11 +583,11 @@ nixlProxyChannelState::deallocate() noexcept {
     control_slot_index_ = 0;
     consumer_idx_shadow_ = 0;
     if (records_host_) {
-        cudaFreeHost(records_host_);
+        allocator.freeMappedHostMem(records_host_);
         records_host_ = nullptr;
     }
     if (work_ring_dev_) {
-        cudaFree(work_ring_dev_);
+        allocator.freeDeviceMem(work_ring_dev_);
         work_ring_dev_ = nullptr;
     }
     inflight_slots_.clear();
@@ -698,25 +700,24 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
         }
     }
 
-    if (cudaMalloc(reinterpret_cast<void **>(&device_channel_views_dev_),
-                   sizeof(nixlProxyChannelView) * channel_slots) != cudaSuccess ||
-        cudaMemcpy(device_channel_views_dev_,
-                   device_channel_views_.data(),
-                   sizeof(nixlProxyChannelView) * channel_slots,
-                   cudaMemcpyHostToDevice) != cudaSuccess) {
+    nixlDeviceAllocator &allocator = nixlGetDeviceAllocator();
+    if (allocator.allocDeviceMem(reinterpret_cast<void **>(&device_channel_views_dev_),
+                              sizeof(nixlProxyChannelView) * channel_slots) != NIXL_SUCCESS ||
+        allocator.copyHostToDevice(device_channel_views_dev_,
+                                   device_channel_views_.data(),
+                                   sizeof(nixlProxyChannelView) * channel_slots) != NIXL_SUCCESS) {
         shutdown();
         return NIXL_ERR_BACKEND;
     }
 
     nixlProxyDeviceContextData device_context{
         device_channel_views_dev_, max_peers, channel_count, shutdown_word_dev_};
-    if (cudaMalloc(reinterpret_cast<void **>(&device_context_),
-                   sizeof(nixlProxyDeviceContextData)) != cudaSuccess ||
-        cudaMemcpy(
-            device_context_, &device_context, sizeof(device_context), cudaMemcpyHostToDevice) !=
-            cudaSuccess) {
+    if (allocator.allocDeviceMem(reinterpret_cast<void **>(&device_context_),
+                              sizeof(nixlProxyDeviceContextData)) != NIXL_SUCCESS ||
+        allocator.copyHostToDevice(device_context_, &device_context, sizeof(device_context)) !=
+            NIXL_SUCCESS) {
         if (device_context_) {
-            cudaFree(device_context_);
+            allocator.freeDeviceMem(device_context_);
             device_context_ = nullptr;
         }
         shutdown();
@@ -924,12 +925,12 @@ nixlProxyRuntime::shutdown() {
     memview_registry_.setDeviceContext(nullptr);
 
     if (device_context_) {
-        cudaFree(device_context_);
+        nixlGetDeviceAllocator().freeDeviceMem(device_context_);
         device_context_ = nullptr;
     }
     shutdown_word_dev_ = nullptr;
     if (device_channel_views_dev_) {
-        cudaFree(device_channel_views_dev_);
+        nixlGetDeviceAllocator().freeDeviceMem(device_channel_views_dev_);
         device_channel_views_dev_ = nullptr;
     }
     device_channel_views_.clear();

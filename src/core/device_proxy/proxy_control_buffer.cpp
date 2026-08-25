@@ -17,8 +17,8 @@
 #include "proxy_control_buffer.h"
 
 #include <algorithm>
-#include <cuda_runtime.h>
 
+#include "device/device_allocator.h"
 #include "nixl_log.h"
 
 nixlProxyControlBuffer::~nixlProxyControlBuffer() {
@@ -32,15 +32,17 @@ nixlProxyControlBuffer::allocate(size_t count) {
     }
 
     const size_t data_size = sizeof(uint64_t) * count;
+    nixlDeviceAllocator &allocator = nixlGetDeviceAllocator();
 #ifdef HAVE_GDRCOPY
-    if (cudaGetDevice(&device_id_) != cudaSuccess) {
-        NIXL_ERROR << "Failed to query CUDA device for proxy control buffer";
+    if (allocator.getActiveDevice(device_id_) != NIXL_SUCCESS) {
+        NIXL_ERROR << "Failed to query active device for proxy control buffer";
         return NIXL_ERR_BACKEND;
     }
 
     mapping_size_ = (data_size + GPU_PAGE_SIZE - 1) & ~(GPU_PAGE_SIZE - 1);
     const size_t allocation_size = mapping_size_ + GPU_PAGE_SIZE - 1;
-    if (cudaMalloc(reinterpret_cast<void **>(&allocation_dev_), allocation_size) != cudaSuccess) {
+    if (allocator.allocDeviceMem(reinterpret_cast<void **>(&allocation_dev_), allocation_size) !=
+        NIXL_SUCCESS) {
         NIXL_ERROR << "Failed to allocate HBM proxy control buffer";
         deallocate();
         return NIXL_ERR_BACKEND;
@@ -50,8 +52,8 @@ nixlProxyControlBuffer::allocate(size_t count) {
     const uintptr_t aligned_addr =
         (allocation_addr + GPU_PAGE_SIZE - 1) & ~(static_cast<uintptr_t>(GPU_PAGE_SIZE) - 1);
     slots_dev_ = reinterpret_cast<uint64_t *>(aligned_addr);
-    if (cudaMemset(slots_dev_, 0, data_size) != cudaSuccess ||
-        cudaDeviceSynchronize() != cudaSuccess) {
+    if (allocator.memsetDeviceMem(slots_dev_, 0, data_size) != NIXL_SUCCESS ||
+        allocator.synchronize() != NIXL_SUCCESS) {
         NIXL_ERROR << "Failed to initialize HBM proxy control buffer";
         deallocate();
         return NIXL_ERR_BACKEND;
@@ -84,19 +86,14 @@ nixlProxyControlBuffer::allocate(size_t count) {
     }
     cpu_write_ptr_ = static_cast<uint64_t *>(cpu_write_ptr);
 #else
-    // cudaHostAllocMapped guarantees cudaHostGetDevicePointer works (vs. relying on UVA).
-    if (cudaHostAlloc(reinterpret_cast<void **>(&cpu_write_ptr_), data_size, cudaHostAllocMapped) !=
-        cudaSuccess) {
+    void *host_ptr = nullptr;
+    void *device_ptr = nullptr;
+    if (allocator.allocMappedHostMem(&host_ptr, &device_ptr, data_size) != NIXL_SUCCESS) {
         NIXL_ERROR << "Failed to allocate host-mapped proxy control buffer";
         deallocate();
         return NIXL_ERR_BACKEND;
     }
-    void *device_ptr = nullptr;
-    if (cudaHostGetDevicePointer(&device_ptr, cpu_write_ptr_, 0) != cudaSuccess) {
-        NIXL_ERROR << "Failed to get device pointer for host-mapped proxy control buffer";
-        deallocate();
-        return NIXL_ERR_BACKEND;
-    }
+    cpu_write_ptr_ = static_cast<uint64_t *>(host_ptr);
     slots_dev_ = static_cast<uint64_t *>(device_ptr);
     std::fill_n(cpu_write_ptr_, count, uint64_t{0});
 #endif
@@ -121,14 +118,18 @@ nixlProxyControlBuffer::deallocate() noexcept {
         gdr_ = nullptr;
     }
     if (allocation_dev_ != nullptr) {
-        cudaSetDevice(device_id_);
-        cudaFree(allocation_dev_);
+        nixlDeviceAllocator &allocator = nixlGetDeviceAllocator();
+        if (allocator.setActiveDevice(device_id_) != NIXL_SUCCESS) {
+            NIXL_WARN << "Failed to restore device " << device_id_
+                      << " before freeing proxy control buffer";
+        }
+        allocator.freeDeviceMem(allocation_dev_);
         allocation_dev_ = nullptr;
     }
     mapping_size_ = 0;
 #else
     if (cpu_write_ptr_ != nullptr) {
-        cudaFreeHost(cpu_write_ptr_);
+        nixlGetDeviceAllocator().freeMappedHostMem(cpu_write_ptr_);
         cpu_write_ptr_ = nullptr;
     }
 #endif
