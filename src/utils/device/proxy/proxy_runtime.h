@@ -14,8 +14,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#ifndef NIXL_SRC_CORE_DEVICE_PROXY_PROXY_RUNTIME_H
-#define NIXL_SRC_CORE_DEVICE_PROXY_PROXY_RUNTIME_H
+#ifndef NIXL_SRC_UTILS_DEVICE_PROXY_PROXY_RUNTIME_H
+#define NIXL_SRC_UTILS_DEVICE_PROXY_PROXY_RUNTIME_H
 
 #include <atomic>
 #include <cstddef>
@@ -361,4 +361,4 @@ class nixlProxyRuntime {
         bool workers_started_ = false;
 };
 
-#endif // NIXL_SRC_CORE_DEVICE_PROXY_PROXY_RUNTIME_H
+#endif // NIXL_SRC_UTILS_DEVICE_PROXY_PROXY_RUNTIME_H

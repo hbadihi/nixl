@@ -14,8 +14,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#ifndef NIXL_SRC_CORE_DEVICE_PROXY_PROXY_PROTOCOL_H
-#define NIXL_SRC_CORE_DEVICE_PROXY_PROXY_PROTOCOL_H
+#ifndef NIXL_SRC_UTILS_DEVICE_PROXY_PROXY_PROTOCOL_H
+#define NIXL_SRC_UTILS_DEVICE_PROXY_PROXY_PROTOCOL_H
 
 #include <cstddef>
 #include <cstdint>
@@ -92,4 +92,4 @@ struct nixlProxyDeviceContextData {
     uint64_t *shutdown_word = nullptr;
 };
 
-#endif // NIXL_SRC_CORE_DEVICE_PROXY_PROXY_PROTOCOL_H
+#endif // NIXL_SRC_UTILS_DEVICE_PROXY_PROXY_PROTOCOL_H

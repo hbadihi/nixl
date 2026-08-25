@@ -20,7 +20,7 @@
 #include <cstdint>
 #include <string>
 
-#include "../../../core/device_proxy/backend_adapter.h"
+#include <device/proxy/backend_adapter.h>
 
 class nixlUcxEngine;
 

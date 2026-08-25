@@ -548,7 +548,8 @@ if get_option('buildtype') == 'debug'
 endif
 
 nixl_inc_dirs = include_directories('src/api/cpp', 'src/api/cpp/backend', 'src/infra', 'src/core', 'src/core/telemetry')
-nixl_gpu_device_api_inc_dirs = include_directories('src/api/gpu', 'src/api')
+# src/utils lets GPU Device API consumers resolve <device/proxy/proxy_protocol.h>
+nixl_gpu_device_api_inc_dirs = include_directories('src/api/gpu', 'src/api', 'src/utils')
 plugins_inc_dirs = include_directories('src/plugins')
 utils_inc_dirs = include_directories('src/utils')
 
@@ -590,8 +591,8 @@ if get_option('install_headers')
       'src/api/gpu/proxy/nixl_device_impl.cuh',
       'src/api/gpu/proxy/nixl_device_proxy.cuh',
       install_dir: prefix_inc + '/gpu/proxy')
-    install_headers('src/core/device_proxy/proxy_protocol.h',
-                    install_dir: prefix_inc + '/device_proxy')
+    install_headers('src/utils/device/proxy/proxy_protocol.h',
+                    install_dir: prefix_inc + '/device/proxy')
     if ucx_gpu_device_api_available
       install_headers('src/api/gpu/ucx/nixl_device_impl.cuh',
                       install_dir: prefix_inc + '/gpu/ucx')

@@ -19,12 +19,8 @@ nixl_lib_deps = [nixl_infra, serdes_interface, stream_interface, dl_dep, nixl_co
 nixl_lib_inc_dirs = [ nixl_inc_dirs, utils_inc_dirs, include_directories('tracing') ]
 
 if cuda_dep.found()
-    nixl_lib_deps += [ cuda_dep, device_allocator_interface ]
+    nixl_lib_deps += [ cuda_dep, device_allocator_interface, device_proxy_interface ]
     nixl_lib_inc_dirs += [ nixl_gpu_device_api_inc_dirs ]
-endif
-
-if have_gdrcopy
-    nixl_lib_deps += [ gdrcopy_dep ]
 endif
 
 if etcd_dep.found()
@@ -87,9 +83,6 @@ nixl_lib_sources = [
     'telemetry/buffer_plugin.cpp',
     'telemetry/nop_plugin.cpp',
     'tracing/tracer.cpp',
-    'device_proxy/proxy_control_buffer.cpp',
-    'device_proxy/proxy_runtime.cpp',
-    'device_proxy/proxy_worker.cpp',
 ]
 
 if cuda_dep.found()

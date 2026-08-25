@@ -14,8 +14,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#ifndef NIXL_SRC_CORE_DEVICE_PROXY_BACKEND_ADAPTER_H
-#define NIXL_SRC_CORE_DEVICE_PROXY_BACKEND_ADAPTER_H
+#ifndef NIXL_SRC_UTILS_DEVICE_PROXY_BACKEND_ADAPTER_H
+#define NIXL_SRC_UTILS_DEVICE_PROXY_BACKEND_ADAPTER_H
 
 #include <cstddef>
 #include <cstdint>
@@ -100,4 +100,4 @@ class nixlDeviceProxyBackendAdapter {
         }
 };
 
-#endif // NIXL_SRC_CORE_DEVICE_PROXY_BACKEND_ADAPTER_H
+#endif // NIXL_SRC_UTILS_DEVICE_PROXY_BACKEND_ADAPTER_H

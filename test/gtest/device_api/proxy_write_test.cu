@@ -36,8 +36,8 @@
 #include <vector>
 
 #include "device_api/device_memview.h"
-#include "device_proxy/proxy_runtime.h"
-#include "device_proxy/backend_adapter.h"
+#include "device/proxy/proxy_runtime.h"
+#include "device/proxy/backend_adapter.h"
 #include "common.h"
 
 // ---------------------------------------------------------------------------

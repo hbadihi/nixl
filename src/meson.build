@@ -19,6 +19,9 @@ subdir('utils')
 
 #subdir('arch')
 subdir('infra')
+if cuda_dep.found()
+    subdir('utils/device/proxy')
+endif
 subdir('plugins')
 subdir('core')
 

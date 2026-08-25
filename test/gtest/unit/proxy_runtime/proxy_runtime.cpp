@@ -27,9 +27,9 @@
 #include <unordered_map>
 #include <vector>
 
-#include "device_proxy/backend_adapter.h"
-#include "device_proxy/proxy_runtime.h"
-#include "device_proxy/proxy_worker.h"
+#include "device/proxy/backend_adapter.h"
+#include "device/proxy/proxy_runtime.h"
+#include "device/proxy/proxy_worker.h"
 
 namespace gtest {
 namespace proxy_runtime {

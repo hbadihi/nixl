@@ -24,7 +24,7 @@
 #include <gtest/gtest.h>
 #include <cuda_runtime.h>
 
-#include "device_proxy/proxy_runtime.h"
+#include "device/proxy/proxy_runtime.h"
 
 namespace gtest {
 namespace proxy_memview_registry {

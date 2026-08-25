@@ -22,6 +22,7 @@ subdir('object')
 if cuda_dep.found()
     subdir('device')
 endif
+# device/proxy is entered from src/meson.build after infra (it needs nixl_infra)
 
 if libfabric_dep.found()
     subdir('libfabric')

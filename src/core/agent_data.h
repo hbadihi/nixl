@@ -22,7 +22,7 @@
 #include "nixl_metadata_context.h"
 #include "telemetry.h"
 #include "tracing/trace.h"
-#include "device_proxy/proxy_runtime.h"
+#include "device/proxy/proxy_runtime.h"
 #include "sync.h"
 
 #include <atomic>

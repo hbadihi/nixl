@@ -14,8 +14,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#ifndef NIXL_SRC_CORE_DEVICE_PROXY_PROXY_CONTROL_BUFFER_H
-#define NIXL_SRC_CORE_DEVICE_PROXY_PROXY_CONTROL_BUFFER_H
+#ifndef NIXL_SRC_UTILS_DEVICE_PROXY_PROXY_CONTROL_BUFFER_H
+#define NIXL_SRC_UTILS_DEVICE_PROXY_PROXY_CONTROL_BUFFER_H
 
 #include <cstddef>
 #include <cstdint>
@@ -70,4 +70,4 @@ private:
 #endif
 };
 
-#endif // NIXL_SRC_CORE_DEVICE_PROXY_PROXY_CONTROL_BUFFER_H
+#endif // NIXL_SRC_UTILS_DEVICE_PROXY_PROXY_CONTROL_BUFFER_H
