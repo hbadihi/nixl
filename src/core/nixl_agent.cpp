@@ -2083,29 +2083,24 @@ nixlAgent::prepMemView(const nixl_remote_dlist_t &dlist,
     }
 
     const bool use_proxy = data->hasProxyRuntime() && (data->proxyTransportEngine == engine);
-    nixlMemViewH backend_memview = nullptr;
     nixl_status_t status;
     if (use_proxy) {
+        nixlMemViewH backend_memview = nullptr;
         status = data->proxyRuntime->prepMemView(remote_meta_dlist, &backend_memview);
-    } else {
-        status = engine->prepMemView(remote_meta_dlist, backend_memview, &opt_args);
-    }
-    if (status != NIXL_SUCCESS) {
-        return status;
-    }
-
-    auto cleanup_backend = [&]() {
-        if (use_proxy) {
-            data->proxyRuntime->unregisterProxyMemView(backend_memview);
-        } else {
-            engine->releaseMemView(backend_memview);
+        if (status != NIXL_SUCCESS) {
+            return status;
         }
-    };
-
-    status = nixlDeviceMemViewAllocate(use_proxy, backend_memview, mvh);
-    if (status != NIXL_SUCCESS) {
-        cleanup_backend();
-        return status;
+        status = nixlDeviceMemViewAllocate(true, backend_memview, mvh);
+        if (status != NIXL_SUCCESS) {
+            data->proxyRuntime->unregisterProxyMemView(backend_memview);
+            return status;
+        }
+    } else {
+        // The engine returns an already-wrapped device memview handle.
+        status = engine->prepMemView(remote_meta_dlist, mvh, &opt_args);
+        if (status != NIXL_SUCCESS) {
+            return status;
+        }
     }
 
     data->mvhToEngine.emplace(mvh, *engine);
@@ -2148,29 +2143,24 @@ nixlAgent::prepMemView(const nixl_local_dlist_t &dlist,
     }
 
     const bool use_proxy = data->hasProxyRuntime() && (data->proxyTransportEngine == engine);
-    nixlMemViewH backend_memview = nullptr;
     nixl_status_t status;
     if (use_proxy) {
+        nixlMemViewH backend_memview = nullptr;
         status = data->proxyRuntime->prepMemView(meta_dlist, &backend_memview);
-    } else {
-        status = engine->prepMemView(meta_dlist, backend_memview, &opt_args);
-    }
-    if (status != NIXL_SUCCESS) {
-        return status;
-    }
-
-    auto cleanup_backend = [&]() {
-        if (use_proxy) {
-            data->proxyRuntime->unregisterProxyMemView(backend_memview);
-        } else {
-            engine->releaseMemView(backend_memview);
+        if (status != NIXL_SUCCESS) {
+            return status;
         }
-    };
-
-    status = nixlDeviceMemViewAllocate(use_proxy, backend_memview, mvh);
-    if (status != NIXL_SUCCESS) {
-        cleanup_backend();
-        return status;
+        status = nixlDeviceMemViewAllocate(true, backend_memview, mvh);
+        if (status != NIXL_SUCCESS) {
+            data->proxyRuntime->unregisterProxyMemView(backend_memview);
+            return status;
+        }
+    } else {
+        // The engine returns an already-wrapped device memview handle.
+        status = engine->prepMemView(meta_dlist, mvh, &opt_args);
+        if (status != NIXL_SUCCESS) {
+            return status;
+        }
     }
 
     data->mvhToEngine.emplace(mvh, *engine);
@@ -2190,17 +2180,16 @@ nixlAgent::releaseMemView(nixlMemViewH mvh) const {
     }
 
     nixlBackendEngine &engine = it->second;
-    nixlMemViewH backend_memview = nullptr;
-    const auto backend_status = nixlDeviceMemViewGetBackend(mvh, backend_memview);
-    if (backend_status != NIXL_SUCCESS) {
-        NIXL_ERROR << "Failed to read device memview wrapper for handle " << mvh;
-        nixlDeviceMemViewFree(mvh);
-        data->mvhToEngine.erase(it);
-        return;
-    }
-
     const bool use_proxy = data->hasProxyRuntime() && (data->proxyTransportEngine == &engine);
     if (use_proxy) {
+        nixlMemViewH backend_memview = nullptr;
+        const auto backend_status = nixlDeviceMemViewGetBackend(mvh, backend_memview);
+        if (backend_status != NIXL_SUCCESS) {
+            NIXL_ERROR << "Failed to read device memview wrapper for handle " << mvh;
+            nixlDeviceMemViewFree(mvh);
+            data->mvhToEngine.erase(it);
+            return;
+        }
         nixlMemViewH resolved = nullptr;
         data->proxyRuntime->resolveProxyMemView(backend_memview, resolved);
         const auto status = data->proxyRuntime->unregisterProxyMemView(backend_memview);
@@ -2209,11 +2198,14 @@ nixlAgent::releaseMemView(nixlMemViewH mvh) const {
                        << status;
         }
         if (resolved != nullptr) {
-            engine.releaseMemView(resolved);
+            // Agent-owned proxy views never wrap an engine memview in-tree;
+            // this path retires with the agent-owned runtime.
+            NIXL_WARN << "Leaking backend memview behind agent-owned proxy view " << mvh;
         }
+        nixlDeviceMemViewFree(mvh);
     } else {
-        engine.releaseMemView(backend_memview);
+        // The engine owns unwrapping and release of its handles.
+        engine.releaseMemView(mvh);
     }
-    nixlDeviceMemViewFree(mvh);
     data->mvhToEngine.erase(it);
 }

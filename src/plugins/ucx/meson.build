@@ -37,7 +37,7 @@ ucx_backend_dependencies = [asio_dep,
                             ucx_dep]
 
 if cuda_dep.found()
-    ucx_backend_dependencies += [device_proxy_interface]
+    ucx_backend_dependencies += [device_proxy_interface, device_allocator_interface]
 endif
 
 ucx_backend_include_directories = [nixl_inc_dirs,

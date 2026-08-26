@@ -18,6 +18,7 @@
 #include "ucx_backend.h"
 #include "ucx_sgl.h"
 #include "device_proxy/ucx_proxy_backend.h"
+#include "device/device_memview.h"
 #include "device/proxy/proxy_runtime.h"
 #include "common/nixl_log.h"
 #include "serdes/serdes.h"
@@ -1686,33 +1687,84 @@ nixl_status_t
 nixlUcxEngine::prepMemView(const nixl_remote_meta_dlist_t &dlist,
                            nixlMemViewH &mvh,
                            const nixl_opt_b_args_t *opt_args) const {
-    const size_t worker_id = getSharedWorkerId(opt_args);
-    try {
-        mvh = nixl::ucx::createMemList(dlist, *getSharedWorker(worker_id));
-        return NIXL_SUCCESS;
+    nixlMemViewH backend_mvh = nullptr;
+    if (proxyRuntime_) {
+        const nixl_status_t status = proxyRuntime_->prepMemView(dlist, &backend_mvh);
+        if (status != NIXL_SUCCESS) {
+            return status;
+        }
+    } else {
+        const size_t worker_id = getSharedWorkerId(opt_args);
+        try {
+            backend_mvh = nixl::ucx::createMemList(dlist, *getSharedWorker(worker_id));
+        }
+        catch (const std::exception &e) {
+            NIXL_ERROR << "Failed to prepare remote memory view: " << e.what();
+            return NIXL_ERR_BACKEND;
+        }
     }
-    catch (const std::exception &e) {
-        NIXL_ERROR << "Failed to prepare remote memory view: " << e.what();
-        return NIXL_ERR_BACKEND;
-    }
+    return wrapMemView(backend_mvh, mvh);
 }
 
 nixl_status_t
 nixlUcxEngine::prepMemView(const nixl_meta_dlist_t &dlist,
                            nixlMemViewH &mvh,
                            const nixl_opt_b_args_t *opt_args) const {
-    const size_t worker_id = getSharedWorkerId(opt_args);
-    try {
-        mvh = nixl::ucx::createMemList(dlist, *getSharedWorker(worker_id));
-        return NIXL_SUCCESS;
+    nixlMemViewH backend_mvh = nullptr;
+    if (proxyRuntime_) {
+        const nixl_status_t status = proxyRuntime_->prepMemView(dlist, &backend_mvh);
+        if (status != NIXL_SUCCESS) {
+            return status;
+        }
+    } else {
+        const size_t worker_id = getSharedWorkerId(opt_args);
+        try {
+            backend_mvh = nixl::ucx::createMemList(dlist, *getSharedWorker(worker_id));
+        }
+        catch (const std::exception &e) {
+            NIXL_ERROR << "Failed to prepare local memory view: " << e.what();
+            return NIXL_ERR_BACKEND;
+        }
     }
-    catch (const std::exception &e) {
-        NIXL_ERROR << "Failed to prepare local memory view: " << e.what();
-        return NIXL_ERR_BACKEND;
+    return wrapMemView(backend_mvh, mvh);
+}
+
+nixl_status_t
+nixlUcxEngine::wrapMemView(nixlMemViewH backend_mvh, nixlMemViewH &mvh) const {
+    const nixl_status_t status =
+        nixlDeviceMemViewAllocate(proxyRuntime_ != nullptr, backend_mvh, mvh);
+    if (status != NIXL_SUCCESS) {
+        if (proxyRuntime_) {
+            proxyRuntime_->unregisterProxyMemView(backend_mvh);
+        } else {
+            nixl::ucx::releaseMemList(backend_mvh);
+        }
     }
+    return status;
 }
 
 void
 nixlUcxEngine::releaseMemView(nixlMemViewH mem_view) const {
-    nixl::ucx::releaseMemList(mem_view);
+    nixlMemViewH backend_mvh = nullptr;
+    if (nixlDeviceMemViewGetBackend(mem_view, backend_mvh) != NIXL_SUCCESS) {
+        NIXL_ERROR << "Failed to read device memview wrapper for handle " << mem_view;
+        nixlDeviceMemViewFree(mem_view);
+        return;
+    }
+
+    if (proxyRuntime_) {
+        nixlMemViewH resolved = nullptr;
+        proxyRuntime_->resolveProxyMemView(backend_mvh, resolved);
+        const nixl_status_t status = proxyRuntime_->unregisterProxyMemView(backend_mvh);
+        if (status != NIXL_SUCCESS) {
+            NIXL_ERROR << "Failed to release proxy memory view " << mem_view << " with status "
+                       << status;
+        }
+        if (resolved != nullptr) {
+            nixl::ucx::releaseMemList(resolved);
+        }
+    } else {
+        nixl::ucx::releaseMemList(backend_mvh);
+    }
+    nixlDeviceMemViewFree(mem_view);
 }

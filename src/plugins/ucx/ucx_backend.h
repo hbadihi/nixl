@@ -344,6 +344,10 @@ private:
     nixl_status_t
     setupProxyRuntime(const nixlProxyConfig &config);
 
+    /** Wrap a backend memview into the device-dispatch handle; cleans up on failure. */
+    nixl_status_t
+    wrapMemView(nixlMemViewH backend_mvh, nixlMemViewH &mvh) const;
+
     /* UCX data */
     std::unique_ptr<nixlUcxContext> uc;
     std::vector<std::unique_ptr<nixlUcxWorker>> workers_;

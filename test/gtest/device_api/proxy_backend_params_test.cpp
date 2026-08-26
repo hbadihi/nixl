@@ -61,6 +61,39 @@ TEST(ProxyBackendParamsTest, NumWorkersMismatchRejected) {
     EXPECT_NE(agent.createBackend("UCX", params, backend), NIXL_SUCCESS);
 }
 
+/**
+ * Memviews served by the engine-owned proxy: prep must return a PROXY-tagged
+ * wrapped handle and release must unwind the registry entry - all with zero
+ * proxy configuration on the agent.
+ */
+TEST(ProxyBackendParamsTest, MemViewRoundTripViaParams) {
+    nixlAgentConfig cfg(false);
+    nixlAgent agent("proxy_params_memview", std::move(cfg));
+
+    nixl_b_params_t params{{"device_proxy", "true"},
+                           {"proxy_channel_count", "2"},
+                           {"proxy_max_peers", "4"}};
+    nixlBackendH *backend = nullptr;
+    ASSERT_EQ(agent.createBackend("UCX", params, backend), NIXL_SUCCESS);
+
+    std::vector<uint8_t> buffer(4096);
+    const auto addr = reinterpret_cast<uintptr_t>(buffer.data());
+
+    nixl_reg_dlist_t reg_list(DRAM_SEG);
+    reg_list.addDesc(nixlBlobDesc(addr, buffer.size(), 0, ""));
+    ASSERT_EQ(agent.registerMem(reg_list), NIXL_SUCCESS);
+
+    nixl_local_dlist_t descs(DRAM_SEG);
+    descs.addDesc(nixlBasicDesc(addr, buffer.size(), 0));
+
+    nixlMemViewH mvh = nullptr;
+    ASSERT_EQ(agent.prepMemView(descs, mvh), NIXL_SUCCESS);
+    ASSERT_NE(mvh, nullptr);
+
+    agent.releaseMemView(mvh);
+    EXPECT_EQ(agent.deregisterMem(reg_list), NIXL_SUCCESS);
+}
+
 TEST(ProxyBackendParamsTest, UnknownProxyParamRejected) {
     nixlAgentConfig cfg(false);
     nixlAgent agent("proxy_params_unknown", std::move(cfg));
