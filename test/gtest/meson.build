@@ -134,7 +134,7 @@ gtest_sources = [
 if gpu_device_api_supported
     gtest_sources += device_api_test_sources
     device_api_inc = [nixl_gpu_device_api_inc_dirs, include_directories('device_api')]
-    device_api_link_deps = [device_proxy_interface]
+    device_api_link_deps = [device_proxy_interface, device_allocator_interface]
 else
     device_api_inc = []
     device_api_link_deps = []

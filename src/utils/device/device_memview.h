@@ -2,8 +2,8 @@
  * SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-#ifndef NIXL_SRC_CORE_DEVICE_API_DEVICE_MEMVIEW_H
-#define NIXL_SRC_CORE_DEVICE_API_DEVICE_MEMVIEW_H
+#ifndef NIXL_SRC_UTILS_DEVICE_DEVICE_MEMVIEW_H
+#define NIXL_SRC_UTILS_DEVICE_DEVICE_MEMVIEW_H
 
 #include <nixl_types.h>
 
@@ -18,4 +18,4 @@ nixlDeviceMemViewGetBackend(nixlMemViewH wrapper, nixlMemViewH &backend_out) noe
 void
 nixlDeviceMemViewFree(nixlMemViewH wrapper) noexcept;
 
-#endif // NIXL_SRC_CORE_DEVICE_API_DEVICE_MEMVIEW_H
+#endif // NIXL_SRC_UTILS_DEVICE_DEVICE_MEMVIEW_H

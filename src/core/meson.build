@@ -85,10 +85,6 @@ nixl_lib_sources = [
     'tracing/tracer.cpp',
 ]
 
-if cuda_dep.found()
-    nixl_lib_sources += ['device_api/device_memview.cpp']
-endif
-
 nixl_lib_link_args = ['-lstdc++fs']
 nixl_lib_build_rpath = ''
 nixl_lib_install_rpath = join_paths(get_option('prefix'), get_option('libdir'))

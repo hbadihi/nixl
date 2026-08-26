@@ -14,8 +14,9 @@
 # limitations under the License.
 
 device_allocator_lib = library('nixl_device_allocator',
-           ['device_allocator_cuda.cpp', 'device_allocator.h'],
-           include_directories: [nixl_inc_dirs, utils_inc_dirs],
+           ['device_allocator_cuda.cpp', 'device_allocator.h',
+            'device_memview.cpp', 'device_memview.h'],
+           include_directories: [nixl_inc_dirs, utils_inc_dirs, nixl_gpu_device_api_inc_dirs],
            dependencies: [cuda_dep, nixl_common_dep],
            install: true)
 
