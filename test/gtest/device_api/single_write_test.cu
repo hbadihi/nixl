@@ -202,23 +202,26 @@ protected:
         nixlAgentConfig cfg;
         cfg.useProgThread = !proxy_owner;
         cfg.syncMode = nixl_thread_sync_t::NIXL_THREAD_SYNC_RW;
-        cfg.pthrDelay = proxy_owner ? 1000 : 100000;
-        cfg.enableDeviceProxy = proxy_owner;
-        if (proxy_owner) {
-            cfg.proxyMaxPeers = kProxyPeerCapacity;
-            cfg.proxyChannelCount = kProxyTransferChannelCount;
-            cfg.proxyWorkerCount = kProxyCpuWorkerCount;
-        }
+        cfg.pthrDelay = 100000;
         return cfg;
     }
 
     nixl_b_params_t
-    getBackendParams() const {
+    getBackendParams(bool proxy_owner) const {
         nixl_b_params_t params;
 
         if (getBackendName() == "UCX") {
-            params["num_workers"] =
-                std::to_string(useProxy() ? kProxyUcxWorkerCount : kDirectUcxWorkerCount);
+            if (proxy_owner) {
+                params["device_proxy"] = "true";
+                params["proxy_channel_count"] = std::to_string(kProxyTransferChannelCount);
+                params["proxy_thread_count"] = std::to_string(kProxyCpuWorkerCount);
+                params["proxy_max_peers"] = std::to_string(kProxyPeerCapacity);
+                params["proxy_pthr_delay_us"] = "1000";
+                // num_workers is derived by the engine (channels x peers).
+            } else {
+                params["num_workers"] =
+                    std::to_string(useProxy() ? kProxyUcxWorkerCount : kDirectUcxWorkerCount);
+            }
         }
 
         return params;
@@ -230,8 +233,8 @@ protected:
         agents.emplace_back(
             std::make_unique<nixlAgent>(getAgentName(agent_index), getConfig(proxy_owner)));
         nixlBackendH *backend_handle = nullptr;
-        const nixl_status_t status =
-            agents.back()->createBackend(getBackendName(), getBackendParams(), backend_handle);
+        const nixl_status_t status = agents.back()->createBackend(
+            getBackendName(), getBackendParams(proxy_owner), backend_handle);
         ASSERT_EQ(status, NIXL_SUCCESS);
         ASSERT_NE(backend_handle, nullptr);
         backend_handles.push_back(backend_handle);

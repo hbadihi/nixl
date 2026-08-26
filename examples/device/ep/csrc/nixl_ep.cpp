@@ -1423,12 +1423,6 @@ void Buffer::_nixl_agent_init() {
     cfg.useProgThread = !enable_device_proxy;
     cfg.syncMode = nixl_thread_sync_t::NIXL_THREAD_SYNC_RW;
     cfg.etcdWatchTimeout = NIXL_ETCD_WATCH_TIMEOUT;
-    if (enable_device_proxy) {
-        cfg.enableDeviceProxy = true;
-        cfg.proxyMaxPeers = static_cast<uint32_t>(max_num_ranks);
-        cfg.proxyChannelCount = proxy_channels;
-        cfg.proxyWorkerCount = proxy_workers;
-    }
     auto agent = std::make_shared<nixlAgent>(agent_name, cfg);
 
     // Create UCX backend
@@ -1442,9 +1436,12 @@ void Buffer::_nixl_agent_init() {
     }
 
     if (enable_device_proxy) {
+        init_params["device_proxy"] = "true";
+        init_params["proxy_channel_count"] = std::to_string(proxy_channels);
+        init_params["proxy_thread_count"] = std::to_string(proxy_workers);
+        init_params["proxy_max_peers"] = std::to_string(max_num_ranks);
+        // num_workers is derived by the engine (channels x peers).
         init_params["ucx_num_device_channels"] = "1";
-        init_params["num_workers"] =
-            std::to_string(proxy_channels * static_cast<uint32_t>(max_num_ranks));
         init_params["ucx_error_handling_mode"] = "none";
         init_params["engine_config"] = "FENCE_MODE=ep_based";
     } else {
