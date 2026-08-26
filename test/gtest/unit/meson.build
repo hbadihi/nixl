@@ -48,6 +48,9 @@ unit_test_deps += [proxy_memview_registry_unit_test_dep]
 subdir('proxy_runtime')
 unit_test_deps += [proxy_runtime_unit_test_dep]
 
+subdir('proxy_config')
+unit_test_deps += [proxy_config_unit_test_dep]
+
 cpp = meson.get_compiler('cpp')
 azure_storage_blobs = cpp.find_library('azure-storage-blobs', required: false)
 if enabled_plugins.get('AZURE_BLOB') and azure_storage_blobs.found()

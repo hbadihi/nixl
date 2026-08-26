@@ -13,14 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-device_proxy_lib = library('nixl_device_proxy',
-           ['proxy_config.cpp', 'proxy_config.h',
-            'proxy_runtime.cpp', 'proxy_runtime.h',
-            'proxy_worker.cpp', 'proxy_worker.h',
-            'proxy_control_buffer.cpp', 'proxy_control_buffer.h',
-            'proxy_protocol.h', 'backend_adapter.h'],
-           include_directories: [nixl_inc_dirs, utils_inc_dirs],
-           dependencies: [gdrcopy_dep, nixl_common_dep, nixl_infra, device_allocator_interface],
-           install: true)
-
-device_proxy_interface = declare_dependency(link_with: device_proxy_lib)
+proxy_config_unit_test_dep = declare_dependency(
+    sources: [
+        'proxy_config.cpp',
+    ],
+    include_directories: [nixl_inc_dirs, gtest_inc_dirs],
+)
