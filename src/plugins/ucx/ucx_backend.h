@@ -119,11 +119,6 @@ public:
         return true;
     }
 
-    bool
-    supportsProxy() const override {
-        return true;
-    }
-
     nixl_mem_list_t
     getSupportedMems() const override;
 
@@ -206,11 +201,6 @@ public:
 
     nixl_status_t
     checkConn(const std::string &remote_agent);
-
-    nixl_status_t
-    createDeviceProxyBackendAdapter(
-        const nixlBackendInitParams &init_params,
-        std::unique_ptr<nixlDeviceProxyBackendAdapter> &adapter) override;
 
     nixl_status_t
     prepMemView(const nixl_remote_meta_dlist_t &,

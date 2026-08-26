@@ -940,20 +940,6 @@ nixl_status_t nixlUcxEngine::checkConn(const std::string &remote_agent) {
     return remoteConnMap.count(remote_agent) ? NIXL_SUCCESS : NIXL_ERR_NOT_FOUND;
 }
 
-nixl_status_t
-nixlUcxEngine::createDeviceProxyBackendAdapter(
-    const nixlBackendInitParams &init_params,
-    std::unique_ptr<nixlDeviceProxyBackendAdapter> &adapter) {
-    if (init_params.enableProgTh) {
-        NIXL_ERROR << "UCX device proxy requires ProxyWorker-driven progress; "
-                   << "disable the UCX progress thread";
-        return NIXL_ERR_NOT_SUPPORTED;
-    }
-
-    adapter = std::make_unique<nixlUcxProxyBackendAdapter>(this);
-    return NIXL_SUCCESS;
-}
-
 nixl_status_t nixlUcxEngine::getConnInfo(std::string &str) const {
     str = workerAddr;
     return NIXL_SUCCESS;

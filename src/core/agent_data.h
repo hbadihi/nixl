@@ -156,11 +156,6 @@ class nixlBackendH {
             return engine->supportsNotif();
         }
 
-        bool
-        supportsProxy() const {
-            return engine->supportsProxy();
-        }
-
     friend class nixlAgentData;
     friend class nixlAgent;
 };
