@@ -22,7 +22,6 @@
 #include "nixl_metadata_context.h"
 #include "telemetry.h"
 #include "tracing/trace.h"
-#include "device/proxy/proxy_runtime.h"
 #include "sync.h"
 
 #include <atomic>
@@ -32,26 +31,8 @@
 
 class nixlBackendEngine;
 class nixlBackendInitParams;
-class nixlProxyRuntime;
 
 using backend_list_t = std::vector<nixlBackendEngine*>;
-
-struct nixlDeviceProxyModeSelection {
-    bool enabled;
-    bool from_environment;
-};
-
-[[nodiscard]] nixlDeviceProxyModeSelection
-nixlResolveDeviceProxyMode(bool configured);
-
-enum class ProxyOrchestrationPhase : uint8_t {
-    Disabled = 0,
-    Registered,
-    MetadataPending,
-    ReadyToBootstrap,
-    Active,
-    ShuttingDown,
-};
 
 // Implements nixlMetadataContext, which is the whole surface a metadata backend
 // sees of the agent: serialization, cache load and invalidation, nothing else.
@@ -61,7 +42,6 @@ class nixlAgentData final : public nixlMetadataContext {
     private:
         const std::string name_;
         const nixlAgentConfig config_;
-        const nixlDeviceProxyModeSelection proxyMode_;
         // Agent-owned metadata manager; always built (single metadata path).
         // It owns the pluggable backends, which own their own transport state
         // (sockets/listener for P2P, client for ETCD) and their own threads.
@@ -89,8 +69,6 @@ class nixlAgentData final : public nixlMetadataContext {
         std::unordered_map<nixl_backend_t, std::unique_ptr<nixlBackendH>> backendHandles_;
         std::unordered_map<nixl_backend_t, nixl_blob_t> connMd_;
         backend_map_t backendEngines_;
-        std::unique_ptr<nixlProxyRuntime> proxyRuntime;
-        nixlBackendEngine *proxyTransportEngine = nullptr;
         std::unordered_map<std::string, nixlRemoteSection> remoteSections_;
         std::unique_ptr<nixlTelemetry> telemetry_;
         // Composite tracer (fans out to every enabled backend); null when no
@@ -125,18 +103,6 @@ class nixlAgentData final : public nixlMetadataContext {
         getBackends(const nixl_opt_args_t *opt_args,
                     const nixlMemSection &section,
                     nixl_mem_t mem_type);
-        [[nodiscard]] bool
-        proxyModeEnabled() const;
-        [[nodiscard]] bool
-        hasProxyRuntime() const;
-        [[nodiscard]] const char *
-        proxyModeSource() const;
-        nixl_status_t
-        createProxyRuntime(nixlBackendEngine *engine,
-                           const nixl_backend_t &backend,
-                           const nixlBackendInitParams &init_params);
-        void
-        shutdownProxyRuntime();
         void
         warnAboutEfaHardwareMismatch();
 
