@@ -285,6 +285,9 @@ class nixlProxyRuntime {
                            const nixl_blob_t &conn_info);
 
         nixl_status_t
+        remoteDisconnected(const std::string &remote_name);
+
+        nixl_status_t
         registerProxyMemView(nixlMemViewH backend_memview,
                              nixlMemViewH *proxy_memview);
 

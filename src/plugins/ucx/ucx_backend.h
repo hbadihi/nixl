@@ -34,6 +34,7 @@
 
 #include "backend/backend_engine.h"
 #include "common/nixl_time.h"
+#include "device/proxy/proxy_config.h"
 
 #include "mem_list.h"
 #include "rkey.h"
@@ -93,6 +94,8 @@ public:
 private:
     const std::vector<nixl::ucx::rkey> rkeys_;
 };
+
+class nixlProxyRuntime;
 
 class nixlUcxEngine : public nixlBackendEngine {
 public:
@@ -333,6 +336,14 @@ private:
     [[nodiscard]] std::optional<size_t>
     getWorkerIdFromOptArgs(const nixl_opt_b_args_t &opt_args) const noexcept;
 
+    /**
+     * Create and start the engine-owned proxy runtime. Called as the last
+     * step of create(); worker threads call back into the engine, so it must
+     * be fully constructed first.
+     */
+    nixl_status_t
+    setupProxyRuntime(const nixlProxyConfig &config);
+
     /* UCX data */
     std::unique_ptr<nixlUcxContext> uc;
     std::vector<std::unique_ptr<nixlUcxWorker>> workers_;
@@ -343,6 +354,10 @@ private:
 
     // Map of agent name to saved nixlUcxConnection info
     std::unordered_map<std::string, ucx_connection_ptr_t> remoteConnMap;
+
+    /* Engine-owned device proxy (enabled via device_proxy backend params). */
+    nixlProxyConfig proxyConfig_{};
+    std::unique_ptr<nixlProxyRuntime> proxyRuntime_;
 };
 
 class nixlUcxThread;

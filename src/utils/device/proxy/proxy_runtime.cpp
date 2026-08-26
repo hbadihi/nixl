@@ -692,6 +692,15 @@ nixlProxyRuntime::loadRemoteConnInfo(const std::string &remote_name, const nixl_
 }
 
 nixl_status_t
+nixlProxyRuntime::remoteDisconnected(const std::string &remote_name) {
+    NIXL_INFO << "ProxyRuntime::remoteDisconnected: remote='" << remote_name << "'";
+    if (backend_ == nullptr) {
+        return NIXL_ERR_NOT_SUPPORTED;
+    }
+    return backend_->remoteDisconnected(remote_name);
+}
+
+nixl_status_t
 nixlProxyRuntime::registerProxyMemView(nixlMemViewH backend_memview, nixlMemViewH *proxy_memview) {
     return memview_registry_.registerProxyMemView(backend_memview, proxy_memview);
 }

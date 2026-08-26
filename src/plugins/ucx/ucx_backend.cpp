@@ -18,6 +18,7 @@
 #include "ucx_backend.h"
 #include "ucx_sgl.h"
 #include "device_proxy/ucx_proxy_backend.h"
+#include "device/proxy/proxy_runtime.h"
 #include "common/nixl_log.h"
 #include "serdes/serdes.h"
 #include "common/backend.h"
@@ -765,9 +766,54 @@ nixlUcxThreadPoolEngine::sendXferRange(const nixl_xfer_op_t &operation,
 
 std::unique_ptr<nixlUcxEngine>
 nixlUcxEngine::create(const nixlBackendInitParams &init_params) {
-    nixlUcxEngine *engine;
+    nixlProxyConfig proxy_config;
+    if (nixlParseProxyConfig(init_params, proxy_config) != NIXL_SUCCESS) {
+        nixl::throwRuntimeError("invalid device proxy configuration");
+    }
+
     const size_t num_threads =
         nixl::getBackendParamDefaulted(init_params.customParams, "num_threads", 0u);
+
+    if (proxy_config.enabled) {
+        if (num_threads > 0) {
+            nixl::throwRuntimeError("num_threads is not supported with device_proxy=true");
+        }
+
+        // The proxy topology dictates the shared-worker count: one UCX worker
+        // per channel x peer slot.
+        const size_t derived_workers =
+            static_cast<size_t>(proxy_config.channel_count) * proxy_config.max_peers;
+        const auto explicit_workers =
+            nixl::getBackendParamOptional<size_t>(init_params.customParams, "num_workers");
+        if (explicit_workers.has_value() && *explicit_workers != derived_workers) {
+            nixl::throwRuntimeError("num_workers=",
+                                    *explicit_workers,
+                                    " conflicts with the device proxy topology (",
+                                    proxy_config.channel_count,
+                                    " channels x ",
+                                    proxy_config.max_peers,
+                                    " peers = ",
+                                    derived_workers,
+                                    "); omit num_workers");
+        }
+
+        nixl_b_params_t derived_params =
+            init_params.customParams ? *init_params.customParams : nixl_b_params_t{};
+        derived_params["num_workers"] = std::to_string(derived_workers);
+        nixlBackendInitParams proxy_init_params = init_params;
+        proxy_init_params.customParams = &derived_params;
+
+        auto engine = std::unique_ptr<nixlUcxEngine>(new nixlUcxEngine(proxy_init_params));
+        // Workers exist and the engine is fully constructed; starting the
+        // runtime is deliberately the factory's last step.
+        const nixl_status_t status = engine->setupProxyRuntime(proxy_config);
+        if (status != NIXL_SUCCESS) {
+            nixl::throwRuntimeError("failed to start device proxy runtime: status=", status);
+        }
+        return engine;
+    }
+
+    nixlUcxEngine *engine;
     if (num_threads > 0) {
         engine = new nixlUcxThreadPoolEngine(init_params, num_threads);
     } else if (init_params.enableProgTh) {
@@ -846,7 +892,43 @@ tlsSharedWorkerMap() {
 
 // Through parent destructor the unregister will be called.
 nixlUcxEngine::~nixlUcxEngine() {
+    if (proxyRuntime_) {
+        // Join the proxy threads before any engine member (UCX workers in
+        // particular) is torn down; shutdown calls back into the engine.
+        proxyRuntime_->shutdown();
+        proxyRuntime_.reset();
+    }
     tlsSharedWorkerMap().erase(this);
+}
+
+nixl_status_t
+nixlUcxEngine::setupProxyRuntime(const nixlProxyConfig &config) {
+    auto adapter = std::make_unique<nixlUcxProxyBackendAdapter>(this);
+    auto runtime = std::make_unique<nixlProxyRuntime>();
+
+    nixl_status_t status = runtime->init(std::move(adapter),
+                                         config.max_peers,
+                                         config.channel_count,
+                                         config.thread_count,
+                                         config.pthr_delay_us);
+    if (status != NIXL_SUCCESS) {
+        NIXL_ERROR << "Device proxy runtime init failed: " << status;
+        return status;
+    }
+
+    status = runtime->startWorkers();
+    if (status != NIXL_SUCCESS) {
+        NIXL_ERROR << "Device proxy runtime failed to start workers: " << status;
+        runtime->shutdown();
+        return status;
+    }
+
+    proxyConfig_ = config;
+    proxyRuntime_ = std::move(runtime);
+    NIXL_INFO << "Engine-owned device proxy enabled: " << config.channel_count << " channel(s), "
+              << config.thread_count << " thread(s), max_peers=" << config.max_peers
+              << ", pthr_delay_us=" << config.pthr_delay_us;
+    return NIXL_SUCCESS;
 }
 
 /****************************************
@@ -894,6 +976,13 @@ nixl_status_t nixlUcxEngine::disconnect(const std::string &remote_agent) {
 
     // thread safety?
     remoteConnMap.erase(it);
+
+    if (proxyRuntime_) {
+        const nixl_status_t proxy_status = proxyRuntime_->remoteDisconnected(remote_agent);
+        if (proxy_status != NIXL_SUCCESS && proxy_status != NIXL_ERR_NOT_SUPPORTED) {
+            return proxy_status;
+        }
+    }
     return NIXL_SUCCESS;
 }
 
@@ -918,6 +1007,14 @@ nixl_status_t nixlUcxEngine::loadRemoteConnInfo (const std::string &remote_agent
     }
 
     remoteConnMap.insert({remote_agent, conn});
+
+    if (proxyRuntime_) {
+        const nixl_status_t proxy_status =
+            proxyRuntime_->loadRemoteConnInfo(remote_agent, remote_conn_info);
+        if (proxy_status != NIXL_SUCCESS && proxy_status != NIXL_ERR_NOT_SUPPORTED) {
+            return proxy_status;
+        }
+    }
 
     return NIXL_SUCCESS;
 }

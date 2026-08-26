@@ -36,6 +36,10 @@ ucx_backend_dependencies = [asio_dep,
                             thread_dep,
                             ucx_dep]
 
+if cuda_dep.found()
+    ucx_backend_dependencies += [device_proxy_interface]
+endif
+
 ucx_backend_include_directories = [nixl_inc_dirs,
                                    utils_inc_dirs]
 

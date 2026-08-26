@@ -70,6 +70,12 @@ class nixlDeviceProxyBackendAdapter {
             return NIXL_ERR_NOT_SUPPORTED;
         }
 
+        /** A remote agent disconnected; in-flight state referencing it is suspect. */
+        virtual nixl_status_t
+        remoteDisconnected(const std::string &) {
+            return NIXL_ERR_NOT_SUPPORTED;
+        }
+
         virtual nixl_status_t
         resolveDirectPointers(const nixl_remote_meta_dlist_t &, std::vector<void *> &) {
             return NIXL_ERR_NOT_SUPPORTED;
