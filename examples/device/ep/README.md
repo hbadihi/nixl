@@ -51,7 +51,21 @@ NIXL EP supports both GPU Device API paths. Select the path when the agent start
 - `NIXL_EP_DEVICE_MODE=direct` selects the direct UCX GPU Device API path (the EP
   default when the variable is unset).
 
-Existing kernels and Device API calls do not change between modes.
+The proxy is owned by the UCX backend and configured through backend params;
+EP translates these environment variables into them:
+
+- `NIXL_EP_PROXY_CHANNELS` (fallback `NIXL_EP_NUM_CHANNELS`, default 4) →
+  `proxy_channel_count`.
+- `NIXL_EP_PROXY_WORKER_COUNT` (default = channel count) →
+  `proxy_thread_count` (CPU proxy progress threads).
+- Peer capacity (`proxy_max_peers`) is the EP `max_num_ranks`; the UCX worker
+  count is derived by the backend (channels x peers) and must not be passed
+  explicitly in proxy mode.
+
+Existing kernels and Device API calls do not change between modes. There is no
+library-level environment override: proxy enablement outside EP is done by
+passing `device_proxy=true` (plus optional `proxy_*` params) to
+`createBackend("UCX", ...)`.
 
 ## Testing
 
