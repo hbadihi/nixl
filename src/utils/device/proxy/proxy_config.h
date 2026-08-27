@@ -32,7 +32,12 @@ inline constexpr std::string_view kProxyMaxPeersParam = "proxy_max_peers";
 inline constexpr std::string_view kProxyPthrDelayParam = "proxy_pthr_delay_us";
 
 inline constexpr uint32_t kDefaultProxyChannelCount = 4;
-inline constexpr uint32_t kDefaultProxyMaxPeers = 256;
+/**
+ * Deliberately small: max_peers sizes real resources (one UCX worker and one
+ * ring per channel x peer slot, one endpoint per worker per remote). Deployments
+ * should pass their actual peer capacity.
+ */
+inline constexpr uint32_t kDefaultProxyMaxPeers = 8;
 
 struct nixlProxyConfig {
     bool enabled = false;

@@ -53,7 +53,7 @@ TEST(ProxyConfigTest, EnabledDefaults) {
     EXPECT_TRUE(config.enabled);
     EXPECT_EQ(config.channel_count, 4u);
     EXPECT_EQ(config.thread_count, 4u);
-    EXPECT_EQ(config.max_peers, 256u);
+    EXPECT_EQ(config.max_peers, 8u);
     EXPECT_EQ(config.pthr_delay_us, 0u);
 }
 
