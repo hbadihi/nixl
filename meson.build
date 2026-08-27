@@ -240,6 +240,9 @@ else
 endif
 
 if cuda_dep.found()
+    # The device allocator / device proxy utils and the device memview wrapper
+    # exist only with CUDA; consumers guard their references on this define.
+    add_project_arguments('-DHAVE_NIXL_DEVICE_API', language: ['cpp', 'cuda'])
     add_languages('CUDA')
     cuda = import('unstable-cuda')
     nvcc = meson.get_compiler('cuda')

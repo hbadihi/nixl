@@ -34,7 +34,9 @@
 
 #include "backend/backend_engine.h"
 #include "common/nixl_time.h"
+#ifdef HAVE_NIXL_DEVICE_API
 #include "device/proxy/proxy_config.h"
+#endif
 
 #include "mem_list.h"
 #include "rkey.h"
@@ -326,6 +328,7 @@ private:
     [[nodiscard]] std::optional<size_t>
     getWorkerIdFromOptArgs(const nixl_opt_b_args_t &opt_args) const noexcept;
 
+#ifdef HAVE_NIXL_DEVICE_API
     /**
      * Create and start the engine-owned proxy runtime. Called as the last
      * step of create(); worker threads call back into the engine, so it must
@@ -337,6 +340,7 @@ private:
     /** Wrap a backend memview into the device-dispatch handle; cleans up on failure. */
     nixl_status_t
     wrapMemView(nixlMemViewH backend_mvh, nixlMemViewH &mvh) const;
+#endif
 
     /* UCX data */
     std::unique_ptr<nixlUcxContext> uc;
@@ -349,9 +353,11 @@ private:
     // Map of agent name to saved nixlUcxConnection info
     std::unordered_map<std::string, ucx_connection_ptr_t> remoteConnMap;
 
+#ifdef HAVE_NIXL_DEVICE_API
     /* Engine-owned device proxy (enabled via device_proxy backend params). */
     nixlProxyConfig proxyConfig_{};
     std::unique_ptr<nixlProxyRuntime> proxyRuntime_;
+#endif
 };
 
 class nixlUcxThread;

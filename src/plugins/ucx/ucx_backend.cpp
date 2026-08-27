@@ -18,8 +18,10 @@
 #include "ucx_backend.h"
 #include "ucx_sgl.h"
 #include "device_proxy/ucx_proxy_backend.h"
+#ifdef HAVE_NIXL_DEVICE_API
 #include "device/device_memview.h"
 #include "device/proxy/proxy_runtime.h"
+#endif
 #include "common/nixl_log.h"
 #include "serdes/serdes.h"
 #include "common/backend.h"
@@ -767,13 +769,25 @@ nixlUcxThreadPoolEngine::sendXferRange(const nixl_xfer_op_t &operation,
 
 std::unique_ptr<nixlUcxEngine>
 nixlUcxEngine::create(const nixlBackendInitParams &init_params) {
+    const size_t num_threads =
+        nixl::getBackendParamDefaulted(init_params.customParams, "num_threads", 0u);
+
+#ifndef HAVE_NIXL_DEVICE_API
+    // Without CUDA the GPU Device API (and thus the device proxy) does not
+    // exist; reject the params at parse time instead of silently ignoring.
+    if (init_params.customParams != nullptr) {
+        for (const auto &[key, value] : *init_params.customParams) {
+            if (key == "device_proxy" || key.rfind("proxy_", 0) == 0) {
+                nixl::throwRuntimeError(
+                    "backend parameter '", key, "' requires a CUDA-enabled NIXL build");
+            }
+        }
+    }
+#else
     nixlProxyConfig proxy_config;
     if (nixlParseProxyConfig(init_params, proxy_config) != NIXL_SUCCESS) {
         nixl::throwRuntimeError("invalid device proxy configuration");
     }
-
-    const size_t num_threads =
-        nixl::getBackendParamDefaulted(init_params.customParams, "num_threads", 0u);
 
     if (proxy_config.enabled) {
         if (num_threads > 0) {
@@ -813,6 +827,7 @@ nixlUcxEngine::create(const nixlBackendInitParams &init_params) {
         }
         return engine;
     }
+#endif
 
     nixlUcxEngine *engine;
     if (num_threads > 0) {
@@ -893,15 +908,18 @@ tlsSharedWorkerMap() {
 
 // Through parent destructor the unregister will be called.
 nixlUcxEngine::~nixlUcxEngine() {
+#ifdef HAVE_NIXL_DEVICE_API
     if (proxyRuntime_) {
         // Join the proxy threads before any engine member (UCX workers in
         // particular) is torn down; shutdown calls back into the engine.
         proxyRuntime_->shutdown();
         proxyRuntime_.reset();
     }
+#endif
     tlsSharedWorkerMap().erase(this);
 }
 
+#ifdef HAVE_NIXL_DEVICE_API
 nixl_status_t
 nixlUcxEngine::setupProxyRuntime(const nixlProxyConfig &config) {
     auto adapter = std::make_unique<nixlUcxProxyBackendAdapter>(this);
@@ -931,6 +949,7 @@ nixlUcxEngine::setupProxyRuntime(const nixlProxyConfig &config) {
               << ", pthr_delay_us=" << config.pthr_delay_us;
     return NIXL_SUCCESS;
 }
+#endif
 
 /****************************************
  * Connection management
@@ -964,12 +983,14 @@ nixl_status_t nixlUcxEngine::disconnect(const std::string &remote_agent) {
     // thread safety?
     remoteConnMap.erase(it);
 
+#ifdef HAVE_NIXL_DEVICE_API
     if (proxyRuntime_) {
         const nixl_status_t proxy_status = proxyRuntime_->remoteDisconnected(remote_agent);
         if (proxy_status != NIXL_SUCCESS && proxy_status != NIXL_ERR_NOT_SUPPORTED) {
             return proxy_status;
         }
     }
+#endif
     return NIXL_SUCCESS;
 }
 
@@ -995,6 +1016,7 @@ nixl_status_t nixlUcxEngine::loadRemoteConnInfo (const std::string &remote_agent
 
     remoteConnMap.insert({remote_agent, conn});
 
+#ifdef HAVE_NIXL_DEVICE_API
     if (proxyRuntime_) {
         const nixl_status_t proxy_status =
             proxyRuntime_->loadRemoteConnInfo(remote_agent, remote_conn_info);
@@ -1002,6 +1024,7 @@ nixl_status_t nixlUcxEngine::loadRemoteConnInfo (const std::string &remote_agent
             return proxy_status;
         }
     }
+#endif
 
     return NIXL_SUCCESS;
 }
@@ -1669,6 +1692,7 @@ nixlUcxEngine::genNotif(const std::string &remote_agent, const std::string &msg)
     return ret;
 }
 
+#ifdef HAVE_NIXL_DEVICE_API
 nixl_status_t
 nixlUcxEngine::prepMemView(const nixl_remote_meta_dlist_t &dlist,
                            nixlMemViewH &mvh,
@@ -1754,3 +1778,25 @@ nixlUcxEngine::releaseMemView(nixlMemViewH mem_view) const {
     }
     nixlDeviceMemViewFree(mem_view);
 }
+#else
+nixl_status_t
+nixlUcxEngine::prepMemView(const nixl_remote_meta_dlist_t &,
+                           nixlMemViewH &,
+                           const nixl_opt_b_args_t *) const {
+    NIXL_ERROR << "The GPU Device API requires a CUDA-enabled NIXL build";
+    return NIXL_ERR_NOT_SUPPORTED;
+}
+
+nixl_status_t
+nixlUcxEngine::prepMemView(const nixl_meta_dlist_t &,
+                           nixlMemViewH &,
+                           const nixl_opt_b_args_t *) const {
+    NIXL_ERROR << "The GPU Device API requires a CUDA-enabled NIXL build";
+    return NIXL_ERR_NOT_SUPPORTED;
+}
+
+void
+nixlUcxEngine::releaseMemView(nixlMemViewH) const {
+    NIXL_ERROR << "The GPU Device API requires a CUDA-enabled NIXL build";
+}
+#endif
