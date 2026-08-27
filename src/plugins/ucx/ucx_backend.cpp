@@ -20,6 +20,7 @@
 #include "device_proxy/ucx_proxy_backend.h"
 #ifdef HAVE_NIXL_DEVICE_API
 #include "device/device_memview.h"
+#include "device/proxy/proxy_config.h"
 #include "device/proxy/proxy_runtime.h"
 #endif
 #include "common/nixl_log.h"
@@ -942,7 +943,6 @@ nixlUcxEngine::setupProxyRuntime(const nixlProxyConfig &config) {
         return status;
     }
 
-    proxyConfig_ = config;
     proxyRuntime_ = std::move(runtime);
     NIXL_INFO << "Engine-owned device proxy enabled: " << config.channel_count << " channel(s), "
               << config.thread_count << " thread(s), max_peers=" << config.max_peers

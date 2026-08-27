@@ -760,11 +760,6 @@ nixlProxyRuntime::resolveProxyMemView(nixlMemViewH proxy_memview,
     return memview_registry_.resolveProxyMemView(proxy_memview, backend_memview);
 }
 
-bool
-nixlProxyRuntime::resolveProxyMemViewId(uint64_t proxy_memview_id,
-                                        nixlMemViewH &backend_memview) const {
-    return memview_registry_.resolveProxyMemViewId(proxy_memview_id, backend_memview);
-}
 
 nixl_status_t
 nixlProxyRuntime::startWorkers() {

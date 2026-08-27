@@ -34,9 +34,6 @@
 
 #include "backend/backend_engine.h"
 #include "common/nixl_time.h"
-#ifdef HAVE_NIXL_DEVICE_API
-#include "device/proxy/proxy_config.h"
-#endif
 
 #include "mem_list.h"
 #include "rkey.h"
@@ -98,6 +95,7 @@ private:
 };
 
 class nixlProxyRuntime;
+struct nixlProxyConfig;
 
 class nixlUcxEngine : public nixlBackendEngine {
 public:
@@ -355,7 +353,6 @@ private:
 
 #ifdef HAVE_NIXL_DEVICE_API
     /* Engine-owned device proxy (enabled via device_proxy backend params). */
-    nixlProxyConfig proxyConfig_{};
     std::unique_ptr<nixlProxyRuntime> proxyRuntime_;
 #endif
 };

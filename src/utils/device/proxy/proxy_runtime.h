@@ -324,10 +324,6 @@ class nixlProxyRuntime {
         resolveProxyMemView(nixlMemViewH proxy_memview,
                             nixlMemViewH &backend_memview) const;
 
-        bool
-        resolveProxyMemViewId(uint64_t proxy_memview_id,
-                              nixlMemViewH &backend_memview) const;
-
         nixl_status_t
         startWorkers();
 
