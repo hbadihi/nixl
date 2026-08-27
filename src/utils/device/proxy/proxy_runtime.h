@@ -22,7 +22,6 @@
 #include <cstdint>
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "backend_aux.h"
@@ -31,6 +30,7 @@
 #include "proxy_config.h"
 #include "proxy_backend_ops.h"
 #include "proxy_control_buffer.h"
+#include "proxy_registry.h"
 
 class ProxyWorker;
 
@@ -107,174 +107,6 @@ struct alignas(64) nixlProxyChannelState {
     deallocate() noexcept;
 };
 
-class nixlProxyMemViewRegistry {
-    public:
-        explicit nixlProxyMemViewRegistry(nixlDeviceAllocator &allocator) noexcept
-            : allocator_(allocator) {}
-        ~nixlProxyMemViewRegistry();
-
-        nixlProxyMemViewRegistry(const nixlProxyMemViewRegistry &) = delete;
-        nixlProxyMemViewRegistry &
-        operator=(const nixlProxyMemViewRegistry &) = delete;
-
-        void
-        setDeviceContext(const nixlProxyDeviceContextData *context) {
-            device_context_ = context;
-        }
-
-        nixl_status_t
-        registerProxyMemView(nixlMemViewH backend_memview,
-                             nixlMemViewH *proxy_memview);
-
-        nixl_status_t
-        prepMemView(const nixl_meta_dlist_t &dlist,
-                    nixlMemViewH *proxy_memview);
-
-        nixl_status_t
-        prepMemView(const nixl_remote_meta_dlist_t &dlist,
-                    nixlMemViewH *proxy_memview);
-
-        nixl_status_t
-        prepMemView(const nixl_remote_meta_dlist_t &dlist,
-                    const std::vector<void *> &direct_ptrs,
-                    nixlMemViewH *proxy_memview);
-
-        nixl_status_t
-        prepMemView(nixlMemViewH backend_memview,
-                    const nixl_meta_dlist_t &dlist,
-                    nixlMemViewH *proxy_memview);
-
-        nixl_status_t
-        prepMemView(nixlMemViewH backend_memview,
-                    const nixl_remote_meta_dlist_t &dlist,
-                    nixlMemViewH *proxy_memview);
-
-        nixl_status_t
-        unregisterProxyMemView(nixlMemViewH proxy_memview);
-
-        nixl_status_t
-        storeMetadata(nixlMemViewH proxy_memview,
-                      const nixl_meta_dlist_t &dlist);
-
-        nixl_status_t
-        storeMetadata(nixlMemViewH proxy_memview,
-                      const nixl_remote_meta_dlist_t &dlist);
-
-        bool
-        resolveProxyMemView(nixlMemViewH proxy_memview,
-                            nixlMemViewH &backend_memview) const;
-
-        bool
-        resolveProxyMemViewId(uint64_t proxy_memview_id,
-                              nixlMemViewH &backend_memview) const;
-
-        nixl_status_t
-        prepareSubmission(const nixlProxySubmission &submission,
-                          nixlBackendProxySubmission &prepared_submission) const;
-
-        void
-        clear() noexcept;
-
-    private:
-        struct ProxyMemViewRegStoredEntry {
-            uintptr_t base_addr = 0;
-            size_t len = 0;
-            uint64_t dev_id = 0;
-            nixlBackendMD *metadata = nullptr;
-            std::string remote_agent;
-        };
-
-        struct LocalMetadata {
-            nixl_mem_t mem_type = DRAM_SEG;
-            std::vector<ProxyMemViewRegStoredEntry> entries;
-        };
-
-        struct RemoteMetadata {
-            std::vector<ProxyMemViewRegStoredEntry> entries;
-        };
-
-        enum class ProxyMemViewRegEntryState : uint8_t {
-            ENTRY_ALLOCATED,
-            ENTRY_READY,
-            ENTRY_RETIRED,
-        };
-
-        enum class ProxyMemViewRegMetadataKind : uint8_t {
-            METADATA_KIND_NONE,
-            METADATA_KIND_LOCAL,
-            METADATA_KIND_REMOTE,
-        };
-
-        struct RegistryEntry {
-            uint32_t proxy_memview_id = 0;
-            nixlMemViewH proxy_memview = nullptr;
-            /** Owns the device-resident nixlProxyDeviceMemView behind proxy_memview. */
-            nixlDeviceMem proxy_memview_mem;
-            nixlMemViewH backend_memview = nullptr;
-            ProxyMemViewRegEntryState state = ProxyMemViewRegEntryState::ENTRY_ALLOCATED;
-            ProxyMemViewRegMetadataKind metadata_kind = ProxyMemViewRegMetadataKind::METADATA_KIND_NONE;
-            LocalMetadata local_metadata{};
-            RemoteMetadata remote_metadata{};
-        };
-
-        nixl_status_t
-        registerProxyMemView(nixlMemViewH backend_memview,
-                             const std::vector<void *> &direct_ptrs,
-                             nixlMemViewH *proxy_memview);
-
-        template<typename DlistT>
-        nixl_status_t
-        prepMemViewImpl(nixlMemViewH backend_memview,
-                        const DlistT &dlist,
-                        const std::vector<void *> &direct_ptrs,
-                        nixlMemViewH *proxy_memview);
-
-        static void
-        releaseDeviceMemView(RegistryEntry &entry) noexcept;
-
-        RegistryEntry *
-        getEntryForHandle(nixlMemViewH proxy_memview);
-
-        const RegistryEntry *
-        getEntryForHandle(nixlMemViewH proxy_memview) const;
-
-        RegistryEntry *
-        getEntryForId(uint64_t proxy_memview_id);
-
-        const RegistryEntry *
-        getEntryForId(uint64_t proxy_memview_id) const;
-
-        nixl_status_t
-        getRemoteEntryForSubmission(uint64_t proxy_memview_id,
-                                    size_t index,
-                                    size_t offset,
-                                    size_t size,
-                                    const ProxyMemViewRegStoredEntry *&entry) const;
-
-        nixl_status_t
-        getLocalEntryForSubmission(uint64_t proxy_memview_id,
-                                   size_t index,
-                                   size_t offset,
-                                   size_t size,
-                                   const LocalMetadata *&metadata,
-                                   const ProxyMemViewRegStoredEntry *&entry) const;
-
-        static bool
-        rangeFits(const ProxyMemViewRegStoredEntry &entry, size_t offset, size_t size);
-
-        static void
-        fillLocalMetadata(const nixl_meta_dlist_t &dlist, LocalMetadata &out);
-
-        static void
-        fillRemoteMetadata(const nixl_remote_meta_dlist_t &dlist, RemoteMetadata &out);
-
-        nixlDeviceAllocator &allocator_;
-        std::vector<RegistryEntry> entries_;
-        std::unordered_map<nixlMemViewH, uint32_t> handle_to_id_;
-        uint64_t next_proxy_memview_id_ = 1;
-        const nixlProxyDeviceContextData *device_context_ = nullptr;
-};
-
 class nixlProxyRuntime {
     public:
         ~nixlProxyRuntime();
@@ -304,40 +136,19 @@ class nixlProxyRuntime {
         nixl_status_t
         remoteDisconnected(const std::string &remote_name);
 
-        nixl_status_t
-        registerProxyMemView(nixlMemViewH backend_memview,
-                             nixlMemViewH *proxy_memview);
-
-        nixl_status_t
+        [[nodiscard]] nixl_status_t
         prepMemView(const nixl_meta_dlist_t &dlist,
                     nixlMemViewH *proxy_memview);
 
-        nixl_status_t
+        /** Resolves the backend's direct pointers first, when it offers any. */
+        [[nodiscard]] nixl_status_t
         prepMemView(const nixl_remote_meta_dlist_t &dlist,
                     nixlMemViewH *proxy_memview);
 
-        nixl_status_t
-        prepMemView(nixlMemViewH backend_memview,
-                    const nixl_meta_dlist_t &dlist,
-                    nixlMemViewH *proxy_memview);
-
-        nixl_status_t
-        prepMemView(nixlMemViewH backend_memview,
-                    const nixl_remote_meta_dlist_t &dlist,
-                    nixlMemViewH *proxy_memview);
-
-        nixl_status_t
+        [[nodiscard]] nixl_status_t
         unregisterProxyMemView(nixlMemViewH proxy_memview);
 
-        nixl_status_t
-        storeMetadata(nixlMemViewH proxy_memview,
-                      const nixl_meta_dlist_t &dlist);
-
-        nixl_status_t
-        storeMetadata(nixlMemViewH proxy_memview,
-                      const nixl_remote_meta_dlist_t &dlist);
-
-        bool
+        [[nodiscard]] bool
         resolveProxyMemView(nixlMemViewH proxy_memview,
                             nixlMemViewH &backend_memview) const;
 
@@ -348,7 +159,7 @@ class nixlProxyRuntime {
         shutdown();
 
         const nixlProxyMemViewRegistry &
-        memviewRegistry() const { return memview_registry_; }
+        memviewRegistry() const { return *memview_registry_; }
 
         const nixlProxyChannelView *
         deviceChannelViews() const {
@@ -379,7 +190,9 @@ class nixlProxyRuntime {
         nixlDeviceMem device_channel_views_mem_;
         nixlDeviceMem device_context_mem_;
         std::vector<std::unique_ptr<ProxyWorker>> workers_;
-        nixlProxyMemViewRegistry memview_registry_;
+        /** Built in build(), once the device context it stamps into memviews
+         *  exists; destroyed by shutdown(), which frees every memview with it. */
+        std::unique_ptr<nixlProxyMemViewRegistry> memview_registry_;
         alignas(64) std::atomic<uint64_t> shutdown_state_{
             static_cast<uint64_t>(nixl_proxy_control_state_t::SHUTDOWN)};
         uint64_t *shutdown_word_dev_ = nullptr;

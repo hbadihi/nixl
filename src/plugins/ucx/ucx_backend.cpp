@@ -1854,7 +1854,7 @@ nixlUcxEngine::wrapMemView(nixlMemViewH backend_mvh, nixlMemViewH &mvh) const {
     const nixl_status_t status = nixlDeviceMemViewAllocate(mode, backend_mvh, mvh);
     if (status != NIXL_SUCCESS) {
         if (proxyRuntime_) {
-            proxyRuntime_->unregisterProxyMemView(backend_mvh);
+            static_cast<void>(proxyRuntime_->unregisterProxyMemView(backend_mvh));
         } else {
             nixl::ucx::releaseMemList(backend_mvh);
         }
@@ -1873,7 +1873,7 @@ nixlUcxEngine::releaseMemView(nixlMemViewH mem_view) const {
 
     if (proxyRuntime_) {
         nixlMemViewH resolved = nullptr;
-        proxyRuntime_->resolveProxyMemView(backend_mvh, resolved);
+        static_cast<void>(proxyRuntime_->resolveProxyMemView(backend_mvh, resolved));
         const nixl_status_t status = proxyRuntime_->unregisterProxyMemView(backend_mvh);
         if (status != NIXL_SUCCESS) {
             NIXL_ERROR << "Failed to release proxy memory view " << mem_view << " with status "

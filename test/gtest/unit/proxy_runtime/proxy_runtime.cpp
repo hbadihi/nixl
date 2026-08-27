@@ -29,6 +29,7 @@
 
 #include "device/device_allocator.h"
 #include "device/proxy/proxy_backend_ops.h"
+#include "device/proxy/proxy_registry.h"
 #include "device/proxy/proxy_runtime.h"
 #include "device/proxy/proxy_worker.h"
 
@@ -573,8 +574,6 @@ TEST_F(ProxyRuntimeTest, PrepMemViewProducesReadyEntries) {
     DummyBackendMD local_md;
     DummyBackendMD remote_md;
     ASSERT_EQ(initRuntime(1, 1), NIXL_SUCCESS);
-    const auto local_backend = reinterpret_cast<nixlMemViewH>(uintptr_t{0x10});
-    const auto remote_backend = reinterpret_cast<nixlMemViewH>(uintptr_t{0x20});
 
     nixl_meta_dlist_t local_dlist(DRAM_SEG);
     local_dlist.addDesc(nixlMetaDesc(0x1000, 64, 0, &local_md));
@@ -589,14 +588,12 @@ TEST_F(ProxyRuntimeTest, PrepMemViewProducesReadyEntries) {
 
     nixlMemViewH src_proxy = nullptr;
     nixlMemViewH dst_proxy = nullptr;
-    ASSERT_EQ(runtime_->prepMemView(local_backend, local_dlist, &src_proxy), NIXL_SUCCESS);
-    ASSERT_EQ(runtime_->prepMemView(remote_backend, remote_dlist, &dst_proxy), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->prepMemView(local_dlist, &src_proxy), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->prepMemView(remote_dlist, &dst_proxy), NIXL_SUCCESS);
 
     nixlMemViewH resolved = nullptr;
     EXPECT_TRUE(runtime_->resolveProxyMemView(src_proxy, resolved));
-    EXPECT_EQ(resolved, local_backend);
     EXPECT_TRUE(runtime_->resolveProxyMemView(dst_proxy, resolved));
-    EXPECT_EQ(resolved, remote_backend);
 
     nixlProxySubmission submission{};
     submission.opcode = nixl_proxy_opcode_t::PUT;
@@ -701,13 +698,9 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedTransportDescriptors) {
 
     nixlMemViewH src_proxy = nullptr;
     nixlMemViewH dst_proxy = nullptr;
-    ASSERT_EQ(
-        runtime_->registerProxyMemView(reinterpret_cast<nixlMemViewH>(uintptr_t{0x10}), &src_proxy),
-        NIXL_SUCCESS);
-
     nixl_meta_dlist_t local_dlist(DRAM_SEG);
     local_dlist.addDesc(nixlMetaDesc(0x1000, 64, 0, &local_md));
-    ASSERT_EQ(runtime_->storeMetadata(src_proxy, local_dlist), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->prepMemView(local_dlist, &src_proxy), NIXL_SUCCESS);
 
     nixl_remote_meta_dlist_t remote_dlist(VRAM_SEG);
     nixlRemoteMetaDesc remote_desc("peer");
@@ -900,13 +893,9 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsReadyPeersForOwnedChannel) {
     ASSERT_EQ(initRuntime(1, 1, NIXL_SUCCESS, 2), NIXL_SUCCESS);
 
     nixlMemViewH src_proxy = nullptr;
-    ASSERT_EQ(
-        runtime_->registerProxyMemView(reinterpret_cast<nixlMemViewH>(uintptr_t{0x10}), &src_proxy),
-        NIXL_SUCCESS);
-
     nixl_meta_dlist_t local_dlist(DRAM_SEG);
     local_dlist.addDesc(nixlMetaDesc(0x1000, 64, 0, &local_md));
-    ASSERT_EQ(runtime_->storeMetadata(src_proxy, local_dlist), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->prepMemView(local_dlist, &src_proxy), NIXL_SUCCESS);
 
     nixlMemViewH dst_proxy = nullptr;
     ASSERT_EQ(runtime_->prepMemView(makeRemotePeerDlist({"peer0", "peer1"}, &remote_md), &dst_proxy),
@@ -958,9 +947,9 @@ TEST_F(ProxyRuntimeTest, ConsumerIndexAdvancesOnlyAfterBackendCompletion) {
     backend.submit_rc_ = NIXL_IN_PROG;
     backend.completion_rc_ = NIXL_IN_PROG;
 
-    nixlProxyMemViewRegistry registry(nixlGetDeviceAllocator());
+    nixlProxyMemViewRegistry registry(nixlGetDeviceAllocator(), nullptr);
     nixlMemViewH dst_proxy = nullptr;
-    ASSERT_EQ(registry.prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &dst_proxy),
+    ASSERT_EQ(registry.prepRemote(makeRemotePeerDlist({"peer"}, &remote_md), {}, dst_proxy),
               NIXL_SUCCESS);
 
     nixlProxyChannelState channel;
@@ -992,9 +981,9 @@ TEST_F(ProxyRuntimeTest, InFlightRequestsAreBoundedByRingDepth) {
     backend.submit_rc_ = NIXL_IN_PROG;
     backend.completion_rc_ = NIXL_IN_PROG;
 
-    nixlProxyMemViewRegistry registry(nixlGetDeviceAllocator());
+    nixlProxyMemViewRegistry registry(nixlGetDeviceAllocator(), nullptr);
     nixlMemViewH dst_proxy = nullptr;
-    ASSERT_EQ(registry.prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &dst_proxy),
+    ASSERT_EQ(registry.prepRemote(makeRemotePeerDlist({"peer"}, &remote_md), {}, dst_proxy),
               NIXL_SUCCESS);
 
     nixlProxyChannelState channel;
@@ -1034,9 +1023,9 @@ TEST_F(ProxyRuntimeTest, CompletionsPublishInSubmissionOrder) {
     backend.submit_rc_ = NIXL_IN_PROG;
     backend.completion_rc_ = NIXL_IN_PROG;
 
-    nixlProxyMemViewRegistry registry(nixlGetDeviceAllocator());
+    nixlProxyMemViewRegistry registry(nixlGetDeviceAllocator(), nullptr);
     nixlMemViewH dst_proxy = nullptr;
-    ASSERT_EQ(registry.prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &dst_proxy),
+    ASSERT_EQ(registry.prepRemote(makeRemotePeerDlist({"peer"}, &remote_md), {}, dst_proxy),
               NIXL_SUCCESS);
 
     nixlProxyChannelState channel;
@@ -1072,9 +1061,9 @@ TEST_F(ProxyRuntimeTest, PreparationErrorLatchesStatusButLaterWorkIsReclaimed) {
     backend.submit_rc_ = NIXL_IN_PROG;
     backend.completion_rc_ = NIXL_SUCCESS;
 
-    nixlProxyMemViewRegistry registry(nixlGetDeviceAllocator());
+    nixlProxyMemViewRegistry registry(nixlGetDeviceAllocator(), nullptr);
     nixlMemViewH dst_proxy = nullptr;
-    ASSERT_EQ(registry.prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &dst_proxy),
+    ASSERT_EQ(registry.prepRemote(makeRemotePeerDlist({"peer"}, &remote_md), {}, dst_proxy),
               NIXL_SUCCESS);
 
     nixlProxyChannelState channel;
@@ -1105,9 +1094,9 @@ TEST_F(ProxyRuntimeTest, SubmitAndCompletionErrorsLatchFirstStatusAndRetireWork)
     backend.submit_rcs_ = {NIXL_ERR_BACKEND, NIXL_IN_PROG, NIXL_IN_PROG};
     backend.completion_rc_ = NIXL_IN_PROG;
 
-    nixlProxyMemViewRegistry registry(nixlGetDeviceAllocator());
+    nixlProxyMemViewRegistry registry(nixlGetDeviceAllocator(), nullptr);
     nixlMemViewH dst_proxy = nullptr;
-    ASSERT_EQ(registry.prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &dst_proxy),
+    ASSERT_EQ(registry.prepRemote(makeRemotePeerDlist({"peer"}, &remote_md), {}, dst_proxy),
               NIXL_SUCCESS);
 
     nixlProxyChannelState channel;

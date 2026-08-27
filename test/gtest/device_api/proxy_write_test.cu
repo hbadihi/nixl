@@ -630,13 +630,10 @@ registerDummyMemViews(nixlProxyRuntime &runtime, uint32_t peer_count) {
     static DummyBackendMD remote_md;
 
     DummyProxyMemViews handles;
-    nixlMemViewH dummy_local_backend = reinterpret_cast<nixlMemViewH>(uintptr_t{0xBEEF});
-
-    EXPECT_EQ(runtime.registerProxyMemView(dummy_local_backend, &handles.src_raw), NIXL_SUCCESS);
 
     nixl_meta_dlist_t local_dlist(DRAM_SEG);
     local_dlist.addDesc(nixlMetaDesc(0x1000, 64, 0, &local_md));
-    EXPECT_EQ(runtime.storeMetadata(handles.src_raw, local_dlist), NIXL_SUCCESS);
+    EXPECT_EQ(runtime.prepMemView(local_dlist, &handles.src_raw), NIXL_SUCCESS);
 
     nixl_remote_meta_dlist_t remote_dlist(VRAM_SEG);
     for (uint32_t peer = 0; peer < peer_count; ++peer) {
