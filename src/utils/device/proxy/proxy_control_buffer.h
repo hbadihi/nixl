@@ -28,6 +28,15 @@
 #include "device/device_allocator.h"
 #include "nixl_types.h"
 
+/**
+ * GPU-visible words the CPU publishes cheaply: the shutdown state and one
+ * consumer index per (channel, peer) ring.
+ *
+ * Preferred backing is GDRCopy-mapped HBM, so a store lands in device memory
+ * without a kernel launch or a copy engine. Where GDRCopy is unavailable -
+ * no gdrdrv, or an allocator whose "device" memory cannot be pinned - the
+ * buffer falls back to pinned host memory the GPU reads over PCIe.
+ */
 class nixlProxyControlBuffer {
 public:
     nixlProxyControlBuffer() = default;
@@ -55,18 +64,26 @@ public:
     writeSlot(size_t index, uint64_t value) noexcept;
 
 private:
+    nixl_status_t
+    allocateMappedHost(nixlDeviceAllocator &allocator, size_t count);
+
+#ifdef HAVE_GDRCOPY
+    /** Returns NIXL_ERR_NOT_SUPPORTED when GDRCopy cannot back this buffer. */
+    nixl_status_t
+    allocateGdrCopy(nixlDeviceAllocator &allocator, size_t count);
+#endif
+
     uint64_t *slots_dev_ = nullptr;
     uint64_t *cpu_write_ptr_ = nullptr;
     size_t count_ = 0;
+    /** Owns the mapped host slab when GDRCopy is not in use. */
+    nixlMappedHostMem control_mem_;
 #ifdef HAVE_GDRCOPY
     /** Owns the padded HBM slab; slots_dev_ is the page-aligned view into it. */
     nixlDeviceMem allocation_mem_;
     size_t mapping_size_ = 0;
     gdr_t gdr_ = nullptr;
     std::optional<gdr_mh_t> mapping_handle_;
-#else
-    /** Owns the mapped host slab behind cpu_write_ptr_ / slots_dev_. */
-    nixlMappedHostMem control_mem_;
 #endif
 };
 
