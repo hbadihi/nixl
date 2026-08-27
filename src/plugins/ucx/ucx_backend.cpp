@@ -1014,9 +1014,10 @@ nixl_status_t nixlUcxEngine::loadRemoteConnInfo (const std::string &remote_agent
         conn->eps.push_back(std::move(ep));
     }
 
-    remoteConnMap.insert({remote_agent, conn});
-
 #ifdef HAVE_NIXL_DEVICE_API
+    // Forward before registering the connection: a proxy failure must leave
+    // no remoteConnMap entry behind, or a retry would hit the duplicate check
+    // above and the proxy would never receive the conn info.
     if (proxyRuntime_) {
         const nixl_status_t proxy_status =
             proxyRuntime_->loadRemoteConnInfo(remote_agent, remote_conn_info);
@@ -1025,6 +1026,8 @@ nixl_status_t nixlUcxEngine::loadRemoteConnInfo (const std::string &remote_agent
         }
     }
 #endif
+
+    remoteConnMap.insert({remote_agent, conn});
 
     return NIXL_SUCCESS;
 }
