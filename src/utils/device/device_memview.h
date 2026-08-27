@@ -7,8 +7,15 @@
 
 #include <nixl_types.h>
 
+#include <gpu/common/nixl_device_types.cuh>
+
+/**
+ * Wrap a backend memview into the device-dispatch handle. The backend that
+ * created the memview decides the execution mode; this layer is
+ * backend-agnostic.
+ */
 [[nodiscard]] nixl_status_t
-nixlDeviceMemViewAllocate(bool use_proxy,
+nixlDeviceMemViewAllocate(nixl_device_exec_mode_t execution_mode,
                           nixlMemViewH backend_memview,
                           nixlMemViewH &wrapper_out) noexcept;
 

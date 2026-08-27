@@ -36,12 +36,14 @@ ucx_backend_dependencies = [asio_dep,
                             thread_dep,
                             ucx_dep]
 
-if cuda_dep.found()
-    ucx_backend_dependencies += [device_proxy_interface, device_allocator_interface]
-endif
-
 ucx_backend_include_directories = [nixl_inc_dirs,
                                    utils_inc_dirs]
+
+if cuda_dep.found()
+    ucx_backend_dependencies += [device_proxy_interface, device_allocator_interface]
+    # device_memview.h exposes the exec-mode enum from the GPU Device API tree.
+    ucx_backend_include_directories += [nixl_gpu_device_api_inc_dirs]
+endif
 
 if 'UCX' in static_plugins
     ucx_backend_lib = static_library('UCX',

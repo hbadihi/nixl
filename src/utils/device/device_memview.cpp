@@ -11,16 +11,13 @@
 static_assert(sizeof(nixl_device_exec_mode_t) == 1);
 
 nixl_status_t
-nixlDeviceMemViewAllocate(bool use_proxy,
+nixlDeviceMemViewAllocate(nixl_device_exec_mode_t execution_mode,
                           nixlMemViewH backend_memview,
                           nixlMemViewH &wrapper_out) noexcept {
     wrapper_out = nullptr;
     if (backend_memview == nullptr) {
         return NIXL_ERR_INVALID_PARAM;
     }
-
-    const nixl_device_exec_mode_t execution_mode =
-        use_proxy ? nixl_device_exec_mode_t::PROXY : nixl_device_exec_mode_t::UCX_DIRECT;
 
     nixlDeviceAllocator &allocator = nixlGetDeviceAllocator();
     nixlDeviceMem wrapper_mem;

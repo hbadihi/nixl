@@ -1741,8 +1741,9 @@ nixlUcxEngine::prepMemView(const nixl_meta_dlist_t &dlist,
 
 nixl_status_t
 nixlUcxEngine::wrapMemView(nixlMemViewH backend_mvh, nixlMemViewH &mvh) const {
-    const nixl_status_t status =
-        nixlDeviceMemViewAllocate(proxyRuntime_ != nullptr, backend_mvh, mvh);
+    const nixl_device_exec_mode_t mode = proxyRuntime_ ? nixl_device_exec_mode_t::PROXY :
+                                                         nixl_device_exec_mode_t::UCX_DIRECT;
+    const nixl_status_t status = nixlDeviceMemViewAllocate(mode, backend_mvh, mvh);
     if (status != NIXL_SUCCESS) {
         if (proxyRuntime_) {
             proxyRuntime_->unregisterProxyMemView(backend_mvh);

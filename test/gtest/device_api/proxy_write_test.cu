@@ -698,8 +698,8 @@ registerDummyMemViews(nixlProxyRuntime &runtime, uint32_t peer_count) {
     }
     EXPECT_EQ(runtime.prepMemView(remote_dlist, &handles.dst_raw), NIXL_SUCCESS);
 
-    EXPECT_EQ(nixlDeviceMemViewAllocate(true, handles.src_raw, handles.src), NIXL_SUCCESS);
-    EXPECT_EQ(nixlDeviceMemViewAllocate(true, handles.dst_raw, handles.dst), NIXL_SUCCESS);
+    EXPECT_EQ(nixlDeviceMemViewAllocate(nixl_device_exec_mode_t::PROXY, handles.src_raw, handles.src), NIXL_SUCCESS);
+    EXPECT_EQ(nixlDeviceMemViewAllocate(nixl_device_exec_mode_t::PROXY, handles.dst_raw, handles.dst), NIXL_SUCCESS);
 
     return handles;
 }
