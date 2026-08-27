@@ -558,14 +558,18 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
                        uint32_t max_peers,
                        uint32_t channel_count,
                        uint32_t worker_count,
-                       uint64_t pthr_delay_us) {
+                       uint64_t pthr_delay_us,
+                       uint32_t ring_depth) {
     NIXL_INFO << "ProxyRuntime::init: max_peers=" << max_peers << " channel_count=" << channel_count
               << " worker_count=" << worker_count << " pthr_delay_us=" << pthr_delay_us
-              << " backend=" << backend.get();
-    if (backend == nullptr || max_peers == 0 || channel_count == 0 || worker_count == 0) {
+              << " ring_depth=" << ring_depth << " backend=" << backend.get();
+    if (backend == nullptr || max_peers == 0 || channel_count == 0 || worker_count == 0 ||
+        ring_depth == 0) {
         NIXL_ERROR << "ProxyRuntime::init: invalid params";
         return NIXL_ERR_INVALID_PARAM;
     }
+
+    ring_depth_ = ring_depth;
 
     backend_ = std::move(backend);
     memview_registry_.clear();

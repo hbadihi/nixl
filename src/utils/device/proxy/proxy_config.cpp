@@ -32,7 +32,13 @@ constexpr std::array kKnownProxyParams = {
     kProxyThreadCountParam,
     kProxyMaxPeersParam,
     kProxyPthrDelayParam,
+    kProxyRingDepthParam,
 };
+
+bool
+isPowerOfTwo(uint32_t value) noexcept {
+    return value != 0 && (value & (value - 1)) == 0;
+}
 
 bool
 isProxyParamKey(const std::string &key) {
@@ -76,11 +82,14 @@ nixlParseProxyConfig(const nixlBackendInitParams &init_params, nixlProxyConfig &
             nixl::getBackendParamOptional<uint32_t>(params, std::string(kProxyMaxPeersParam));
         const auto pthr_delay =
             nixl::getBackendParamOptional<uint64_t>(params, std::string(kProxyPthrDelayParam));
+        const auto ring_depth =
+            nixl::getBackendParamOptional<uint32_t>(params, std::string(kProxyRingDepthParam));
 
         config.channel_count = channel_count.value_or(kDefaultProxyChannelCount);
         config.thread_count = thread_count.value_or(config.channel_count);
         config.max_peers = max_peers.value_or(kDefaultProxyMaxPeers);
         config.pthr_delay_us = pthr_delay.value_or(0);
+        config.ring_depth = ring_depth.value_or(kDefaultProxyRingDepth);
     }
     catch (const std::exception &e) {
         NIXL_ERROR << "Failed to parse device proxy backend parameters: " << e.what();
@@ -101,6 +110,19 @@ nixlParseProxyConfig(const nixlBackendInitParams &init_params, nixlProxyConfig &
                    << config.channel_count << " " << kProxyThreadCountParam << "="
                    << config.thread_count << " " << kProxyMaxPeersParam << "=" << config.max_peers;
         return NIXL_ERR_INVALID_PARAM;
+    }
+
+    if (!isPowerOfTwo(config.ring_depth)) {
+        NIXL_ERROR << "Device proxy " << kProxyRingDepthParam
+                   << " must be a non-zero power of two: " << config.ring_depth;
+        return NIXL_ERR_INVALID_PARAM;
+    }
+
+    if (config.thread_count > config.channel_count) {
+        NIXL_INFO << "Device proxy " << kProxyThreadCountParam << "=" << config.thread_count
+                  << " exceeds " << kProxyChannelCountParam << "=" << config.channel_count
+                  << "; only " << config.effectiveThreadCount()
+                  << " thread(s) will be started (channels are striped across threads)";
     }
 
     if (init_params.enableProgTh) {

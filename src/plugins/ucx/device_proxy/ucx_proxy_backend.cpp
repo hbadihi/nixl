@@ -15,6 +15,9 @@
  * limitations under the License.
  */
 #include "ucx_proxy_backend.h"
+
+#include <cassert>
+
 #include "../ucx_backend.h"
 #include "nixl_log.h"
 #include "nixl_types.h"
@@ -39,14 +42,10 @@ nixlUcxProxyBackendAdapter::init(uint32_t, uint32_t channel_count, uint32_t peer
     if (engine_ == nullptr || channel_count == 0 || peer_capacity == 0) {
         return NIXL_ERR_INVALID_PARAM;
     }
-    const size_t worker_count = engine_->getSharedWorkersSize();
-    const size_t expected_workers = static_cast<size_t>(channel_count) * peer_capacity;
-    if (worker_count != expected_workers) {
-        NIXL_ERROR << "UCX proxy requires one UCX worker per (channel, peer): workers="
-                   << worker_count << " channels=" << channel_count
-                   << " peer_capacity=" << peer_capacity << " expected=" << expected_workers;
-        return NIXL_ERR_INVALID_PARAM;
-    }
+    // nixlProxyConfig::ucxWorkerCount() is the single place the topology is
+    // turned into a worker count, and create() sizes the engine from it.
+    assert(engine_->getSharedWorkersSize() == static_cast<size_t>(channel_count) * peer_capacity &&
+           "UCX proxy requires one UCX worker per (channel, peer)");
     peer_capacity_ = peer_capacity;
     return NIXL_SUCCESS;
 }

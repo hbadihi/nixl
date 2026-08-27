@@ -55,6 +55,7 @@ TEST(ProxyConfigTest, EnabledDefaults) {
     EXPECT_EQ(config.thread_count, 4u);
     EXPECT_EQ(config.max_peers, 8u);
     EXPECT_EQ(config.pthr_delay_us, 0u);
+    EXPECT_EQ(config.ring_depth, kDefaultProxyRingDepth);
 }
 
 TEST(ProxyConfigTest, ExplicitValues) {
@@ -139,6 +140,54 @@ TEST(ProxyConfigTest, ProgressThreadConflict) {
     nixl_b_params_t off_params;
     EXPECT_EQ(nixlParseProxyConfig(makeInitParams(&off_params, true), config), NIXL_SUCCESS);
     EXPECT_FALSE(config.enabled);
+}
+
+TEST(ProxyConfigTest, TopologyAccessors) {
+    nixl_b_params_t params{{"device_proxy", "true"},
+                           {"proxy_channel_count", "3"},
+                           {"proxy_thread_count", "2"},
+                           {"proxy_max_peers", "5"}};
+    nixlProxyConfig config;
+    ASSERT_EQ(nixlParseProxyConfig(makeInitParams(&params), config), NIXL_SUCCESS);
+    EXPECT_EQ(config.ucxWorkerCount(), 15u);
+    EXPECT_EQ(config.effectiveThreadCount(), 2u);
+}
+
+TEST(ProxyConfigTest, EffectiveThreadCountClampsToChannelCount) {
+    nixl_b_params_t params{{"device_proxy", "true"},
+                           {"proxy_channel_count", "2"},
+                           {"proxy_thread_count", "8"}};
+    nixlProxyConfig config;
+    ASSERT_EQ(nixlParseProxyConfig(makeInitParams(&params), config), NIXL_SUCCESS);
+    // The parsed value is preserved; only the started-thread count is clamped.
+    EXPECT_EQ(config.thread_count, 8u);
+    EXPECT_EQ(config.effectiveThreadCount(), 2u);
+}
+
+TEST(ProxyConfigTest, RingDepthOverride) {
+    nixl_b_params_t params{{"device_proxy", "true"}, {"proxy_ring_depth", "1024"}};
+    nixlProxyConfig config;
+    ASSERT_EQ(nixlParseProxyConfig(makeInitParams(&params), config), NIXL_SUCCESS);
+    EXPECT_EQ(config.ring_depth, 1024u);
+}
+
+TEST(ProxyConfigTest, RingDepthMustBeNonZeroPowerOfTwo) {
+    nixlProxyConfig config;
+    for (const char *depth : {"0", "3", "100", "255"}) {
+        nixl_b_params_t params{{"device_proxy", "true"}, {"proxy_ring_depth", depth}};
+        EXPECT_EQ(nixlParseProxyConfig(makeInitParams(&params), config), NIXL_ERR_INVALID_PARAM)
+            << depth;
+    }
+    for (const char *depth : {"1", "2", "512"}) {
+        nixl_b_params_t params{{"device_proxy", "true"}, {"proxy_ring_depth", depth}};
+        EXPECT_EQ(nixlParseProxyConfig(makeInitParams(&params), config), NIXL_SUCCESS) << depth;
+    }
+}
+
+TEST(ProxyConfigTest, RingDepthWithoutEnableRejected) {
+    nixl_b_params_t params{{"proxy_ring_depth", "512"}};
+    nixlProxyConfig config;
+    EXPECT_EQ(nixlParseProxyConfig(makeInitParams(&params), config), NIXL_ERR_INVALID_PARAM);
 }
 
 TEST(ProxyConfigTest, NonProxyParamsIgnored) {

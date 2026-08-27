@@ -797,8 +797,7 @@ nixlUcxEngine::create(const nixlBackendInitParams &init_params) {
 
         // The proxy topology dictates the shared-worker count: one UCX worker
         // per channel x peer slot.
-        const size_t derived_workers =
-            static_cast<size_t>(proxy_config.channel_count) * proxy_config.max_peers;
+        const size_t derived_workers = proxy_config.ucxWorkerCount();
         const auto explicit_workers =
             nixl::getBackendParamOptional<size_t>(init_params.customParams, "num_workers");
         if (explicit_workers.has_value() && *explicit_workers != derived_workers) {
@@ -929,8 +928,9 @@ nixlUcxEngine::setupProxyRuntime(const nixlProxyConfig &config) {
     nixl_status_t status = runtime->init(std::move(adapter),
                                          config.max_peers,
                                          config.channel_count,
-                                         config.thread_count,
-                                         config.pthr_delay_us);
+                                         config.effectiveThreadCount(),
+                                         config.pthr_delay_us,
+                                         config.ring_depth);
     if (status != NIXL_SUCCESS) {
         NIXL_ERROR << "Device proxy runtime init failed: " << status;
         return status;
@@ -945,7 +945,8 @@ nixlUcxEngine::setupProxyRuntime(const nixlProxyConfig &config) {
 
     proxyRuntime_ = std::move(runtime);
     NIXL_INFO << "Engine-owned device proxy enabled: " << config.channel_count << " channel(s), "
-              << config.thread_count << " thread(s), max_peers=" << config.max_peers
+              << config.effectiveThreadCount() << " thread(s), max_peers=" << config.max_peers
+              << ", ring_depth=" << config.ring_depth
               << ", pthr_delay_us=" << config.pthr_delay_us;
     return NIXL_SUCCESS;
 }

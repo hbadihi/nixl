@@ -28,12 +28,12 @@
 #include "backend_aux.h"
 #include "device/device_allocator.h"
 #include "proxy_protocol.h"
+#include "proxy_config.h"
 #include "backend_adapter.h"
 #include "proxy_control_buffer.h"
 
 class ProxyWorker;
 
-static constexpr uint32_t kDefaultProxyRingDepth = 256;
 static constexpr size_t kProxyShutdownSlot = 0;
 static constexpr size_t kProxyCiSlotBase = 1;
 
@@ -285,7 +285,8 @@ class nixlProxyRuntime {
              uint32_t max_peers,
              uint32_t channel_count,
              uint32_t worker_count,
-             uint64_t pthr_delay_us = 0);
+             uint64_t pthr_delay_us = 0,
+             uint32_t ring_depth = kDefaultProxyRingDepth);
 
         nixl_status_t
         loadRemoteConnInfo(const std::string &remote_name,
