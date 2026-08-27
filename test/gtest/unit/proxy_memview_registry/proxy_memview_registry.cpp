@@ -24,6 +24,7 @@
 #include <gtest/gtest.h>
 #include <cuda_runtime.h>
 
+#include "device/device_allocator.h"
 #include "device/proxy/proxy_runtime.h"
 
 namespace gtest {
@@ -36,7 +37,7 @@ namespace proxy_memview_registry {
             DummyBackendMD() : nixlBackendMD(false) {}
         };
 
-        nixlProxyMemViewRegistry registry_;
+        nixlProxyMemViewRegistry registry_{nixlGetDeviceAllocator()};
         DummyBackendMD local_md_;
         DummyBackendMD remote_md_;
 

@@ -17,7 +17,6 @@
 
 #include "ucx_backend.h"
 #include "ucx_sgl.h"
-#include "device_proxy/ucx_proxy_backend.h"
 #ifdef HAVE_NIXL_DEVICE_API
 #include "device/device_memview.h"
 #include "device/proxy/proxy_config.h"
@@ -29,6 +28,7 @@
 #include "common/configuration.h"
 #include "common/nixl_log.h"
 
+#include <cassert>
 #include <optional>
 #include <limits>
 #include <future>
@@ -920,34 +920,145 @@ nixlUcxEngine::~nixlUcxEngine() {
 }
 
 #ifdef HAVE_NIXL_DEVICE_API
+namespace {
+static_assert(sizeof(nixlUcxReq) <= sizeof(uint64_t),
+              "UCX proxy requests must fit in the opaque token field");
+
+nixlUcxReq
+proxyReqFromToken(const nixlBackendProxyRequest &request) {
+    return reinterpret_cast<nixlUcxReq>(request.token);
+}
+
+uint64_t
+proxyTokenFromReq(nixlUcxReq req) {
+    return static_cast<uint64_t>(reinterpret_cast<uintptr_t>(req));
+}
+} // namespace
+
 nixl_status_t
 nixlUcxEngine::setupProxyRuntime(const nixlProxyConfig &config) {
-    auto adapter = std::make_unique<nixlUcxProxyBackendAdapter>(this);
-    auto runtime = std::make_unique<nixlProxyRuntime>();
+    // One UCX worker per (channel, peer) slot: create() already sized the
+    // engine from nixlProxyConfig::ucxWorkerCount(), so the mapping below is
+    // the only place that layout is spelled out.
+    const size_t peer_capacity = config.max_peers;
+    const auto worker_id_for = [peer_capacity](uint32_t channel_id, uint32_t peer_index) {
+        return static_cast<size_t>(channel_id) * peer_capacity + peer_index;
+    };
 
-    nixl_status_t status = runtime->init(std::move(adapter),
-                                         config.max_peers,
-                                         config.channel_count,
-                                         config.effectiveThreadCount(),
-                                         config.pthr_delay_us,
-                                         config.ring_depth);
+    nixlProxyBackendOps ops;
+
+    ops.init = [this](const nixlProxyConfig &cfg) {
+        assert(getSharedWorkersSize() == cfg.ucxWorkerCount() &&
+               "UCX proxy requires one UCX worker per (channel, peer)");
+        static_cast<void>(cfg);
+        return NIXL_SUCCESS;
+    };
+
+    ops.submit = [this, worker_id_for](const nixlBackendProxySubmission &submission,
+                                       nixlBackendProxyRequest &request) {
+        request = nixlBackendProxyRequest{};
+        const size_t worker_id = worker_id_for(submission.channel_id, submission.peer_index);
+
+        nixlUcxReq req = nullptr;
+        nixl_status_t status;
+        switch (submission.opcode) {
+        case nixl_proxy_opcode_t::PUT:
+            status = submitProxyRmaWrite(
+                submission.local.desc, submission.remote.desc, submission.size, worker_id, req);
+            break;
+        case nixl_proxy_opcode_t::ATOMIC_ADD:
+            status = submitProxyAtomicAdd(submission.remote.desc, submission.value, worker_id, req);
+            break;
+        default:
+            return NIXL_ERR_NOT_SUPPORTED;
+        }
+
+        if (status == NIXL_IN_PROG) {
+            request = nixlBackendProxyRequest{proxyTokenFromReq(req), worker_id};
+        }
+        NIXL_DEBUG << "device proxy submit: opcode=" << static_cast<int>(submission.opcode)
+                   << " src_addr=0x" << std::hex << submission.local.desc.addr << " dst_addr=0x"
+                   << submission.remote.desc.addr << std::dec << " size=" << submission.size
+                   << " remote_agent='" << submission.remote_agent << "' token=" << request.token
+                   << " context=" << request.context << " status=" << status;
+        return status;
+    };
+
+    ops.check_completion = [this](const nixlBackendProxyRequest &request) {
+        if (!request) {
+            return NIXL_ERR_INVALID_PARAM;
+        }
+
+        const nixlUcxReq req = proxyReqFromToken(request);
+        const nixl_status_t status = checkProxyRequest(req);
+        if (status == NIXL_IN_PROG) {
+            return NIXL_IN_PROG;
+        }
+
+        NIXL_DEBUG << "device proxy completion: token=" << request.token
+                   << " context=" << request.context << " status=" << status;
+        releaseProxyRequest(request.context, req, false);
+        return status;
+    };
+
+    ops.release_request = [this](const nixlBackendProxyRequest &request) {
+        if (request) {
+            releaseProxyRequest(request.context, proxyReqFromToken(request), true);
+        }
+    };
+
+    ops.progress = [this, worker_id_for](uint32_t channel_id, uint32_t peer_index) {
+        progress(worker_id_for(channel_id, peer_index));
+        return NIXL_SUCCESS;
+    };
+
+    ops.shutdown = []() { return NIXL_SUCCESS; };
+
+    ops.resolve_direct_ptrs = [this](const nixl_remote_meta_dlist_t &dlist,
+                                     std::vector<void *> &direct_ptrs) {
+        direct_ptrs.assign(dlist.descCount(), nullptr);
+        const size_t worker_id = getSharedWorkerId();
+
+        size_t index = 0;
+        for (const auto &desc : dlist) {
+            if (desc.remoteAgent == nixl_null_agent) {
+                ++index;
+                continue;
+            }
+
+            const auto *metadata = static_cast<const nixlUcxPublicMetadata *>(desc.metadataP);
+            void *direct_ptr = nullptr;
+            const ucs_status_t status = ucp_rkey_ptr(
+                metadata->getRkey(worker_id).get(), static_cast<uint64_t>(desc.addr), &direct_ptr);
+            if (status == UCS_OK) {
+                direct_ptrs[index] = direct_ptr;
+            } else {
+                NIXL_DEBUG << "device proxy: direct access unavailable for descriptor " << index
+                           << ": " << ucs_status_string(status);
+            }
+            ++index;
+        }
+
+        return NIXL_SUCCESS;
+    };
+
+    std::unique_ptr<nixlProxyRuntime> runtime;
+    nixl_status_t status = nixlProxyRuntime::create(std::move(ops), config, runtime);
     if (status != NIXL_SUCCESS) {
-        NIXL_ERROR << "Device proxy runtime init failed: " << status;
+        NIXL_ERROR << "Device proxy runtime creation failed: " << status;
         return status;
     }
 
     status = runtime->startWorkers();
     if (status != NIXL_SUCCESS) {
         NIXL_ERROR << "Device proxy runtime failed to start workers: " << status;
-        runtime->shutdown();
         return status;
     }
 
     proxyRuntime_ = std::move(runtime);
     NIXL_INFO << "Engine-owned device proxy enabled: " << config.channel_count << " channel(s), "
               << config.effectiveThreadCount() << " thread(s), max_peers=" << config.max_peers
-              << ", ring_depth=" << config.ring_depth
-              << ", pthr_delay_us=" << config.pthr_delay_us;
+              << ", ring_depth=" << config.ring_depth << ", pthr_delay_us=" << config.pthr_delay_us;
     return NIXL_SUCCESS;
 }
 #endif
@@ -987,7 +1098,7 @@ nixl_status_t nixlUcxEngine::disconnect(const std::string &remote_agent) {
 #ifdef HAVE_NIXL_DEVICE_API
     if (proxyRuntime_) {
         const nixl_status_t proxy_status = proxyRuntime_->remoteDisconnected(remote_agent);
-        if (proxy_status != NIXL_SUCCESS && proxy_status != NIXL_ERR_NOT_SUPPORTED) {
+        if (proxy_status != NIXL_SUCCESS) {
             return proxy_status;
         }
     }
@@ -1022,7 +1133,7 @@ nixl_status_t nixlUcxEngine::loadRemoteConnInfo (const std::string &remote_agent
     if (proxyRuntime_) {
         const nixl_status_t proxy_status =
             proxyRuntime_->loadRemoteConnInfo(remote_agent, remote_conn_info);
-        if (proxy_status != NIXL_SUCCESS && proxy_status != NIXL_ERR_NOT_SUPPORTED) {
+        if (proxy_status != NIXL_SUCCESS) {
             return proxy_status;
         }
     }

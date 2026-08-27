@@ -29,7 +29,7 @@
 #include "device/device_allocator.h"
 #include "proxy_protocol.h"
 #include "proxy_config.h"
-#include "backend_adapter.h"
+#include "proxy_backend_ops.h"
 #include "proxy_control_buffer.h"
 
 class ProxyWorker;
@@ -80,7 +80,10 @@ struct alignas(64) nixlProxyChannelState {
     nixlProxyChannelState &operator=(const nixlProxyChannelState &) = delete;
 
     nixl_status_t
-    allocate(uint32_t depth, nixlProxyControlBuffer *control_slots, size_t control_slot_index);
+    allocate(nixlDeviceAllocator &allocator,
+             uint32_t depth,
+             nixlProxyControlBuffer *control_slots,
+             size_t control_slot_index);
 
     nixl_status_t
     publishConsumerIdx(uint64_t value) noexcept;
@@ -106,7 +109,8 @@ struct alignas(64) nixlProxyChannelState {
 
 class nixlProxyMemViewRegistry {
     public:
-        nixlProxyMemViewRegistry() = default;
+        explicit nixlProxyMemViewRegistry(nixlDeviceAllocator &allocator) noexcept
+            : allocator_(allocator) {}
         ~nixlProxyMemViewRegistry();
 
         nixlProxyMemViewRegistry(const nixlProxyMemViewRegistry &) = delete;
@@ -264,6 +268,7 @@ class nixlProxyMemViewRegistry {
         static void
         fillRemoteMetadata(const nixl_remote_meta_dlist_t &dlist, RemoteMetadata &out);
 
+        nixlDeviceAllocator &allocator_;
         std::vector<RegistryEntry> entries_;
         std::unordered_map<nixlMemViewH, uint32_t> handle_to_id_;
         uint64_t next_proxy_memview_id_ = 1;
@@ -272,7 +277,6 @@ class nixlProxyMemViewRegistry {
 
 class nixlProxyRuntime {
     public:
-        nixlProxyRuntime();
         ~nixlProxyRuntime();
 
         nixlProxyRuntime(nixlProxyRuntime &&) = delete;
@@ -280,13 +284,18 @@ class nixlProxyRuntime {
         nixlProxyRuntime& operator=(nixlProxyRuntime &&) = delete;
         nixlProxyRuntime& operator=(const nixlProxyRuntime &) = delete;
 
-        nixl_status_t
-        init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
-             uint32_t max_peers,
-             uint32_t channel_count,
-             uint32_t worker_count,
-             uint64_t pthr_delay_us = 0,
-             uint32_t ring_depth = kDefaultProxyRingDepth);
+        /**
+         * Build a ready - but not yet running - runtime, or fail leaving `out`
+         * untouched. All device memory comes from `allocator`, which must
+         * outlive the runtime. startWorkers() is a separate, later call: the
+         * worker threads call back into the backend that owns the runtime, so
+         * the owner has to be fully constructed first.
+         */
+        [[nodiscard]] static nixl_status_t
+        create(nixlProxyBackendOps backend_ops,
+               const nixlProxyConfig &config,
+               std::unique_ptr<nixlProxyRuntime> &out,
+               nixlDeviceAllocator &allocator = nixlGetDeviceAllocator());
 
         nixl_status_t
         loadRemoteConnInfo(const std::string &remote_name,
@@ -332,7 +341,7 @@ class nixlProxyRuntime {
         resolveProxyMemView(nixlMemViewH proxy_memview,
                             nixlMemViewH &backend_memview) const;
 
-        nixl_status_t
+        [[nodiscard]] nixl_status_t
         startWorkers();
 
         nixl_status_t
@@ -350,9 +359,20 @@ class nixlProxyRuntime {
         deviceContext() const { return device_context_mem_.as<nixlProxyDeviceContextData>(); }
 
     private:
+        nixlProxyRuntime(nixlProxyBackendOps backend_ops,
+                         const nixlProxyConfig &config,
+                         nixlDeviceAllocator &allocator) noexcept;
+
+        /** Allocate rings, device context and workers; see create(). */
+        nixl_status_t
+        build();
+
         void
         joinWorkerThreads() noexcept;
 
+        nixlDeviceAllocator &allocator_;
+        nixlProxyBackendOps backend_ops_;
+        nixlProxyConfig config_;
         std::vector<nixlProxyChannelState> channels_;
         nixlProxyControlBuffer control_slots_;
         std::vector<nixlProxyChannelView> device_channel_views_;
@@ -360,11 +380,9 @@ class nixlProxyRuntime {
         nixlDeviceMem device_context_mem_;
         std::vector<std::unique_ptr<ProxyWorker>> workers_;
         nixlProxyMemViewRegistry memview_registry_;
-        std::unique_ptr<nixlDeviceProxyBackendAdapter> backend_;
         alignas(64) std::atomic<uint64_t> shutdown_state_{
             static_cast<uint64_t>(nixl_proxy_control_state_t::SHUTDOWN)};
         uint64_t *shutdown_word_dev_ = nullptr;
-        uint32_t ring_depth_ = kDefaultProxyRingDepth;
         bool workers_started_ = false;
 };
 

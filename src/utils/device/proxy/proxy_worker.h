@@ -23,13 +23,13 @@
 #include <thread>
 #include "proxy_protocol.h"
 
-class nixlDeviceProxyBackendAdapter;
+struct nixlProxyBackendOps;
 class nixlProxyMemViewRegistry;
 struct nixlProxyChannelState;
 
 class ProxyWorker {
     public:
-        ProxyWorker(nixlDeviceProxyBackendAdapter *backend,
+        ProxyWorker(const nixlProxyBackendOps *backend_ops,
                     const nixlProxyMemViewRegistry *proxy_memview_registry,
                     std::atomic<uint64_t> *shutdown_state,
                     nixlProxyChannelState *channels,
@@ -73,7 +73,7 @@ class ProxyWorker {
         void
         publishCompletions(nixlProxyChannelState &channel);
 
-        nixlDeviceProxyBackendAdapter *backend_ = nullptr;
+        const nixlProxyBackendOps *backend_ops_ = nullptr;
         const nixlProxyMemViewRegistry *proxy_memview_registry_ = nullptr;
         std::atomic<uint64_t> *shutdown_state_ = nullptr;
         nixlProxyChannelState *channels_ = nullptr;

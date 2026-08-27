@@ -27,7 +27,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include "device/proxy/backend_adapter.h"
+#include "device/device_allocator.h"
+#include "device/proxy/proxy_backend_ops.h"
 #include "device/proxy/proxy_runtime.h"
 #include "device/proxy/proxy_worker.h"
 
@@ -44,25 +45,47 @@ struct StubBackendState {
     std::vector<nixlBackendProxyRequest> released_requests;
 };
 
-class StubBackend : public nixlDeviceProxyBackendAdapter {
+class StubBackend {
     public:
+        /** The mock the runtime actually sees. */
+        nixlProxyBackendOps
+        ops() {
+            nixlProxyBackendOps ops;
+            ops.init = [this](const nixlProxyConfig &config) { return init(config); };
+            ops.submit = [this](const nixlBackendProxySubmission &submission,
+                                nixlBackendProxyRequest &request) {
+                return submit(submission, request);
+            };
+            ops.check_completion = [this](const nixlBackendProxyRequest &request) {
+                return checkCompletion(request);
+            };
+            ops.release_request = [this](const nixlBackendProxyRequest &request) {
+                releaseRequest(request);
+            };
+            ops.progress = [this](uint32_t, uint32_t) { return progress(); };
+            ops.shutdown = []() { return NIXL_SUCCESS; };
+            ops.on_remote_loaded = [](const std::string &, const nixl_blob_t &) {
+                return NIXL_SUCCESS;
+            };
+            ops.resolve_direct_ptrs = [this](const nixl_remote_meta_dlist_t &dlist,
+                                             std::vector<void *> &direct_ptrs) {
+                return resolveDirectPointers(dlist, direct_ptrs);
+            };
+            return ops;
+        }
+
         nixl_status_t
-        init(uint32_t worker_count, uint32_t channel_count, uint32_t max_peers) override {
+        init(const nixlProxyConfig &config) {
             init_called_ = true;
-            init_worker_count_ = worker_count;
-            init_channel_count_ = channel_count;
-            init_max_peers_ = max_peers;
+            init_worker_count_ = config.effectiveThreadCount();
+            init_channel_count_ = config.channel_count;
+            init_max_peers_ = config.max_peers;
             return init_rc_;
         }
 
         nixl_status_t
-        loadRemoteConnInfo(const std::string &, const nixl_blob_t &) override {
-            return NIXL_SUCCESS;
-        }
-
-        nixl_status_t
         resolveDirectPointers(const nixl_remote_meta_dlist_t &dlist,
-                              std::vector<void *> &direct_ptrs) override {
+                              std::vector<void *> &direct_ptrs) {
             ++resolve_direct_pointer_calls_;
             last_resolved_desc_count_ = dlist.descCount();
             if (resolve_direct_pointer_rc_ == NIXL_SUCCESS) {
@@ -72,8 +95,7 @@ class StubBackend : public nixlDeviceProxyBackendAdapter {
         }
 
         nixl_status_t
-        submit(const nixlBackendProxySubmission &submission,
-               nixlBackendProxyRequest &request) override {
+        submit(const nixlBackendProxySubmission &submission, nixlBackendProxyRequest &request) {
             nixl_status_t status = submit_rc_;
             {
                 std::lock_guard<std::mutex> lock(submit_mutex_);
@@ -91,7 +113,7 @@ class StubBackend : public nixlDeviceProxyBackendAdapter {
         }
 
         nixl_status_t
-        checkCompletion(const nixlBackendProxyRequest &request) override {
+        checkCompletion(const nixlBackendProxyRequest &request) {
             std::lock_guard<std::mutex> lock(completion_mutex_);
             last_checked_request_ = request;
             ++check_completion_calls_;
@@ -103,23 +125,13 @@ class StubBackend : public nixlDeviceProxyBackendAdapter {
         }
 
         nixl_status_t
-        progress() override {
+        progress() {
             ++progress_calls_;
             return NIXL_SUCCESS;
         }
 
-        nixl_status_t
-        progress(uint32_t, uint32_t) override {
-            return progress();
-        }
-
-        nixl_status_t
-        shutdown() override {
-            return NIXL_SUCCESS;
-        }
-
         void
-        releaseRequest(const nixlBackendProxyRequest &request) override {
+        releaseRequest(const nixlBackendProxyRequest &request) {
             std::lock_guard<std::mutex> lock(state_->released_mutex);
             state_->released_requests.push_back(request);
         }
@@ -150,9 +162,19 @@ class StubBackend : public nixlDeviceProxyBackendAdapter {
         std::shared_ptr<StubBackendState> state_ = std::make_shared<StubBackendState>();
         uint64_t resolve_direct_pointer_calls_ = 0;
         size_t last_resolved_desc_count_ = 0;
-        nixl_status_t resolve_direct_pointer_rc_ = NIXL_ERR_NOT_SUPPORTED;
+        nixl_status_t resolve_direct_pointer_rc_ = NIXL_SUCCESS;
         std::vector<void *> direct_ptrs_to_return_;
 };
+
+static nixlProxyConfig
+makeConfig(uint32_t channel_count, uint32_t thread_count, uint32_t max_peers = 4) {
+    nixlProxyConfig config;
+    config.enabled = true;
+    config.channel_count = channel_count;
+    config.thread_count = thread_count;
+    config.max_peers = max_peers;
+    return config;
+}
 
 class ProxyRuntimeTest : public testing::Test {
     protected:
@@ -160,20 +182,31 @@ class ProxyRuntimeTest : public testing::Test {
         initRuntime(uint32_t channel_count,
                     uint32_t worker_count,
                     nixl_status_t init_rc = NIXL_SUCCESS,
-                    uint32_t max_peers = 4) {
-            auto backend = std::make_unique<StubBackend>();
-            backend_ = backend.get();
+                    uint32_t max_peers = 4,
+                    bool with_direct_ptr_resolver = true) {
+            // Tear the previous runtime down before its backend goes away.
+            runtime_.reset();
+            backend_storage_ = std::make_unique<StubBackend>();
+            backend_ = backend_storage_.get();
             backend_->init_rc_ = init_rc;
-            return runtime_.init(std::move(backend), max_peers, channel_count, worker_count);
+            nixlProxyBackendOps ops = backend_->ops();
+            if (!with_direct_ptr_resolver) {
+                ops.resolve_direct_ptrs = nullptr;
+            }
+            return nixlProxyRuntime::create(
+                std::move(ops), makeConfig(channel_count, worker_count, max_peers), runtime_);
         }
 
         void
         TearDown() override {
-            runtime_.shutdown();
+            runtime_.reset();
         }
 
+        // Declared before runtime_: the runtime's callbacks reference the stub,
+        // so the stub has to outlive it.
+        std::unique_ptr<StubBackend> backend_storage_;
         StubBackend *backend_ = nullptr;
-        nixlProxyRuntime runtime_;
+        std::unique_ptr<nixlProxyRuntime> runtime_;
 };
 
 static nixlProxyWorkRing
@@ -267,11 +300,12 @@ static nixl_status_t
 allocateDirectChannel(nixlProxyChannelState &channel,
                       nixlProxyControlBuffer &control_slots,
                       uint32_t depth) {
-    nixl_status_t status = control_slots.allocate(kProxyCiSlotBase + 1);
+    nixlDeviceAllocator &allocator = nixlGetDeviceAllocator();
+    nixl_status_t status = control_slots.allocate(allocator, kProxyCiSlotBase + 1);
     if (status != NIXL_SUCCESS) {
         return status;
     }
-    return channel.allocate(depth, &control_slots, kProxyCiSlotBase);
+    return channel.allocate(allocator, depth, &control_slots, kProxyCiSlotBase);
 }
 
 static uint64_t
@@ -313,11 +347,11 @@ publishRecord(nixlProxySubmission *records,
 }
 
 static std::unique_ptr<ProxyWorker>
-makeDirectWorker(StubBackend *backend,
+makeDirectWorker(const nixlProxyBackendOps *ops,
                  const nixlProxyMemViewRegistry *registry,
                  std::atomic<uint64_t> *shutdown_state,
                  nixlProxyChannelState *channel) {
-    return std::make_unique<ProxyWorker>(backend, registry, shutdown_state, channel, 1, 1, 0, 1, 0);
+    return std::make_unique<ProxyWorker>(ops, registry, shutdown_state, channel, 1, 1, 0, 1, 0);
 }
 
 static nixl_remote_meta_dlist_t
@@ -338,36 +372,43 @@ makeRemotePeerDlist(const std::vector<std::string> &agents, nixlBackendMD *md) {
     return dlist;
 }
 
-TEST_F(ProxyRuntimeTest, InitCallsBackendInit) {
+TEST_F(ProxyRuntimeTest, CreateCallsBackendInit) {
     ASSERT_EQ(initRuntime(4, 2), NIXL_SUCCESS);
     EXPECT_TRUE(backend_->init_called_);
     EXPECT_EQ(backend_->init_worker_count_, 2u);
     EXPECT_EQ(backend_->init_channel_count_, 4u);
 }
 
-TEST_F(ProxyRuntimeTest, InitRejectsNullBackend) {
-    EXPECT_EQ(runtime_.init(nullptr, 4, 4, 2), NIXL_ERR_INVALID_PARAM);
+TEST_F(ProxyRuntimeTest, CreateRejectsIncompleteOps) {
+    StubBackend backend;
+    nixlProxyBackendOps ops = backend.ops();
+    ops.submit = nullptr;
+    EXPECT_EQ(nixlProxyRuntime::create(std::move(ops), makeConfig(4, 2), runtime_),
+              NIXL_ERR_INVALID_PARAM);
+    EXPECT_EQ(runtime_, nullptr);
 }
 
-TEST_F(ProxyRuntimeTest, InitRejectsZeroPeerCapacity) {
+TEST_F(ProxyRuntimeTest, CreateRejectsZeroPeerCapacity) {
     EXPECT_EQ(initRuntime(2, 1, NIXL_SUCCESS, 0), NIXL_ERR_INVALID_PARAM);
 }
 
-TEST_F(ProxyRuntimeTest, InitRejectsZeroChannels) {
+TEST_F(ProxyRuntimeTest, CreateRejectsZeroChannels) {
     EXPECT_EQ(initRuntime(0, 2), NIXL_ERR_INVALID_PARAM);
 }
 
-TEST_F(ProxyRuntimeTest, InitRejectsZeroWorkers) {
+TEST_F(ProxyRuntimeTest, CreateRejectsZeroWorkers) {
     EXPECT_EQ(initRuntime(4, 0), NIXL_ERR_INVALID_PARAM);
 }
 
-TEST_F(ProxyRuntimeTest, InitPropagatesBackendFailure) {
+TEST_F(ProxyRuntimeTest, CreatePropagatesBackendFailure) {
     EXPECT_EQ(initRuntime(4, 2, NIXL_ERR_BACKEND), NIXL_ERR_BACKEND);
+    // A failed create() leaves no half-built runtime behind.
+    EXPECT_EQ(runtime_, nullptr);
 }
 
 TEST_F(ProxyRuntimeTest, DeviceChannelViewMatrixStartsAllocated) {
     ASSERT_EQ(initRuntime(3, 1), NIXL_SUCCESS);
-    const nixlProxyChannelView *views = runtime_.deviceChannelViews();
+    const nixlProxyChannelView *views = runtime_->deviceChannelViews();
     ASSERT_NE(views, nullptr);
     for (uint32_t peer = 0; peer < 4; ++peer) {
         for (uint32_t channel = 0; channel < 3; ++channel) {
@@ -382,9 +423,9 @@ TEST_F(ProxyRuntimeTest, WorkRingIndicesStartAtZero) {
     DummyBackendMD remote_md;
     ASSERT_EQ(initRuntime(2, 1), NIXL_SUCCESS);
     nixlMemViewH remote_mvh = nullptr;
-    ASSERT_EQ(runtime_.prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &remote_mvh),
+    ASSERT_EQ(runtime_->prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &remote_mvh),
               NIXL_SUCCESS);
-    const nixlProxyChannelView *views = runtime_.deviceChannelViews();
+    const nixlProxyChannelView *views = runtime_->deviceChannelViews();
     for (uint32_t channel = 0; channel < 2; ++channel) {
         const nixlProxyWorkRing ring = copyDeviceWorkRing(views[channelViewIndex(0, channel)]);
         uint64_t producer = 0;
@@ -404,9 +445,9 @@ TEST_F(ProxyRuntimeTest, CompletionSlotsInitialized) {
     DummyBackendMD remote_md;
     ASSERT_EQ(initRuntime(2, 1), NIXL_SUCCESS);
     nixlMemViewH remote_mvh = nullptr;
-    ASSERT_EQ(runtime_.prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &remote_mvh),
+    ASSERT_EQ(runtime_->prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &remote_mvh),
               NIXL_SUCCESS);
-    const nixlProxyChannelView *views = runtime_.deviceChannelViews();
+    const nixlProxyChannelView *views = runtime_->deviceChannelViews();
     for (uint32_t channel = 0; channel < 2; ++channel) {
         nixlProxyCompletionSlot slot{};
         ASSERT_EQ(cudaMemcpy(&slot,
@@ -433,7 +474,7 @@ TEST_F(ProxyRuntimeTest, WorkerCountClampedToChannelCount) {
 
 TEST_F(ProxyRuntimeTest, DeviceContextPopulated) {
     ASSERT_EQ(initRuntime(3, 1), NIXL_SUCCESS);
-    auto *device_ctx = runtime_.deviceContext();
+    auto *device_ctx = runtime_->deviceContext();
     ASSERT_NE(device_ctx, nullptr);
     nixlProxyDeviceContextData ctx{};
     ASSERT_EQ(cudaMemcpy(&ctx, device_ctx, sizeof(ctx), cudaMemcpyDeviceToHost), cudaSuccess);
@@ -447,82 +488,85 @@ TEST_F(ProxyRuntimeTest, DeviceContextCarriedByMemView) {
     DummyBackendMD remote_md;
     ASSERT_EQ(initRuntime(3, 1), NIXL_SUCCESS);
     nixlMemViewH remote_mvh = nullptr;
-    ASSERT_EQ(runtime_.prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &remote_mvh),
+    ASSERT_EQ(runtime_->prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &remote_mvh),
               NIXL_SUCCESS);
-    EXPECT_EQ(copyDeviceMemView(remote_mvh).context, runtime_.deviceContext());
+    EXPECT_EQ(copyDeviceMemView(remote_mvh).context, runtime_->deviceContext());
 }
 
 TEST_F(ProxyRuntimeTest, DeviceContextNullAfterShutdown) {
     ASSERT_EQ(initRuntime(2, 1), NIXL_SUCCESS);
-    ASSERT_NE(runtime_.deviceContext(), nullptr);
-    ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
-    EXPECT_EQ(runtime_.deviceContext(), nullptr);
+    ASSERT_NE(runtime_->deviceContext(), nullptr);
+    ASSERT_EQ(runtime_->shutdown(), NIXL_SUCCESS);
+    EXPECT_EQ(runtime_->deviceContext(), nullptr);
 }
 
 TEST_F(ProxyRuntimeTest, StartWorkersAndShutdown) {
     ASSERT_EQ(initRuntime(2, 2), NIXL_SUCCESS);
-    ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->startWorkers(), NIXL_SUCCESS);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
 
-    ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->shutdown(), NIXL_SUCCESS);
 }
 
 TEST_F(ProxyRuntimeTest, RepeatedStartWorkersIsRejected) {
     ASSERT_EQ(initRuntime(2, 2), NIXL_SUCCESS);
-    ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->startWorkers(), NIXL_SUCCESS);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
-    EXPECT_EQ(runtime_.startWorkers(), NIXL_ERR_INVALID_PARAM);
+    EXPECT_EQ(runtime_->startWorkers(), NIXL_ERR_INVALID_PARAM);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
-    ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->shutdown(), NIXL_SUCCESS);
 }
 
 TEST_F(ProxyRuntimeTest, ShutdownWithoutStartIsHarmless) {
     ASSERT_EQ(initRuntime(2, 1), NIXL_SUCCESS);
-    EXPECT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
+    EXPECT_EQ(runtime_->shutdown(), NIXL_SUCCESS);
 }
 
-TEST_F(ProxyRuntimeTest, ShutdownBeforeInitIsHarmless) {
-    EXPECT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
+// create() replaced the two-phase ctor+init(): there is no observable
+// pre-init state left to shut down, only a runtime that was never created.
+TEST_F(ProxyRuntimeTest, FailedCreateLeavesNoRuntime) {
+    EXPECT_EQ(initRuntime(0, 1), NIXL_ERR_INVALID_PARAM);
+    EXPECT_EQ(runtime_, nullptr);
 }
 
 TEST_F(ProxyRuntimeTest, DoubleShutdownIsHarmless) {
     ASSERT_EQ(initRuntime(2, 1), NIXL_SUCCESS);
-    ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
-    EXPECT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
-    EXPECT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->startWorkers(), NIXL_SUCCESS);
+    EXPECT_EQ(runtime_->shutdown(), NIXL_SUCCESS);
+    EXPECT_EQ(runtime_->shutdown(), NIXL_SUCCESS);
 }
 
-TEST_F(ProxyRuntimeTest, InitAfterShutdownWorks) {
+TEST_F(ProxyRuntimeTest, CreateAfterShutdownWorks) {
     ASSERT_EQ(initRuntime(2, 1), NIXL_SUCCESS);
-    ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
-    ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->startWorkers(), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->shutdown(), NIXL_SUCCESS);
 
     ASSERT_EQ(initRuntime(4, 2), NIXL_SUCCESS);
-    ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
-    EXPECT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->startWorkers(), NIXL_SUCCESS);
+    EXPECT_EQ(runtime_->shutdown(), NIXL_SUCCESS);
 }
 
 TEST_F(ProxyRuntimeTest, SingleChannelSingleWorker) {
     ASSERT_EQ(initRuntime(1, 1), NIXL_SUCCESS);
-    ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->startWorkers(), NIXL_SUCCESS);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
-    ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->shutdown(), NIXL_SUCCESS);
 }
 
 TEST_F(ProxyRuntimeTest, ManyChannelsManyWorkers) {
     ASSERT_EQ(initRuntime(16, 4), NIXL_SUCCESS);
-    ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->startWorkers(), NIXL_SUCCESS);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
 
-    ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->shutdown(), NIXL_SUCCESS);
 }
 
 TEST_F(ProxyRuntimeTest, PrepMemViewProducesReadyEntries) {
@@ -545,13 +589,13 @@ TEST_F(ProxyRuntimeTest, PrepMemViewProducesReadyEntries) {
 
     nixlMemViewH src_proxy = nullptr;
     nixlMemViewH dst_proxy = nullptr;
-    ASSERT_EQ(runtime_.prepMemView(local_backend, local_dlist, &src_proxy), NIXL_SUCCESS);
-    ASSERT_EQ(runtime_.prepMemView(remote_backend, remote_dlist, &dst_proxy), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->prepMemView(local_backend, local_dlist, &src_proxy), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->prepMemView(remote_backend, remote_dlist, &dst_proxy), NIXL_SUCCESS);
 
     nixlMemViewH resolved = nullptr;
-    EXPECT_TRUE(runtime_.resolveProxyMemView(src_proxy, resolved));
+    EXPECT_TRUE(runtime_->resolveProxyMemView(src_proxy, resolved));
     EXPECT_EQ(resolved, local_backend);
-    EXPECT_TRUE(runtime_.resolveProxyMemView(dst_proxy, resolved));
+    EXPECT_TRUE(runtime_->resolveProxyMemView(dst_proxy, resolved));
     EXPECT_EQ(resolved, remote_backend);
 
     nixlProxySubmission submission{};
@@ -563,7 +607,7 @@ TEST_F(ProxyRuntimeTest, PrepMemViewProducesReadyEntries) {
     submission.size = 32;
 
     nixlBackendProxySubmission prepared_submission;
-    ASSERT_EQ(runtime_.memviewRegistry().prepareSubmission(submission, prepared_submission),
+    ASSERT_EQ(runtime_->memviewRegistry().prepareSubmission(submission, prepared_submission),
               NIXL_SUCCESS);
     EXPECT_EQ(prepared_submission.local.desc.addr, 0x1004u);
     EXPECT_EQ(prepared_submission.local.desc.len, 32u);
@@ -576,14 +620,17 @@ TEST_F(ProxyRuntimeTest, PrepMemViewProducesReadyEntries) {
 
 TEST_F(ProxyRuntimeTest, PrepMemViewRejectsNullOutput) {
     DummyBackendMD local_md;
+    ASSERT_EQ(initRuntime(1, 1), NIXL_SUCCESS);
+
     nixl_meta_dlist_t local_dlist(DRAM_SEG);
     local_dlist.addDesc(nixlMetaDesc(0x1000, 64, 0, &local_md));
 
-    EXPECT_EQ(runtime_.prepMemView(local_dlist, nullptr), NIXL_ERR_INVALID_PARAM);
+    EXPECT_EQ(runtime_->prepMemView(local_dlist, nullptr), NIXL_ERR_INVALID_PARAM);
 }
 
 TEST_F(ProxyRuntimeTest, PrepRemoteMemViewRejectsNonVramMetadata) {
     DummyBackendMD remote_md;
+    ASSERT_EQ(initRuntime(1, 1), NIXL_SUCCESS);
 
     nixl_remote_meta_dlist_t remote_dlist(DRAM_SEG);
     nixlRemoteMetaDesc remote_desc("peer");
@@ -594,18 +641,17 @@ TEST_F(ProxyRuntimeTest, PrepRemoteMemViewRejectsNonVramMetadata) {
     remote_dlist.addDesc(remote_desc);
 
     nixlMemViewH dst_proxy = nullptr;
-    EXPECT_EQ(runtime_.prepMemView(remote_dlist, &dst_proxy), NIXL_ERR_INVALID_PARAM);
+    EXPECT_EQ(runtime_->prepMemView(remote_dlist, &dst_proxy), NIXL_ERR_INVALID_PARAM);
 }
 
 TEST_F(ProxyRuntimeTest, PrepRemoteMemViewStoresResolvedDirectPointers) {
     DummyBackendMD remote_md;
     ASSERT_EQ(initRuntime(1, 1), NIXL_SUCCESS);
 
-    backend_->resolve_direct_pointer_rc_ = NIXL_SUCCESS;
     backend_->direct_ptrs_to_return_ = {reinterpret_cast<void *>(uintptr_t{0xabc00000}), nullptr};
 
     nixlMemViewH dst_proxy = nullptr;
-    ASSERT_EQ(runtime_.prepMemView(makeRemotePeerDlist({"peer0", "peer1"}, &remote_md), &dst_proxy),
+    ASSERT_EQ(runtime_->prepMemView(makeRemotePeerDlist({"peer0", "peer1"}, &remote_md), &dst_proxy),
               NIXL_SUCCESS);
 
     EXPECT_EQ(backend_->resolve_direct_pointer_calls_, 1u);
@@ -617,15 +663,18 @@ TEST_F(ProxyRuntimeTest, PrepRemoteMemViewStoresResolvedDirectPointers) {
               backend_->direct_ptrs_to_return_);
 }
 
-TEST_F(ProxyRuntimeTest, PrepRemoteMemViewFallsBackWhenDirectPointersUnsupported) {
+// An unset resolve_direct_ptrs callback means the backend does not resolve
+// direct pointers - the prep still succeeds, with none stored.
+TEST_F(ProxyRuntimeTest, PrepRemoteMemViewSkipsDirectPointersWhenResolverUnset) {
     DummyBackendMD remote_md;
-    ASSERT_EQ(initRuntime(1, 1), NIXL_SUCCESS);
-
-    nixlMemViewH dst_proxy = nullptr;
-    ASSERT_EQ(runtime_.prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &dst_proxy),
+    ASSERT_EQ(initRuntime(1, 1, NIXL_SUCCESS, 4, /*with_direct_ptr_resolver=*/false),
               NIXL_SUCCESS);
 
-    EXPECT_EQ(backend_->resolve_direct_pointer_calls_, 1u);
+    nixlMemViewH dst_proxy = nullptr;
+    ASSERT_EQ(runtime_->prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &dst_proxy),
+              NIXL_SUCCESS);
+
+    EXPECT_EQ(backend_->resolve_direct_pointer_calls_, 0u);
     EXPECT_EQ(copyDeviceMemView(dst_proxy).direct_ptr_count, 0u);
 }
 
@@ -635,7 +684,7 @@ TEST_F(ProxyRuntimeTest, PrepRemoteMemViewPropagatesDirectPointerResolverErrors)
     backend_->resolve_direct_pointer_rc_ = NIXL_ERR_INVALID_PARAM;
 
     nixlMemViewH dst_proxy = nullptr;
-    EXPECT_EQ(runtime_.prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &dst_proxy),
+    EXPECT_EQ(runtime_->prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &dst_proxy),
               NIXL_ERR_INVALID_PARAM);
     EXPECT_EQ(dst_proxy, nullptr);
     EXPECT_EQ(backend_->resolve_direct_pointer_calls_, 1u);
@@ -653,12 +702,12 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedTransportDescriptors) {
     nixlMemViewH src_proxy = nullptr;
     nixlMemViewH dst_proxy = nullptr;
     ASSERT_EQ(
-        runtime_.registerProxyMemView(reinterpret_cast<nixlMemViewH>(uintptr_t{0x10}), &src_proxy),
+        runtime_->registerProxyMemView(reinterpret_cast<nixlMemViewH>(uintptr_t{0x10}), &src_proxy),
         NIXL_SUCCESS);
 
     nixl_meta_dlist_t local_dlist(DRAM_SEG);
     local_dlist.addDesc(nixlMetaDesc(0x1000, 64, 0, &local_md));
-    ASSERT_EQ(runtime_.storeMetadata(src_proxy, local_dlist), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->storeMetadata(src_proxy, local_dlist), NIXL_SUCCESS);
 
     nixl_remote_meta_dlist_t remote_dlist(VRAM_SEG);
     nixlRemoteMetaDesc remote_desc("peer");
@@ -667,8 +716,8 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedTransportDescriptors) {
     remote_desc.devId = 0;
     remote_desc.metadataP = &remote_md;
     remote_dlist.addDesc(remote_desc);
-    ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
-    ASSERT_EQ(runtime_.prepMemView(remote_dlist, &dst_proxy), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->startWorkers(), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->prepMemView(remote_dlist, &dst_proxy), NIXL_SUCCESS);
 
     nixlProxySubmission submission{};
     submission.op_idx = 11;
@@ -680,7 +729,7 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedTransportDescriptors) {
     submission.dst_offset = 8;
     submission.size = 32;
 
-    const nixlProxyWorkRing ring = copyDeviceWorkRing(runtime_.deviceChannelViews()[0]);
+    const nixlProxyWorkRing ring = copyDeviceWorkRing(runtime_->deviceChannelViews()[0]);
     auto *records = hostAliasOf(ring.records);
     ASSERT_NE(records, nullptr);
     submission.op_idx = 0;
@@ -703,9 +752,9 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedTransportDescriptors) {
         std::lock_guard<std::mutex> lock(backend_->submit_mutex_);
         submissions = backend_->submissions_;
     }
-    ASSERT_TRUE(waitForCompletedIdx(runtime_.deviceChannelViews()[0], 11));
+    ASSERT_TRUE(waitForCompletedIdx(runtime_->deviceChannelViews()[0], 11));
 
-    ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->shutdown(), NIXL_SUCCESS);
 
     ASSERT_EQ(submissions.size(), 1u);
     const auto &prepared = submissions.front();
@@ -742,8 +791,8 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedAtomicAddDescriptor) {
     remote_desc.devId = 0;
     remote_desc.metadataP = &remote_md;
     remote_dlist.addDesc(remote_desc);
-    ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
-    ASSERT_EQ(runtime_.prepMemView(remote_dlist, &dst_proxy), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->startWorkers(), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->prepMemView(remote_dlist, &dst_proxy), NIXL_SUCCESS);
 
     nixlProxySubmission submission{};
     submission.op_idx = 11;
@@ -754,7 +803,7 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedAtomicAddDescriptor) {
     submission.size = sizeof(uint64_t);
     submission.value = 42;
 
-    const nixlProxyWorkRing ring = copyDeviceWorkRing(runtime_.deviceChannelViews()[0]);
+    const nixlProxyWorkRing ring = copyDeviceWorkRing(runtime_->deviceChannelViews()[0]);
     auto *records = hostAliasOf(ring.records);
     ASSERT_NE(records, nullptr);
     submission.op_idx = 0;
@@ -777,9 +826,9 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsPreparedAtomicAddDescriptor) {
         std::lock_guard<std::mutex> lock(backend_->submit_mutex_);
         submissions = backend_->submissions_;
     }
-    ASSERT_TRUE(waitForCompletedIdx(runtime_.deviceChannelViews()[0], 11));
+    ASSERT_TRUE(waitForCompletedIdx(runtime_->deviceChannelViews()[0], 11));
 
-    ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->shutdown(), NIXL_SUCCESS);
 
     ASSERT_EQ(submissions.size(), 1u);
     const auto &prepared = submissions.front();
@@ -815,8 +864,8 @@ TEST_F(ProxyRuntimeTest, ShutdownReleasesPendingBackendRequests) {
     remote_desc.devId = 0;
     remote_desc.metadataP = &remote_md;
     remote_dlist.addDesc(remote_desc);
-    ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
-    ASSERT_EQ(runtime_.prepMemView(remote_dlist, &dst_proxy), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->startWorkers(), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->prepMemView(remote_dlist, &dst_proxy), NIXL_SUCCESS);
 
     nixlProxySubmission submission{};
     submission.op_idx = 31;
@@ -827,7 +876,7 @@ TEST_F(ProxyRuntimeTest, ShutdownReleasesPendingBackendRequests) {
     submission.size = sizeof(uint64_t);
     submission.value = 42;
 
-    const nixlProxyWorkRing ring = copyDeviceWorkRing(runtime_.deviceChannelViews()[0]);
+    const nixlProxyWorkRing ring = copyDeviceWorkRing(runtime_->deviceChannelViews()[0]);
     auto *records = hostAliasOf(ring.records);
     ASSERT_NE(records, nullptr);
     submission.op_idx = 0;
@@ -836,7 +885,7 @@ TEST_F(ProxyRuntimeTest, ShutdownReleasesPendingBackendRequests) {
 
     const auto submissions = waitForSubmissions(backend_, 1);
     ASSERT_EQ(submissions.size(), 1u);
-    ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->shutdown(), NIXL_SUCCESS);
 
     std::lock_guard<std::mutex> lock(backend_state->released_mutex);
     ASSERT_EQ(backend_state->released_requests.size(), 1u);
@@ -852,17 +901,17 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsReadyPeersForOwnedChannel) {
 
     nixlMemViewH src_proxy = nullptr;
     ASSERT_EQ(
-        runtime_.registerProxyMemView(reinterpret_cast<nixlMemViewH>(uintptr_t{0x10}), &src_proxy),
+        runtime_->registerProxyMemView(reinterpret_cast<nixlMemViewH>(uintptr_t{0x10}), &src_proxy),
         NIXL_SUCCESS);
 
     nixl_meta_dlist_t local_dlist(DRAM_SEG);
     local_dlist.addDesc(nixlMetaDesc(0x1000, 64, 0, &local_md));
-    ASSERT_EQ(runtime_.storeMetadata(src_proxy, local_dlist), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->storeMetadata(src_proxy, local_dlist), NIXL_SUCCESS);
 
     nixlMemViewH dst_proxy = nullptr;
-    ASSERT_EQ(runtime_.prepMemView(makeRemotePeerDlist({"peer0", "peer1"}, &remote_md), &dst_proxy),
+    ASSERT_EQ(runtime_->prepMemView(makeRemotePeerDlist({"peer0", "peer1"}, &remote_md), &dst_proxy),
               NIXL_SUCCESS);
-    ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->startWorkers(), NIXL_SUCCESS);
 
     nixlProxySubmission peer0{};
     peer0.opcode = nixl_proxy_opcode_t::PUT;
@@ -876,9 +925,9 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsReadyPeersForOwnedChannel) {
     peer1.dst_index = 1;
 
     const nixlProxyWorkRing ring0 =
-        copyDeviceWorkRing(runtime_.deviceChannelViews()[channelViewIndex(0, 0, 2)]);
+        copyDeviceWorkRing(runtime_->deviceChannelViews()[channelViewIndex(0, 0, 2)]);
     const nixlProxyWorkRing ring1 =
-        copyDeviceWorkRing(runtime_.deviceChannelViews()[channelViewIndex(1, 0, 2)]);
+        copyDeviceWorkRing(runtime_->deviceChannelViews()[channelViewIndex(1, 0, 2)]);
     auto *records0 = hostAliasOf(ring0.records);
     auto *records1 = hostAliasOf(ring1.records);
     ASSERT_NE(records0, nullptr);
@@ -890,7 +939,7 @@ TEST_F(ProxyRuntimeTest, WorkerSubmitsReadyPeersForOwnedChannel) {
     __atomic_store_n(&records1[0].op_idx, uint64_t{22}, __ATOMIC_RELEASE);
 
     const auto submissions = waitForSubmissions(backend_, 2);
-    ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->shutdown(), NIXL_SUCCESS);
 
     ASSERT_EQ(submissions.size(), 2u);
     std::vector<bool> seen(2, false);
@@ -909,7 +958,7 @@ TEST_F(ProxyRuntimeTest, ConsumerIndexAdvancesOnlyAfterBackendCompletion) {
     backend.submit_rc_ = NIXL_IN_PROG;
     backend.completion_rc_ = NIXL_IN_PROG;
 
-    nixlProxyMemViewRegistry registry;
+    nixlProxyMemViewRegistry registry(nixlGetDeviceAllocator());
     nixlMemViewH dst_proxy = nullptr;
     ASSERT_EQ(registry.prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &dst_proxy),
               NIXL_SUCCESS);
@@ -919,7 +968,8 @@ TEST_F(ProxyRuntimeTest, ConsumerIndexAdvancesOnlyAfterBackendCompletion) {
     ASSERT_EQ(allocateDirectChannel(channel, control_slots, 2), NIXL_SUCCESS);
     std::atomic<uint64_t> shutdown_state{
         static_cast<uint64_t>(nixl_proxy_control_state_t::RUNNING)};
-    auto worker = makeDirectWorker(&backend, &registry, &shutdown_state, &channel);
+    const nixlProxyBackendOps ops = backend.ops();
+    auto worker = makeDirectWorker(&ops, &registry, &shutdown_state, &channel);
 
     publishRecord(channel.recordsHost(), 0, makeAtomicAddSubmission(dst_proxy), 1);
 
@@ -942,7 +992,7 @@ TEST_F(ProxyRuntimeTest, InFlightRequestsAreBoundedByRingDepth) {
     backend.submit_rc_ = NIXL_IN_PROG;
     backend.completion_rc_ = NIXL_IN_PROG;
 
-    nixlProxyMemViewRegistry registry;
+    nixlProxyMemViewRegistry registry(nixlGetDeviceAllocator());
     nixlMemViewH dst_proxy = nullptr;
     ASSERT_EQ(registry.prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &dst_proxy),
               NIXL_SUCCESS);
@@ -952,7 +1002,8 @@ TEST_F(ProxyRuntimeTest, InFlightRequestsAreBoundedByRingDepth) {
     ASSERT_EQ(allocateDirectChannel(channel, control_slots, 2), NIXL_SUCCESS);
     std::atomic<uint64_t> shutdown_state{
         static_cast<uint64_t>(nixl_proxy_control_state_t::RUNNING)};
-    auto worker = makeDirectWorker(&backend, &registry, &shutdown_state, &channel);
+    const nixlProxyBackendOps ops = backend.ops();
+    auto worker = makeDirectWorker(&ops, &registry, &shutdown_state, &channel);
 
     const auto submission = makeAtomicAddSubmission(dst_proxy);
     publishRecord(channel.recordsHost(), 0, submission, 1);
@@ -983,7 +1034,7 @@ TEST_F(ProxyRuntimeTest, CompletionsPublishInSubmissionOrder) {
     backend.submit_rc_ = NIXL_IN_PROG;
     backend.completion_rc_ = NIXL_IN_PROG;
 
-    nixlProxyMemViewRegistry registry;
+    nixlProxyMemViewRegistry registry(nixlGetDeviceAllocator());
     nixlMemViewH dst_proxy = nullptr;
     ASSERT_EQ(registry.prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &dst_proxy),
               NIXL_SUCCESS);
@@ -993,7 +1044,8 @@ TEST_F(ProxyRuntimeTest, CompletionsPublishInSubmissionOrder) {
     ASSERT_EQ(allocateDirectChannel(channel, control_slots, 3), NIXL_SUCCESS);
     std::atomic<uint64_t> shutdown_state{
         static_cast<uint64_t>(nixl_proxy_control_state_t::RUNNING)};
-    auto worker = makeDirectWorker(&backend, &registry, &shutdown_state, &channel);
+    const nixlProxyBackendOps ops = backend.ops();
+    auto worker = makeDirectWorker(&ops, &registry, &shutdown_state, &channel);
 
     const auto submission = makeAtomicAddSubmission(dst_proxy);
     publishRecord(channel.recordsHost(), 0, submission, 1);
@@ -1020,7 +1072,7 @@ TEST_F(ProxyRuntimeTest, PreparationErrorLatchesStatusButLaterWorkIsReclaimed) {
     backend.submit_rc_ = NIXL_IN_PROG;
     backend.completion_rc_ = NIXL_SUCCESS;
 
-    nixlProxyMemViewRegistry registry;
+    nixlProxyMemViewRegistry registry(nixlGetDeviceAllocator());
     nixlMemViewH dst_proxy = nullptr;
     ASSERT_EQ(registry.prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &dst_proxy),
               NIXL_SUCCESS);
@@ -1030,7 +1082,8 @@ TEST_F(ProxyRuntimeTest, PreparationErrorLatchesStatusButLaterWorkIsReclaimed) {
     ASSERT_EQ(allocateDirectChannel(channel, control_slots, 3), NIXL_SUCCESS);
     std::atomic<uint64_t> shutdown_state{
         static_cast<uint64_t>(nixl_proxy_control_state_t::RUNNING)};
-    auto worker = makeDirectWorker(&backend, &registry, &shutdown_state, &channel);
+    const nixlProxyBackendOps ops = backend.ops();
+    auto worker = makeDirectWorker(&ops, &registry, &shutdown_state, &channel);
 
     publishRecord(channel.recordsHost(), 0, makeInvalidAtomicAddSubmission(), 1);
     worker->runOnce();
@@ -1052,7 +1105,7 @@ TEST_F(ProxyRuntimeTest, SubmitAndCompletionErrorsLatchFirstStatusAndRetireWork)
     backend.submit_rcs_ = {NIXL_ERR_BACKEND, NIXL_IN_PROG, NIXL_IN_PROG};
     backend.completion_rc_ = NIXL_IN_PROG;
 
-    nixlProxyMemViewRegistry registry;
+    nixlProxyMemViewRegistry registry(nixlGetDeviceAllocator());
     nixlMemViewH dst_proxy = nullptr;
     ASSERT_EQ(registry.prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &dst_proxy),
               NIXL_SUCCESS);
@@ -1062,7 +1115,8 @@ TEST_F(ProxyRuntimeTest, SubmitAndCompletionErrorsLatchFirstStatusAndRetireWork)
     ASSERT_EQ(allocateDirectChannel(channel, control_slots, 4), NIXL_SUCCESS);
     std::atomic<uint64_t> shutdown_state{
         static_cast<uint64_t>(nixl_proxy_control_state_t::RUNNING)};
-    auto worker = makeDirectWorker(&backend, &registry, &shutdown_state, &channel);
+    const nixlProxyBackendOps ops = backend.ops();
+    auto worker = makeDirectWorker(&ops, &registry, &shutdown_state, &channel);
 
     const auto submission = makeAtomicAddSubmission(dst_proxy);
     publishRecord(channel.recordsHost(), 0, submission, 1);
@@ -1099,11 +1153,11 @@ TEST_F(ProxyRuntimeTest, ShutdownReleasesAllPendingBackendRequests) {
     auto backend_state = backend_->state_;
 
     nixlMemViewH dst_proxy = nullptr;
-    ASSERT_EQ(runtime_.startWorkers(), NIXL_SUCCESS);
-    ASSERT_EQ(runtime_.prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &dst_proxy),
+    ASSERT_EQ(runtime_->startWorkers(), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->prepMemView(makeRemotePeerDlist({"peer"}, &remote_md), &dst_proxy),
               NIXL_SUCCESS);
 
-    const nixlProxyWorkRing ring = copyDeviceWorkRing(runtime_.deviceChannelViews()[0]);
+    const nixlProxyWorkRing ring = copyDeviceWorkRing(runtime_->deviceChannelViews()[0]);
     auto *records = hostAliasOf(ring.records);
     ASSERT_NE(records, nullptr);
 
@@ -1113,7 +1167,7 @@ TEST_F(ProxyRuntimeTest, ShutdownReleasesAllPendingBackendRequests) {
 
     const auto submissions = waitForSubmissions(backend_, 2);
     ASSERT_EQ(submissions.size(), 2u);
-    ASSERT_EQ(runtime_.shutdown(), NIXL_SUCCESS);
+    ASSERT_EQ(runtime_->shutdown(), NIXL_SUCCESS);
 
     std::lock_guard<std::mutex> lock(backend_state->released_mutex);
     ASSERT_EQ(backend_state->released_requests.size(), 2u);

@@ -26,13 +26,12 @@ nixlProxyControlBuffer::~nixlProxyControlBuffer() {
 }
 
 nixl_status_t
-nixlProxyControlBuffer::allocate(size_t count) {
+nixlProxyControlBuffer::allocate(nixlDeviceAllocator &allocator, size_t count) {
     if (count == 0 || allocated()) {
         return NIXL_ERR_INVALID_PARAM;
     }
 
     const size_t data_size = sizeof(uint64_t) * count;
-    nixlDeviceAllocator &allocator = nixlGetDeviceAllocator();
 #ifdef HAVE_GDRCOPY
     mapping_size_ = (data_size + GPU_PAGE_SIZE - 1) & ~(GPU_PAGE_SIZE - 1);
     const size_t allocation_size = mapping_size_ + GPU_PAGE_SIZE - 1;

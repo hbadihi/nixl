@@ -53,7 +53,6 @@ class nixlUcxConnection : public nixlBackendConnMD {
 };
 
 using ucx_connection_ptr_t = std::shared_ptr<nixlUcxConnection>;
-class nixlUcxProxyBackendAdapter;
 
 // A private metadata has to implement get, and has all the metadata
 class nixlUcxPrivateMetadata : public nixlBackendMD {
@@ -260,8 +259,6 @@ protected:
     notif_list_t notifList_;
 
 private:
-    friend class nixlUcxProxyBackendAdapter;
-
     nixl_status_t
     submitProxyRmaWrite(const nixlMetaDesc &local,
                         const nixlMetaDesc &remote,

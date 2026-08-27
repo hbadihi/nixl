@@ -16,11 +16,11 @@
  */
 #include "proxy_worker.h"
 #include "proxy_runtime.h"
-#include "backend_adapter.h"
+#include "proxy_backend_ops.h"
 #include "nixl_log.h"
 #include <chrono>
 
-ProxyWorker::ProxyWorker(nixlDeviceProxyBackendAdapter *backend,
+ProxyWorker::ProxyWorker(const nixlProxyBackendOps *backend_ops,
                          const nixlProxyMemViewRegistry *proxy_memview_registry,
                          std::atomic<uint64_t> *shutdown_state,
                          nixlProxyChannelState *channels,
@@ -29,7 +29,7 @@ ProxyWorker::ProxyWorker(nixlDeviceProxyBackendAdapter *backend,
                          uint32_t worker_index,
                          uint32_t worker_count,
                          uint64_t pthr_delay_us) noexcept
-    : backend_(backend),
+    : backend_ops_(backend_ops),
       proxy_memview_registry_(proxy_memview_registry),
       shutdown_state_(shutdown_state),
       channels_(channels),
@@ -153,7 +153,7 @@ ProxyWorker::submitToBackend(nixlProxyChannelState &channel,
                << prepared_submission.remote.desc.addr << std::dec << " size=" << submission.size
                << " remote_agent='" << prepared_submission.remote_agent << "'";
 
-    status = backend_->submit(prepared_submission, inflight.backend_request);
+    status = backend_ops_->submit(prepared_submission, inflight.backend_request);
     inflight.status = status;
     if (status != NIXL_SUCCESS && status != NIXL_IN_PROG) {
         NIXL_ERROR << "ProxyWorker::submitToBackend: backend submit failed"
@@ -173,7 +173,7 @@ ProxyWorker::driveBackendProgress() {
     for (uint32_t channel_id = worker_index_; channel_id < channel_count_;
          channel_id += worker_count_) {
         for (uint32_t peer = 0; peer < max_peers_; ++peer) {
-            backend_->progress(channel_id, peer);
+            backend_ops_->progress(channel_id, peer);
         }
     }
 }
@@ -193,7 +193,7 @@ ProxyWorker::publishCompletions(nixlProxyChannelState &channel) {
         if (front.status != NIXL_IN_PROG) {
             st = front.status;
         } else {
-            st = backend_->checkCompletion(front.backend_request);
+            st = backend_ops_->check_completion(front.backend_request);
             if (st == NIXL_IN_PROG) {
                 break;
             }

@@ -38,7 +38,7 @@ public:
     operator=(const nixlProxyControlBuffer &) = delete;
 
     nixl_status_t
-    allocate(size_t count);
+    allocate(nixlDeviceAllocator &allocator, size_t count);
 
     void
     deallocate() noexcept;

@@ -15,7 +15,6 @@
  * limitations under the License.
  */
 #include "proxy_runtime.h"
-#include "backend_adapter.h"
 #include "nixl_types.h"
 #include "proxy_worker.h"
 #include "nixl_log.h"
@@ -50,9 +49,8 @@ nixlProxyMemViewRegistry::registerProxyMemView(nixlMemViewH backend_memview,
     const size_t direct_ptr_bytes = direct_ptrs.size() * sizeof(void *);
     const size_t allocation_size = sizeof(nixlProxyDeviceMemView) + direct_ptr_bytes;
 
-    nixlDeviceAllocator &allocator = nixlGetDeviceAllocator();
     nixlDeviceMem device_memview_mem;
-    if (allocator.allocDeviceMem(allocation_size, device_memview_mem) != NIXL_SUCCESS) {
+    if (allocator_.allocDeviceMem(allocation_size, device_memview_mem) != NIXL_SUCCESS) {
         NIXL_ERROR << "nixlProxyMemViewRegistry::register: failed to allocate device memview";
         return NIXL_ERR_BACKEND;
     }
@@ -61,9 +59,9 @@ nixlProxyMemViewRegistry::registerProxyMemView(nixlMemViewH backend_memview,
     const nixlProxyDeviceMemView host_memview{
         entry.proxy_memview_id, static_cast<uint32_t>(direct_ptrs.size()), device_context_};
     nixl_status_t copy_status =
-        allocator.copyHostToDevice(device_memview, &host_memview, sizeof(host_memview));
+        allocator_.copyHostToDevice(device_memview, &host_memview, sizeof(host_memview));
     if (copy_status == NIXL_SUCCESS && !direct_ptrs.empty()) {
-        copy_status = allocator.copyHostToDevice(
+        copy_status = allocator_.copyHostToDevice(
             device_memview->direct_ptrs, direct_ptrs.data(), direct_ptr_bytes);
     }
     if (copy_status != NIXL_SUCCESS) {
@@ -442,7 +440,8 @@ nixlProxyMemViewRegistry::fillRemoteMetadata(const nixl_remote_meta_dlist_t &dli
 }
 
 nixl_status_t
-nixlProxyChannelState::allocate(uint32_t depth,
+nixlProxyChannelState::allocate(nixlDeviceAllocator &allocator,
+                                uint32_t depth,
                                 nixlProxyControlBuffer *control_slots,
                                 size_t control_slot_index) {
     NIXL_INFO << "nixlProxyChannelState::allocate: depth=" << depth
@@ -458,7 +457,6 @@ nixlProxyChannelState::allocate(uint32_t depth,
     consumer_idx_dev_ = control_slots_->devicePtr(control_slot_index_);
     consumer_idx_shadow_ = 0;
 
-    nixlDeviceAllocator &allocator = nixlGetDeviceAllocator();
     if (allocator.allocDeviceMem(sizeof(nixlProxyWorkRing), work_ring_mem_) != NIXL_SUCCESS ||
         allocator.allocDeviceMem(sizeof(uint64_t), producer_idx_mem_) != NIXL_SUCCESS ||
         allocator.allocDeviceMem(sizeof(uint64_t), consumer_idx_cache_mem_) != NIXL_SUCCESS ||
@@ -545,54 +543,67 @@ nixlProxyChannelState::deallocate() noexcept {
     device_view = nixlProxyChannelView{};
 }
 
-nixlProxyRuntime::nixlProxyRuntime() = default;
+nixlProxyRuntime::nixlProxyRuntime(nixlProxyBackendOps backend_ops,
+                                   const nixlProxyConfig &config,
+                                   nixlDeviceAllocator &allocator) noexcept
+    : allocator_(allocator),
+      backend_ops_(std::move(backend_ops)),
+      config_(config),
+      memview_registry_(allocator) {}
 
 nixlProxyRuntime::~nixlProxyRuntime() {
-    if (backend_) {
-        shutdown();
-    }
+    shutdown();
 }
 
 nixl_status_t
-nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
-                       uint32_t max_peers,
-                       uint32_t channel_count,
-                       uint32_t worker_count,
-                       uint64_t pthr_delay_us,
-                       uint32_t ring_depth) {
-    NIXL_INFO << "ProxyRuntime::init: max_peers=" << max_peers << " channel_count=" << channel_count
-              << " worker_count=" << worker_count << " pthr_delay_us=" << pthr_delay_us
-              << " ring_depth=" << ring_depth << " backend=" << backend.get();
-    if (backend == nullptr || max_peers == 0 || channel_count == 0 || worker_count == 0 ||
-        ring_depth == 0) {
-        NIXL_ERROR << "ProxyRuntime::init: invalid params";
+nixlProxyRuntime::create(nixlProxyBackendOps backend_ops,
+                         const nixlProxyConfig &config,
+                         std::unique_ptr<nixlProxyRuntime> &out,
+                         nixlDeviceAllocator &allocator) {
+    NIXL_INFO << "ProxyRuntime::create: max_peers=" << config.max_peers
+              << " channel_count=" << config.channel_count
+              << " thread_count=" << config.effectiveThreadCount()
+              << " pthr_delay_us=" << config.pthr_delay_us << " ring_depth=" << config.ring_depth;
+
+    if (!backend_ops.complete()) {
+        NIXL_ERROR << "ProxyRuntime::create: incomplete backend callbacks";
+        return NIXL_ERR_INVALID_PARAM;
+    }
+    if (config.max_peers == 0 || config.channel_count == 0 || config.effectiveThreadCount() == 0 ||
+        config.ring_depth == 0) {
+        NIXL_ERROR << "ProxyRuntime::create: invalid config";
         return NIXL_ERR_INVALID_PARAM;
     }
 
-    ring_depth_ = ring_depth;
+    // Held locally so a failed build tears itself down; `out` is only written
+    // once the runtime is complete.
+    std::unique_ptr<nixlProxyRuntime> runtime(
+        new nixlProxyRuntime(std::move(backend_ops), config, allocator));
+    const nixl_status_t status = runtime->build();
+    if (status != NIXL_SUCCESS) {
+        return status;
+    }
 
-    backend_ = std::move(backend);
-    memview_registry_.clear();
+    out = std::move(runtime);
+    return NIXL_SUCCESS;
+}
 
-    const uint32_t effective_worker_count = std::min(worker_count, channel_count);
-    NIXL_INFO << "ProxyRuntime::init: effective worker_count=" << effective_worker_count
-              << " (clamped to channel_count)";
+nixl_status_t
+nixlProxyRuntime::build() {
+    const uint32_t max_peers = config_.max_peers;
+    const uint32_t channel_count = config_.channel_count;
+    const uint32_t worker_count = config_.effectiveThreadCount();
 
-    nixl_status_t rc = backend_->init(effective_worker_count, channel_count, max_peers);
-    if ((rc != NIXL_SUCCESS) && (rc != NIXL_ERR_NOT_SUPPORTED)) {
-        NIXL_ERROR << "ProxyRuntime::init: backend init failed: " << rc;
-        backend_.reset();
+    nixl_status_t rc = backend_ops_.init(config_);
+    if (rc != NIXL_SUCCESS) {
+        NIXL_ERROR << "ProxyRuntime::build: backend init failed: " << rc;
         return rc;
     }
-    if (rc == NIXL_ERR_NOT_SUPPORTED) {
-        NIXL_INFO << "ProxyRuntime::init: backend init hook not supported; continuing";
-    }
 
-    const size_t channel_slots = static_cast<size_t>(max_peers) * channel_count;
-    rc = control_slots_.allocate(kProxyCiSlotBase + channel_slots);
+    const size_t channel_slots = config_.ucxWorkerCount();
+    rc = control_slots_.allocate(allocator_, kProxyCiSlotBase + channel_slots);
     if (rc != NIXL_SUCCESS) {
-        NIXL_ERROR << "ProxyRuntime::init: failed to create GPU-visible control slab";
-        shutdown();
+        NIXL_ERROR << "ProxyRuntime::build: failed to create GPU-visible control slab";
         return rc;
     }
     shutdown_word_dev_ = control_slots_.devicePtr(kProxyShutdownSlot);
@@ -601,22 +612,20 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
     for (uint32_t channel_idx = 0; channel_idx < channel_count; channel_idx++) {
         for (uint32_t peer_idx = 0; peer_idx < max_peers; peer_idx++) {
             const size_t slot = static_cast<size_t>(channel_idx) * max_peers + peer_idx;
-            rc = channels_[slot].allocate(ring_depth_, &control_slots_, kProxyCiSlotBase + slot);
+            rc = channels_[slot].allocate(
+                allocator_, config_.ring_depth, &control_slots_, kProxyCiSlotBase + slot);
             if (rc != NIXL_SUCCESS) {
-                shutdown();
                 return rc;
             }
             device_channel_views_[slot] = channels_[slot].device_view;
         }
     }
 
-    nixlDeviceAllocator &allocator = nixlGetDeviceAllocator();
-    if (allocator.allocDeviceMem(sizeof(nixlProxyChannelView) * channel_slots,
-                                 device_channel_views_mem_) != NIXL_SUCCESS ||
-        allocator.copyHostToDevice(device_channel_views_mem_.get(),
-                                   device_channel_views_.data(),
-                                   sizeof(nixlProxyChannelView) * channel_slots) != NIXL_SUCCESS) {
-        shutdown();
+    if (allocator_.allocDeviceMem(sizeof(nixlProxyChannelView) * channel_slots,
+                                  device_channel_views_mem_) != NIXL_SUCCESS ||
+        allocator_.copyHostToDevice(device_channel_views_mem_.get(),
+                                    device_channel_views_.data(),
+                                    sizeof(nixlProxyChannelView) * channel_slots) != NIXL_SUCCESS) {
         return NIXL_ERR_BACKEND;
     }
 
@@ -624,36 +633,32 @@ nixlProxyRuntime::init(std::unique_ptr<nixlDeviceProxyBackendAdapter> backend,
                                               max_peers,
                                               channel_count,
                                               shutdown_word_dev_};
-    if (allocator.allocDeviceMem(sizeof(nixlProxyDeviceContextData), device_context_mem_) !=
+    if (allocator_.allocDeviceMem(sizeof(nixlProxyDeviceContextData), device_context_mem_) !=
             NIXL_SUCCESS ||
-        allocator.copyHostToDevice(
+        allocator_.copyHostToDevice(
             device_context_mem_.get(), &device_context, sizeof(device_context)) != NIXL_SUCCESS) {
-        shutdown();
         return NIXL_ERR_BACKEND;
     }
     memview_registry_.setDeviceContext(deviceContext());
 
-    workers_.clear();
-    workers_.reserve(effective_worker_count);
-    workers_started_ = false;
-
-    for (uint32_t worker_idx = 0; worker_idx < effective_worker_count; worker_idx++) {
-        NIXL_INFO << "ProxyRuntime::init: worker " << worker_idx
-                  << " owns channel(s) where channel_id % " << effective_worker_count
-                  << " == " << worker_idx << "; handles all dest rings of those channels";
-        workers_.push_back(std::make_unique<ProxyWorker>(backend_.get(),
+    workers_.reserve(worker_count);
+    for (uint32_t worker_idx = 0; worker_idx < worker_count; worker_idx++) {
+        NIXL_INFO << "ProxyRuntime::build: worker " << worker_idx
+                  << " owns channel(s) where channel_id % " << worker_count << " == " << worker_idx
+                  << "; handles all dest rings of those channels";
+        workers_.push_back(std::make_unique<ProxyWorker>(&backend_ops_,
                                                          &memview_registry_,
                                                          &shutdown_state_,
                                                          channels_.data(),
                                                          max_peers,
                                                          channel_count,
                                                          worker_idx,
-                                                         effective_worker_count,
-                                                         pthr_delay_us));
+                                                         worker_count,
+                                                         config_.pthr_delay_us));
     }
 
-    NIXL_INFO << "ProxyRuntime::init: complete — " << max_peers << " peers, " << channel_count
-              << " channels (rings per dest), " << effective_worker_count
+    NIXL_INFO << "ProxyRuntime::build: complete - " << max_peers << " peers, " << channel_count
+              << " channels (rings per dest), " << worker_count
               << " workers, device_context(dev)=" << deviceContext();
     return NIXL_SUCCESS;
 }
@@ -662,11 +667,10 @@ nixl_status_t
 nixlProxyRuntime::loadRemoteConnInfo(const std::string &remote_name, const nixl_blob_t &conn_info) {
     NIXL_INFO << "ProxyRuntime::loadRemoteConnInfo: remote='" << remote_name
               << "' conn_info_size=" << conn_info.size();
-    if (backend_ == nullptr) {
-        NIXL_ERROR << "ProxyRuntime::loadRemoteConnInfo: no backend";
-        return NIXL_ERR_NOT_SUPPORTED;
+    if (!backend_ops_.on_remote_loaded) {
+        return NIXL_SUCCESS;
     }
-    nixl_status_t rc = backend_->loadRemoteConnInfo(remote_name, conn_info);
+    const nixl_status_t rc = backend_ops_.on_remote_loaded(remote_name, conn_info);
     NIXL_INFO << "ProxyRuntime::loadRemoteConnInfo: result=" << rc;
     return rc;
 }
@@ -674,10 +678,10 @@ nixlProxyRuntime::loadRemoteConnInfo(const std::string &remote_name, const nixl_
 nixl_status_t
 nixlProxyRuntime::remoteDisconnected(const std::string &remote_name) {
     NIXL_INFO << "ProxyRuntime::remoteDisconnected: remote='" << remote_name << "'";
-    if (backend_ == nullptr) {
-        return NIXL_ERR_NOT_SUPPORTED;
+    if (!backend_ops_.on_remote_disconnected) {
+        return NIXL_SUCCESS;
     }
-    return backend_->remoteDisconnected(remote_name);
+    return backend_ops_.on_remote_disconnected(remote_name);
 }
 
 nixl_status_t
@@ -693,11 +697,9 @@ nixlProxyRuntime::prepMemView(const nixl_meta_dlist_t &dlist, nixlMemViewH *prox
 nixl_status_t
 nixlProxyRuntime::prepMemView(const nixl_remote_meta_dlist_t &dlist, nixlMemViewH *proxy_memview) {
     std::vector<void *> direct_ptrs;
-    if (backend_ != nullptr) {
-        const nixl_status_t resolve_status = backend_->resolveDirectPointers(dlist, direct_ptrs);
-        if (resolve_status == NIXL_ERR_NOT_SUPPORTED) {
-            direct_ptrs.clear();
-        } else if (resolve_status != NIXL_SUCCESS) {
+    if (backend_ops_.resolve_direct_ptrs) {
+        const nixl_status_t resolve_status = backend_ops_.resolve_direct_ptrs(dlist, direct_ptrs);
+        if (resolve_status != NIXL_SUCCESS) {
             return resolve_status;
         }
     }
@@ -797,7 +799,7 @@ nixlProxyRuntime::shutdown() {
     workers_started_ = false;
     NIXL_INFO << "ProxyRuntime::shutdown: all worker threads joined";
 
-    if (backend_ != nullptr) {
+    if (backend_ops_.release_request) {
         size_t released = 0;
         for (auto &channel : channels_) {
             if (channel.ring_depth_ == 0 || channel.consumer_idx_dev_ == nullptr) {
@@ -809,7 +811,7 @@ nixlProxyRuntime::shutdown() {
                 nixlProxyRequestState &inflight =
                     channel.inflight_slots_[idx % channel.ring_depth_];
                 if (inflight.status == NIXL_IN_PROG && inflight.backend_request) {
-                    backend_->releaseRequest(inflight.backend_request);
+                    backend_ops_.release_request(inflight.backend_request);
                     ++released;
                 }
                 inflight = nixlProxyRequestState{};
@@ -823,13 +825,10 @@ nixlProxyRuntime::shutdown() {
     }
 
     nixl_status_t backend_status = NIXL_SUCCESS;
-    if (backend_ != nullptr) {
+    if (backend_ops_.shutdown) {
         NIXL_INFO << "ProxyRuntime::shutdown: shutting down backend";
-        backend_status = backend_->shutdown();
+        backend_status = backend_ops_.shutdown();
         NIXL_INFO << "ProxyRuntime::shutdown: backend shutdown status=" << backend_status;
-        if (backend_status == NIXL_ERR_NOT_SUPPORTED) {
-            backend_status = NIXL_SUCCESS;
-        }
     }
 
     workers_.clear();
@@ -843,7 +842,9 @@ nixlProxyRuntime::shutdown() {
 
     channels_.clear();
     control_slots_.deallocate();
-    backend_.reset();
+    // Drop the callbacks last: they are what makes a second shutdown a no-op,
+    // and they may own state belonging to the backend that is going away.
+    backend_ops_ = nixlProxyBackendOps{};
     NIXL_INFO << "ProxyRuntime::shutdown: complete";
     if (backend_status != NIXL_SUCCESS) {
         return backend_status;

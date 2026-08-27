@@ -18,9 +18,11 @@ device_proxy_lib = library('nixl_device_proxy',
             'proxy_runtime.cpp', 'proxy_runtime.h',
             'proxy_worker.cpp', 'proxy_worker.h',
             'proxy_control_buffer.cpp', 'proxy_control_buffer.h',
-            'proxy_protocol.h', 'backend_adapter.h'],
+            'proxy_protocol.h', 'proxy_backend_ops.h'],
            include_directories: [nixl_inc_dirs, utils_inc_dirs],
            dependencies: [gdrcopy_dep, nixl_common_dep, nixl_infra, device_allocator_interface],
            install: true)
 
-device_proxy_interface = declare_dependency(link_with: device_proxy_lib)
+# The proxy headers hand out nixlDeviceAllocator, so consumers link it too.
+device_proxy_interface = declare_dependency(link_with: device_proxy_lib,
+                                            dependencies: [device_allocator_interface])
