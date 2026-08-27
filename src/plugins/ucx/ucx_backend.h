@@ -332,16 +332,16 @@ private:
      * step of create(); worker threads call back into the engine, so it must
      * be fully constructed first.
      */
-    nixl_status_t
+    [[nodiscard]] nixl_status_t
     setupProxyRuntime(const nixlProxyConfig &config);
 
     /** Wrap a backend memview into the device-dispatch handle; cleans up on failure. */
-    nixl_status_t
+    [[nodiscard]] nixl_status_t
     wrapMemView(nixlMemViewH backend_mvh, nixlMemViewH &mvh) const;
 
     /** Shared proxy/direct dispatch behind both public prepMemView overloads. */
     template<typename DlistT>
-    nixl_status_t
+    [[nodiscard]] nixl_status_t
     prepMemViewImpl(const DlistT &dlist,
                     nixlMemViewH &mvh,
                     const nixl_opt_b_args_t *opt_args,

@@ -36,7 +36,9 @@ constexpr std::array kKnownProxyParams = {
 
 bool
 isProxyParamKey(const std::string &key) {
-    return key == kProxyEnabledParam || key.rfind("proxy_", 0) == 0;
+    // Prefix-match both families so near-miss spellings (device_proxy_enable,
+    // proxy_channel_cnt) are rejected as unknown instead of silently ignored.
+    return key.rfind("device_proxy", 0) == 0 || key.rfind("proxy_", 0) == 0;
 }
 
 } // namespace

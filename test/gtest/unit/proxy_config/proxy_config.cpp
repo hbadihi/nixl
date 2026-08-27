@@ -112,6 +112,13 @@ TEST(ProxyConfigTest, UnknownProxyKeyRejected) {
     EXPECT_EQ(nixlParseProxyConfig(makeInitParams(&params), config), NIXL_ERR_INVALID_PARAM);
 }
 
+TEST(ProxyConfigTest, EnableKeyTypoRejected) {
+    // Near-miss spellings of the enable key are unknown keys, not no-ops.
+    nixl_b_params_t params{{"device_proxy_enable", "true"}};
+    nixlProxyConfig config;
+    EXPECT_EQ(nixlParseProxyConfig(makeInitParams(&params), config), NIXL_ERR_INVALID_PARAM);
+}
+
 TEST(ProxyConfigTest, TuningWithoutEnableRejected) {
     nixlProxyConfig config;
     {

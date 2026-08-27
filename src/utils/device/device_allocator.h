@@ -35,65 +35,65 @@ class nixlMappedHostMem;
  * implementation hooks.
  */
 class nixlDeviceAllocator {
-    public:
-        virtual ~nixlDeviceAllocator() = default;
+public:
+    virtual ~nixlDeviceAllocator() = default;
 
-        [[nodiscard]] nixl_status_t
-        allocDeviceMem(size_t size, nixlDeviceMem &out) noexcept;
+    [[nodiscard]] nixl_status_t
+    allocDeviceMem(size_t size, nixlDeviceMem &out) noexcept;
 
-        /**
-         * Allocate pinned host memory that is mapped into the device address
-         * space; the handle exposes both the host pointer and its
-         * device-visible alias.
-         */
-        [[nodiscard]] nixl_status_t
-        allocMappedHostMem(size_t size, nixlMappedHostMem &out) noexcept;
+    /**
+     * Allocate pinned host memory that is mapped into the device address
+     * space; the handle exposes both the host pointer and its
+     * device-visible alias.
+     */
+    [[nodiscard]] nixl_status_t
+    allocMappedHostMem(size_t size, nixlMappedHostMem &out) noexcept;
 
-        /**
-         * Narrow raw free for pointers whose ownership left RAII scope via
-         * nixlDeviceMem::release() (e.g. nixlMemViewH handles crossing the
-         * public API boundary). Prefer the RAII handles everywhere else.
-         */
-        void
-        freeDeviceMem(void *ptr) noexcept {
-            doFreeDeviceMem(ptr);
-        }
+    /**
+     * Narrow raw free for pointers whose ownership left RAII scope via
+     * nixlDeviceMem::release() (e.g. nixlMemViewH handles crossing the
+     * public API boundary). Prefer the RAII handles everywhere else.
+     */
+    void
+    freeDeviceMem(void *ptr) noexcept {
+        doFreeDeviceMem(ptr);
+    }
 
-        [[nodiscard]] virtual nixl_status_t
-        copyHostToDevice(void *dst, const void *src, size_t size) noexcept = 0;
+    [[nodiscard]] virtual nixl_status_t
+    copyHostToDevice(void *dst, const void *src, size_t size) noexcept = 0;
 
-        [[nodiscard]] virtual nixl_status_t
-        copyDeviceToHost(void *dst, const void *src, size_t size) noexcept = 0;
+    [[nodiscard]] virtual nixl_status_t
+    copyDeviceToHost(void *dst, const void *src, size_t size) noexcept = 0;
 
-        [[nodiscard]] virtual nixl_status_t
-        memsetDeviceMem(void *ptr, int value, size_t size) noexcept = 0;
+    [[nodiscard]] virtual nixl_status_t
+    memsetDeviceMem(void *ptr, int value, size_t size) noexcept = 0;
 
-        /** Block until all outstanding work on the active device completes. */
-        [[nodiscard]] virtual nixl_status_t
-        synchronize() noexcept = 0;
+    /** Block until all outstanding work on the active device completes. */
+    [[nodiscard]] virtual nixl_status_t
+    synchronize() noexcept = 0;
 
-        [[nodiscard]] virtual nixl_status_t
-        getActiveDevice(int &device_id) noexcept = 0;
+    [[nodiscard]] virtual nixl_status_t
+    getActiveDevice(int &device_id) noexcept = 0;
 
-        [[nodiscard]] virtual nixl_status_t
-        setActiveDevice(int device_id) noexcept = 0;
+    [[nodiscard]] virtual nixl_status_t
+    setActiveDevice(int device_id) noexcept = 0;
 
-    protected:
-        [[nodiscard]] virtual nixl_status_t
-        doAllocDeviceMem(void **ptr, size_t size) noexcept = 0;
+protected:
+    [[nodiscard]] virtual nixl_status_t
+    doAllocDeviceMem(void **ptr, size_t size) noexcept = 0;
 
-        virtual void
-        doFreeDeviceMem(void *ptr) noexcept = 0;
+    virtual void
+    doFreeDeviceMem(void *ptr) noexcept = 0;
 
-        [[nodiscard]] virtual nixl_status_t
-        doAllocMappedHostMem(void **host_ptr, void **dev_ptr, size_t size) noexcept = 0;
+    [[nodiscard]] virtual nixl_status_t
+    doAllocMappedHostMem(void **host_ptr, void **dev_ptr, size_t size) noexcept = 0;
 
-        virtual void
-        doFreeMappedHostMem(void *host_ptr) noexcept = 0;
+    virtual void
+    doFreeMappedHostMem(void *host_ptr) noexcept = 0;
 
-    private:
-        friend class nixlDeviceMem;
-        friend class nixlMappedHostMem;
+private:
+    friend class nixlDeviceMem;
+    friend class nixlMappedHostMem;
 };
 
 /**
@@ -102,97 +102,97 @@ class nixlDeviceAllocator {
  * active device at destruction time.
  */
 class nixlDeviceMem {
-    public:
-        nixlDeviceMem() = default;
+public:
+    nixlDeviceMem() = default;
 
-        ~nixlDeviceMem() {
+    ~nixlDeviceMem() {
+        reset();
+    }
+
+    nixlDeviceMem(nixlDeviceMem &&other) noexcept {
+        *this = std::move(other);
+    }
+
+    nixlDeviceMem &
+    operator=(nixlDeviceMem &&other) noexcept {
+        if (this != &other) {
             reset();
+            allocator_ = std::exchange(other.allocator_, nullptr);
+            ptr_ = std::exchange(other.ptr_, nullptr);
+            size_ = std::exchange(other.size_, 0);
+            device_id_ = std::exchange(other.device_id_, -1);
         }
+        return *this;
+    }
 
-        nixlDeviceMem(nixlDeviceMem &&other) noexcept {
-            *this = std::move(other);
+    nixlDeviceMem(const nixlDeviceMem &) = delete;
+    nixlDeviceMem &
+    operator=(const nixlDeviceMem &) = delete;
+
+    [[nodiscard]] void *
+    get() const noexcept {
+        return ptr_;
+    }
+
+    template<class T>
+    [[nodiscard]] T *
+    as() const noexcept {
+        return static_cast<T *>(ptr_);
+    }
+
+    [[nodiscard]] size_t
+    size() const noexcept {
+        return size_;
+    }
+
+    explicit
+    operator bool() const noexcept {
+        return ptr_ != nullptr;
+    }
+
+    void
+    reset() noexcept {
+        if (ptr_ == nullptr) {
+            return;
         }
-
-        nixlDeviceMem &
-        operator=(nixlDeviceMem &&other) noexcept {
-            if (this != &other) {
-                reset();
-                allocator_ = std::exchange(other.allocator_, nullptr);
-                ptr_ = std::exchange(other.ptr_, nullptr);
-                size_ = std::exchange(other.size_, 0);
-                device_id_ = std::exchange(other.device_id_, -1);
-            }
-            return *this;
+        int prev_device = -1;
+        bool restore = false;
+        if (device_id_ >= 0 && allocator_->getActiveDevice(prev_device) == NIXL_SUCCESS &&
+            prev_device != device_id_) {
+            restore = allocator_->setActiveDevice(device_id_) == NIXL_SUCCESS;
         }
-
-        nixlDeviceMem(const nixlDeviceMem &) = delete;
-        nixlDeviceMem &
-        operator=(const nixlDeviceMem &) = delete;
-
-        [[nodiscard]] void *
-        get() const noexcept {
-            return ptr_;
+        allocator_->doFreeDeviceMem(ptr_);
+        if (restore) {
+            static_cast<void>(allocator_->setActiveDevice(prev_device));
         }
+        allocator_ = nullptr;
+        ptr_ = nullptr;
+        size_ = 0;
+        device_id_ = -1;
+    }
 
-        template<class T>
-        [[nodiscard]] T *
-        as() const noexcept {
-            return static_cast<T *>(ptr_);
-        }
+    /** Give up ownership; the pointer must later go to freeDeviceMem(). */
+    [[nodiscard]] void *
+    release() noexcept {
+        allocator_ = nullptr;
+        size_ = 0;
+        device_id_ = -1;
+        return std::exchange(ptr_, nullptr);
+    }
 
-        [[nodiscard]] size_t
-        size() const noexcept {
-            return size_;
-        }
+private:
+    friend class nixlDeviceAllocator;
 
-        explicit
-        operator bool() const noexcept {
-            return ptr_ != nullptr;
-        }
+    nixlDeviceMem(nixlDeviceAllocator *allocator, void *ptr, size_t size, int device_id) noexcept
+        : allocator_(allocator),
+          ptr_(ptr),
+          size_(size),
+          device_id_(device_id) {}
 
-        void
-        reset() noexcept {
-            if (ptr_ == nullptr) {
-                return;
-            }
-            int prev_device = -1;
-            bool restore = false;
-            if (device_id_ >= 0 && allocator_->getActiveDevice(prev_device) == NIXL_SUCCESS &&
-                prev_device != device_id_) {
-                restore = allocator_->setActiveDevice(device_id_) == NIXL_SUCCESS;
-            }
-            allocator_->doFreeDeviceMem(ptr_);
-            if (restore) {
-                static_cast<void>(allocator_->setActiveDevice(prev_device));
-            }
-            allocator_ = nullptr;
-            ptr_ = nullptr;
-            size_ = 0;
-            device_id_ = -1;
-        }
-
-        /** Give up ownership; the pointer must later go to freeDeviceMem(). */
-        [[nodiscard]] void *
-        release() noexcept {
-            allocator_ = nullptr;
-            size_ = 0;
-            device_id_ = -1;
-            return std::exchange(ptr_, nullptr);
-        }
-
-    private:
-        friend class nixlDeviceAllocator;
-
-        nixlDeviceMem(nixlDeviceAllocator *allocator, void *ptr, size_t size, int device_id) noexcept
-            : allocator_(allocator),
-              ptr_(ptr),
-              size_(size),
-              device_id_(device_id) {}
-
-        nixlDeviceAllocator *allocator_ = nullptr;
-        void *ptr_ = nullptr;
-        size_t size_ = 0;
-        int device_id_ = -1;
+    nixlDeviceAllocator *allocator_ = nullptr;
+    void *ptr_ = nullptr;
+    size_t size_ = 0;
+    int device_id_ = -1;
 };
 
 /**
@@ -200,98 +200,99 @@ class nixlDeviceMem {
  * address space. Exposes the host pointer and its device-visible alias.
  */
 class nixlMappedHostMem {
-    public:
-        nixlMappedHostMem() = default;
+public:
+    nixlMappedHostMem() = default;
 
-        ~nixlMappedHostMem() {
+    ~nixlMappedHostMem() {
+        reset();
+    }
+
+    nixlMappedHostMem(nixlMappedHostMem &&other) noexcept {
+        *this = std::move(other);
+    }
+
+    nixlMappedHostMem &
+    operator=(nixlMappedHostMem &&other) noexcept {
+        if (this != &other) {
             reset();
+            allocator_ = std::exchange(other.allocator_, nullptr);
+            host_ptr_ = std::exchange(other.host_ptr_, nullptr);
+            dev_ptr_ = std::exchange(other.dev_ptr_, nullptr);
+            size_ = std::exchange(other.size_, 0);
         }
+        return *this;
+    }
 
-        nixlMappedHostMem(nixlMappedHostMem &&other) noexcept {
-            *this = std::move(other);
+    nixlMappedHostMem(const nixlMappedHostMem &) = delete;
+    nixlMappedHostMem &
+    operator=(const nixlMappedHostMem &) = delete;
+
+    [[nodiscard]] void *
+    hostPtr() const noexcept {
+        return host_ptr_;
+    }
+
+    [[nodiscard]] void *
+    devPtr() const noexcept {
+        return dev_ptr_;
+    }
+
+    template<class T>
+    [[nodiscard]] T *
+    asHost() const noexcept {
+        return static_cast<T *>(host_ptr_);
+    }
+
+    template<class T>
+    [[nodiscard]] T *
+    asDev() const noexcept {
+        return static_cast<T *>(dev_ptr_);
+    }
+
+    [[nodiscard]] size_t
+    size() const noexcept {
+        return size_;
+    }
+
+    explicit
+    operator bool() const noexcept {
+        return host_ptr_ != nullptr;
+    }
+
+    void
+    reset() noexcept {
+        if (host_ptr_ == nullptr) {
+            return;
         }
+        allocator_->doFreeMappedHostMem(host_ptr_);
+        allocator_ = nullptr;
+        host_ptr_ = nullptr;
+        dev_ptr_ = nullptr;
+        size_ = 0;
+    }
 
-        nixlMappedHostMem &
-        operator=(nixlMappedHostMem &&other) noexcept {
-            if (this != &other) {
-                reset();
-                allocator_ = std::exchange(other.allocator_, nullptr);
-                host_ptr_ = std::exchange(other.host_ptr_, nullptr);
-                dev_ptr_ = std::exchange(other.dev_ptr_, nullptr);
-                size_ = std::exchange(other.size_, 0);
-            }
-            return *this;
-        }
+private:
+    friend class nixlDeviceAllocator;
 
-        nixlMappedHostMem(const nixlMappedHostMem &) = delete;
-        nixlMappedHostMem &
-        operator=(const nixlMappedHostMem &) = delete;
+    nixlMappedHostMem(nixlDeviceAllocator *allocator,
+                      void *host_ptr,
+                      void *dev_ptr,
+                      size_t size) noexcept
+        : allocator_(allocator),
+          host_ptr_(host_ptr),
+          dev_ptr_(dev_ptr),
+          size_(size) {}
 
-        [[nodiscard]] void *
-        hostPtr() const noexcept {
-            return host_ptr_;
-        }
-
-        [[nodiscard]] void *
-        devPtr() const noexcept {
-            return dev_ptr_;
-        }
-
-        template<class T>
-        [[nodiscard]] T *
-        asHost() const noexcept {
-            return static_cast<T *>(host_ptr_);
-        }
-
-        template<class T>
-        [[nodiscard]] T *
-        asDev() const noexcept {
-            return static_cast<T *>(dev_ptr_);
-        }
-
-        [[nodiscard]] size_t
-        size() const noexcept {
-            return size_;
-        }
-
-        explicit
-        operator bool() const noexcept {
-            return host_ptr_ != nullptr;
-        }
-
-        void
-        reset() noexcept {
-            if (host_ptr_ == nullptr) {
-                return;
-            }
-            allocator_->doFreeMappedHostMem(host_ptr_);
-            allocator_ = nullptr;
-            host_ptr_ = nullptr;
-            dev_ptr_ = nullptr;
-            size_ = 0;
-        }
-
-    private:
-        friend class nixlDeviceAllocator;
-
-        nixlMappedHostMem(nixlDeviceAllocator *allocator,
-                          void *host_ptr,
-                          void *dev_ptr,
-                          size_t size) noexcept
-            : allocator_(allocator),
-              host_ptr_(host_ptr),
-              dev_ptr_(dev_ptr),
-              size_(size) {}
-
-        nixlDeviceAllocator *allocator_ = nullptr;
-        void *host_ptr_ = nullptr;
-        void *dev_ptr_ = nullptr;
-        size_t size_ = 0;
+    nixlDeviceAllocator *allocator_ = nullptr;
+    void *host_ptr_ = nullptr;
+    void *dev_ptr_ = nullptr;
+    size_t size_ = 0;
 };
 
 inline nixl_status_t
 nixlDeviceAllocator::allocDeviceMem(size_t size, nixlDeviceMem &out) noexcept {
-    out.reset();
+    // `out` is only touched on success; a failed allocation leaves the
+    // caller's existing buffer intact.
     void *ptr = nullptr;
     const nixl_status_t status = doAllocDeviceMem(&ptr, size);
     if (status != NIXL_SUCCESS) {
@@ -307,7 +308,8 @@ nixlDeviceAllocator::allocDeviceMem(size_t size, nixlDeviceMem &out) noexcept {
 
 inline nixl_status_t
 nixlDeviceAllocator::allocMappedHostMem(size_t size, nixlMappedHostMem &out) noexcept {
-    out.reset();
+    // `out` is only touched on success; a failed allocation leaves the
+    // caller's existing buffer intact.
     void *host_ptr = nullptr;
     void *dev_ptr = nullptr;
     const nixl_status_t status = doAllocMappedHostMem(&host_ptr, &dev_ptr, size);
