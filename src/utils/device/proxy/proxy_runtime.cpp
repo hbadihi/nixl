@@ -85,87 +85,63 @@ nixlProxyMemViewRegistry::registerProxyMemView(nixlMemViewH backend_memview,
     return NIXL_SUCCESS;
 }
 
+template<typename DlistT>
+nixl_status_t
+nixlProxyMemViewRegistry::prepMemViewImpl(nixlMemViewH backend_memview,
+                                          const DlistT &dlist,
+                                          const std::vector<void *> &direct_ptrs,
+                                          nixlMemViewH *proxy_memview) {
+    if (proxy_memview == nullptr) {
+        return NIXL_ERR_INVALID_PARAM;
+    }
+
+    nixlMemViewH registered_proxy_memview = nullptr;
+    nixl_status_t status =
+        registerProxyMemView(backend_memview, direct_ptrs, &registered_proxy_memview);
+    if (status != NIXL_SUCCESS) {
+        return status;
+    }
+
+    status = storeMetadata(registered_proxy_memview, dlist);
+    if (status != NIXL_SUCCESS) {
+        unregisterProxyMemView(registered_proxy_memview);
+        return status;
+    }
+
+    *proxy_memview = registered_proxy_memview;
+    return NIXL_SUCCESS;
+}
+
 nixl_status_t
 nixlProxyMemViewRegistry::prepMemView(const nixl_meta_dlist_t &dlist, nixlMemViewH *proxy_memview) {
-    return prepMemView(nullptr, dlist, proxy_memview);
+    return prepMemViewImpl(nullptr, dlist, {}, proxy_memview);
 }
 
 nixl_status_t
 nixlProxyMemViewRegistry::prepMemView(const nixl_remote_meta_dlist_t &dlist,
                                       nixlMemViewH *proxy_memview) {
-    return prepMemView(dlist, {}, proxy_memview);
+    return prepMemViewImpl(nullptr, dlist, {}, proxy_memview);
 }
 
 nixl_status_t
 nixlProxyMemViewRegistry::prepMemView(const nixl_remote_meta_dlist_t &dlist,
                                       const std::vector<void *> &direct_ptrs,
                                       nixlMemViewH *proxy_memview) {
-    if (proxy_memview == nullptr) {
-        return NIXL_ERR_INVALID_PARAM;
-    }
-
-    nixlMemViewH registered_proxy_memview = nullptr;
-    nixl_status_t status = registerProxyMemView(nullptr, direct_ptrs, &registered_proxy_memview);
-    if (status != NIXL_SUCCESS) {
-        return status;
-    }
-
-    status = storeMetadata(registered_proxy_memview, dlist);
-    if (status != NIXL_SUCCESS) {
-        unregisterProxyMemView(registered_proxy_memview);
-        return status;
-    }
-
-    *proxy_memview = registered_proxy_memview;
-    return NIXL_SUCCESS;
+    return prepMemViewImpl(nullptr, dlist, direct_ptrs, proxy_memview);
 }
 
 nixl_status_t
 nixlProxyMemViewRegistry::prepMemView(nixlMemViewH backend_memview,
                                       const nixl_meta_dlist_t &dlist,
                                       nixlMemViewH *proxy_memview) {
-    if (proxy_memview == nullptr) {
-        return NIXL_ERR_INVALID_PARAM;
-    }
-
-    nixlMemViewH registered_proxy_memview = nullptr;
-    nixl_status_t status = registerProxyMemView(backend_memview, &registered_proxy_memview);
-    if (status != NIXL_SUCCESS) {
-        return status;
-    }
-
-    status = storeMetadata(registered_proxy_memview, dlist);
-    if (status != NIXL_SUCCESS) {
-        unregisterProxyMemView(registered_proxy_memview);
-        return status;
-    }
-
-    *proxy_memview = registered_proxy_memview;
-    return NIXL_SUCCESS;
+    return prepMemViewImpl(backend_memview, dlist, {}, proxy_memview);
 }
 
 nixl_status_t
 nixlProxyMemViewRegistry::prepMemView(nixlMemViewH backend_memview,
                                       const nixl_remote_meta_dlist_t &dlist,
                                       nixlMemViewH *proxy_memview) {
-    if (proxy_memview == nullptr) {
-        return NIXL_ERR_INVALID_PARAM;
-    }
-
-    nixlMemViewH registered_proxy_memview = nullptr;
-    nixl_status_t status = registerProxyMemView(backend_memview, &registered_proxy_memview);
-    if (status != NIXL_SUCCESS) {
-        return status;
-    }
-
-    status = storeMetadata(registered_proxy_memview, dlist);
-    if (status != NIXL_SUCCESS) {
-        unregisterProxyMemView(registered_proxy_memview);
-        return status;
-    }
-
-    *proxy_memview = registered_proxy_memview;
-    return NIXL_SUCCESS;
+    return prepMemViewImpl(backend_memview, dlist, {}, proxy_memview);
 }
 
 nixl_status_t

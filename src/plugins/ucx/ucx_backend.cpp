@@ -1696,10 +1696,12 @@ nixlUcxEngine::genNotif(const std::string &remote_agent, const std::string &msg)
 }
 
 #ifdef HAVE_NIXL_DEVICE_API
+template<typename DlistT>
 nixl_status_t
-nixlUcxEngine::prepMemView(const nixl_remote_meta_dlist_t &dlist,
-                           nixlMemViewH &mvh,
-                           const nixl_opt_b_args_t *opt_args) const {
+nixlUcxEngine::prepMemViewImpl(const DlistT &dlist,
+                               nixlMemViewH &mvh,
+                               const nixl_opt_b_args_t *opt_args,
+                               const char *kind) const {
     nixlMemViewH backend_mvh = nullptr;
     if (proxyRuntime_) {
         const nixl_status_t status = proxyRuntime_->prepMemView(dlist, &backend_mvh);
@@ -1712,7 +1714,7 @@ nixlUcxEngine::prepMemView(const nixl_remote_meta_dlist_t &dlist,
             backend_mvh = nixl::ucx::createMemList(dlist, *getSharedWorker(worker_id));
         }
         catch (const std::exception &e) {
-            NIXL_ERROR << "Failed to prepare remote memory view: " << e.what();
+            NIXL_ERROR << "Failed to prepare " << kind << " memory view: " << e.what();
             return NIXL_ERR_BACKEND;
         }
     }
@@ -1720,26 +1722,17 @@ nixlUcxEngine::prepMemView(const nixl_remote_meta_dlist_t &dlist,
 }
 
 nixl_status_t
+nixlUcxEngine::prepMemView(const nixl_remote_meta_dlist_t &dlist,
+                           nixlMemViewH &mvh,
+                           const nixl_opt_b_args_t *opt_args) const {
+    return prepMemViewImpl(dlist, mvh, opt_args, "remote");
+}
+
+nixl_status_t
 nixlUcxEngine::prepMemView(const nixl_meta_dlist_t &dlist,
                            nixlMemViewH &mvh,
                            const nixl_opt_b_args_t *opt_args) const {
-    nixlMemViewH backend_mvh = nullptr;
-    if (proxyRuntime_) {
-        const nixl_status_t status = proxyRuntime_->prepMemView(dlist, &backend_mvh);
-        if (status != NIXL_SUCCESS) {
-            return status;
-        }
-    } else {
-        const size_t worker_id = getSharedWorkerId(opt_args);
-        try {
-            backend_mvh = nixl::ucx::createMemList(dlist, *getSharedWorker(worker_id));
-        }
-        catch (const std::exception &e) {
-            NIXL_ERROR << "Failed to prepare local memory view: " << e.what();
-            return NIXL_ERR_BACKEND;
-        }
-    }
-    return wrapMemView(backend_mvh, mvh);
+    return prepMemViewImpl(dlist, mvh, opt_args, "local");
 }
 
 nixl_status_t

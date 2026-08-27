@@ -218,6 +218,13 @@ class nixlProxyMemViewRegistry {
                              const std::vector<void *> &direct_ptrs,
                              nixlMemViewH *proxy_memview);
 
+        template<typename DlistT>
+        nixl_status_t
+        prepMemViewImpl(nixlMemViewH backend_memview,
+                        const DlistT &dlist,
+                        const std::vector<void *> &direct_ptrs,
+                        nixlMemViewH *proxy_memview);
+
         static void
         releaseDeviceMemView(RegistryEntry &entry) noexcept;
 

@@ -338,6 +338,14 @@ private:
     /** Wrap a backend memview into the device-dispatch handle; cleans up on failure. */
     nixl_status_t
     wrapMemView(nixlMemViewH backend_mvh, nixlMemViewH &mvh) const;
+
+    /** Shared proxy/direct dispatch behind both public prepMemView overloads. */
+    template<typename DlistT>
+    nixl_status_t
+    prepMemViewImpl(const DlistT &dlist,
+                    nixlMemViewH &mvh,
+                    const nixl_opt_b_args_t *opt_args,
+                    const char *kind) const;
 #endif
 
     /* UCX data */
