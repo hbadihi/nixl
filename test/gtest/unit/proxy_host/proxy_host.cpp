@@ -182,11 +182,16 @@ namespace proxy_host {
                 request = nixlBackendProxyRequest{++next_token_, submission.channel_id};
                 submissions_.push_back(submission);
                 tokens_.push_back(request.token);
+                token_peer_[request.token] = submission.peer_index;
                 return NIXL_IN_PROG;
             };
             ops.check_completion = [this](const nixlBackendProxyRequest &request) {
                 const std::lock_guard<std::mutex> lock(mutex_);
                 if (complete_on_check_) {
+                    return NIXL_SUCCESS;
+                }
+                const auto peer = token_peer_.find(request.token);
+                if (peer != token_peer_.end() && healthy_peers_.count(peer->second) != 0) {
                     return NIXL_SUCCESS;
                 }
                 const auto it = completed_.find(request.token);
@@ -219,6 +224,23 @@ namespace proxy_host {
         completeEverything() {
             const std::lock_guard<std::mutex> lock(mutex_);
             complete_on_check_ = true;
+        }
+
+        /** Requests bound for this peer finish; every other peer stays wedged. */
+        void
+        completePeer(uint32_t peer_index) {
+            const std::lock_guard<std::mutex> lock(mutex_);
+            healthy_peers_.insert(peer_index);
+        }
+
+        size_t
+        submissionCountForPeer(uint32_t peer_index) const {
+            const std::lock_guard<std::mutex> lock(mutex_);
+            size_t count = 0;
+            for (const auto &submission : submissions_) {
+                count += submission.peer_index == peer_index ? 1 : 0;
+            }
+            return count;
         }
 
         size_t
@@ -265,6 +287,8 @@ namespace proxy_host {
         std::vector<uint64_t> released_;
         std::map<uint64_t, nixl_status_t> completed_;
         std::atomic<uint64_t> progress_calls_{0};
+        std::map<uint64_t, uint32_t> token_peer_;
+        std::set<uint32_t> healthy_peers_;
         bool complete_on_check_ = false;
         uint64_t next_token_ = 0;
         uint32_t init_thread_count_ = 0;
@@ -711,6 +735,60 @@ namespace proxy_host {
 
         EXPECT_TRUE(backend_.released().empty());
         EXPECT_EQ(backend_.submissionCount(), 0u);
+
+        EXPECT_EQ(runtime_->shutdown(), NIXL_SUCCESS);
+    }
+
+    // One wedged peer must not take a healthy peer's queued records with it -
+    // that is the whole point of draining rather than retiring underneath them.
+    TEST_F(ProxyHostTest, WedgedPeerDoesNotDropAHealthyPeersRecords) {
+        ASSERT_EQ(createRuntime(/*channel_count=*/1, /*max_peers=*/2), NIXL_SUCCESS);
+
+        nixlMemViewH src = nullptr, dst = nullptr;
+        nixl_meta_dlist_t local_dlist(DRAM_SEG);
+        local_dlist.addDesc(nixlMetaDesc(0x1000, 64, 0, &local_md_));
+        ASSERT_EQ(runtime_->prepMemView(local_dlist, &src), NIXL_SUCCESS);
+
+        nixl_remote_meta_dlist_t remote_dlist(VRAM_SEG);
+        for (const char *agent : {"wedged", "healthy"}) {
+            nixlRemoteMetaDesc remote_desc(agent);
+            remote_desc.addr = 0x2000;
+            remote_desc.len = 64;
+            remote_desc.devId = 0;
+            remote_desc.metadataP = &remote_md_;
+            remote_dlist.addDesc(remote_desc);
+        }
+        ASSERT_EQ(runtime_->prepMemView(remote_dlist, &dst), NIXL_SUCCESS);
+        ASSERT_EQ(runtime_->startWorkers(), NIXL_SUCCESS);
+
+        // Peer 0 is drained first and never completes, so it burns the deadline.
+        const ChannelAccess wedged = channel(0);
+        nixlProxySubmission wedged_record = makePut(src, dst);
+        wedged_record.dst_index = 0;
+        publish(wedged, 0, wedged_record, 1);
+
+        // Fill the healthy peer's ring so the worker cannot pick anything else
+        // up until something completes - that is what makes this deterministic.
+        const ChannelAccess healthy = channel(1);
+        nixlProxySubmission healthy_record = makePut(src, dst);
+        healthy_record.dst_index = 1;
+        for (uint64_t i = 0; i < kRingDepth; ++i) {
+            publish(healthy, i, healthy_record, 100 + i);
+        }
+        ASSERT_TRUE(waitFor([&]() {
+            return backend_.submissionCountForPeer(1) == kRingDepth &&
+                backend_.submissionCountForPeer(0) == 1;
+        }));
+
+        // One more behind the full ring, which only a drain can get to.
+        publish(healthy, kRingDepth, healthy_record, 200);
+        backend_.completePeer(1);
+
+        ASSERT_EQ(runtime_->unregisterProxyMemView(dst), NIXL_SUCCESS);
+
+        // Every healthy record made it out; only the wedged peer lost anything.
+        EXPECT_EQ(backend_.submissionCountForPeer(1), size_t{kRingDepth} + 1);
+        EXPECT_EQ(backend_.released(), (std::vector<uint64_t>{backend_.token(0)}));
 
         EXPECT_EQ(runtime_->shutdown(), NIXL_SUCCESS);
     }

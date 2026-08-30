@@ -143,31 +143,51 @@ ProxyWorker::drainOwnedChannels() {
     // worker picks up records that were already published.
     const auto deadline = std::chrono::steady_clock::now() + kProxyDrainTimeout;
 
+    // Every ring is stepped on every pass rather than drained to completion in
+    // turn. A peer whose requests never terminate burns the whole deadline; if
+    // it were drained first and alone, the rings behind it would be cancelled
+    // without ever being stepped, losing healthy peers' queued work - the very
+    // thing draining exists to prevent. One shared deadline also bounds a drain
+    // to a single timeout however many rings this worker owns.
+    for (;;) {
+        bool all_drained = true;
+        for (uint32_t channel_id = worker_index_; channel_id < channel_count_;
+             channel_id += worker_count_) {
+            for (uint32_t peer = 0; peer < max_peers_; ++peer) {
+                nixlProxyChannelState *channel = getChannelState(peer, channel_id);
+                if (drained(*channel)) {
+                    continue;
+                }
+
+                submitReady(*channel, peer);
+                backend_ops_->progress(channel_id, peer);
+                publishCompletions(*channel);
+                all_drained = all_drained && drained(*channel);
+            }
+        }
+
+        if (all_drained || std::chrono::steady_clock::now() >= deadline) {
+            break;
+        }
+    }
+
     for (uint32_t channel_id = worker_index_; channel_id < channel_count_;
          channel_id += worker_count_) {
         for (uint32_t peer = 0; peer < max_peers_; ++peer) {
             nixlProxyChannelState *channel = getChannelState(peer, channel_id);
-
-            for (;;) {
-                submitReady(*channel, peer);
-                backend_ops_->progress(channel_id, peer);
-                publishCompletions(*channel);
-                if (drained(*channel)) {
-                    break;
-                }
-                if (std::chrono::steady_clock::now() >= deadline) {
-                    // A peer that never completes - a dead one under
-                    // err_mode=none - would otherwise hold up the rebuild
-                    // forever. Give the requests back and say so, instead of
-                    // dropping the work silently the way a retire used to.
-                    const size_t released = channel->releaseInflightRequests(*backend_ops_);
-                    NIXL_WARN << "ProxyWorker::drainOwnedChannels: channel " << channel_id
-                              << " peer " << peer << " did not drain; released " << released
-                              << " in-flight request(s)";
-                    break;
-                }
+            if (!channel->allocated()) {
+                continue;
             }
 
+            if (!drained(*channel)) {
+                // A dead peer under err_mode=none may never complete. Give the
+                // requests back and say so, instead of dropping the work
+                // silently the way a retire used to.
+                const size_t released = channel->releaseInflightRequests(*backend_ops_);
+                NIXL_WARN << "ProxyWorker::drainOwnedChannels: channel " << channel_id << " peer "
+                          << peer << " did not drain; released " << released
+                          << " in-flight request(s)";
+            }
             if (channel->rearm() != NIXL_SUCCESS) {
                 NIXL_ERROR << "ProxyWorker::drainOwnedChannels: failed to rearm channel "
                            << channel_id << " peer " << peer;
