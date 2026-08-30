@@ -81,26 +81,29 @@ ProxyWorker::getChannelState(uint32_t peer, uint32_t channel_id) {
     return &channels_[static_cast<size_t>(channel_id) * max_peers_ + peer];
 }
 
+template<typename Fn>
 void
-ProxyWorker::publishOwnedChannels() {
+ProxyWorker::forEachOwnedChannel(Fn &&fn) {
     for (uint32_t channel_id = worker_index_; channel_id < channel_count_;
          channel_id += worker_count_) {
         for (uint32_t peer = 0; peer < max_peers_; ++peer) {
-            nixlProxyChannelState *channel = getChannelState(peer, channel_id);
-            publishCompletions(*channel);
+            fn(*getChannelState(peer, channel_id), channel_id, peer);
         }
     }
 }
 
 void
+ProxyWorker::publishOwnedChannels() {
+    forEachOwnedChannel([this](nixlProxyChannelState &channel, uint32_t, uint32_t) {
+        publishCompletions(channel);
+    });
+}
+
+void
 ProxyWorker::submitOwnedChannels() {
-    for (uint32_t channel_id = worker_index_; channel_id < channel_count_;
-         channel_id += worker_count_) {
-        for (uint32_t peer = 0; peer < max_peers_; ++peer) {
-            nixlProxyChannelState *channel = getChannelState(peer, channel_id);
-            submitReady(*channel, peer);
-        }
-    }
+    forEachOwnedChannel([this](nixlProxyChannelState &channel, uint32_t, uint32_t peer) {
+        submitReady(channel, peer);
+    });
 }
 
 void
@@ -122,78 +125,49 @@ ProxyWorker::runOnce() {
 }
 
 bool
-ProxyWorker::drained(const nixlProxyChannelState &channel) const noexcept {
-    if (channel.ring_depth_ == 0) {
-        return true;
-    }
-    if (channel.consumer_idx_shadow_ != channel.submit_idx_) {
-        return false;
-    }
-    // Catching up to submit_idx_ is not enough: records the GPU published but
-    // this worker has not picked up yet sit past it. Same readiness test
-    // submitReady() uses, so "drained" means exactly "submitReady would do
-    // nothing".
-    const uint32_t slot = static_cast<uint32_t>(channel.submit_idx_ % channel.ring_depth_);
-    return __atomic_load_n(&channel.recordsHost()[slot].op_idx, __ATOMIC_ACQUIRE) == 0;
+ProxyWorker::ownedChannelsDrained() {
+    bool all_drained = true;
+    forEachOwnedChannel([&](nixlProxyChannelState &channel, uint32_t, uint32_t) {
+        all_drained = all_drained && channel.drained();
+    });
+    return all_drained;
 }
 
 void
 ProxyWorker::drainOwnedChannels() {
-    // The GPU is quiesced by the caller, so submit_idx_ only moves as this
-    // worker picks up records that were already published.
+    // Nothing more than the ordinary pass, repeated until there is nothing
+    // left. Stepping every ring each time is what keeps a peer whose requests
+    // never terminate from starving the rings behind it, and one deadline for
+    // the whole sweep bounds a drain to a single timeout however many rings
+    // this worker owns. The GPU is quiesced by the caller, so submit_idx_ only
+    // moves as this worker picks up records that were already published.
     const auto deadline = std::chrono::steady_clock::now() + kProxyDrainTimeout;
-
-    // Every ring is stepped on every pass rather than drained to completion in
-    // turn. A peer whose requests never terminate burns the whole deadline; if
-    // it were drained first and alone, the rings behind it would be cancelled
-    // without ever being stepped, losing healthy peers' queued work - the very
-    // thing draining exists to prevent. One shared deadline also bounds a drain
-    // to a single timeout however many rings this worker owns.
-    for (;;) {
-        bool all_drained = true;
-        for (uint32_t channel_id = worker_index_; channel_id < channel_count_;
-             channel_id += worker_count_) {
-            for (uint32_t peer = 0; peer < max_peers_; ++peer) {
-                nixlProxyChannelState *channel = getChannelState(peer, channel_id);
-                if (drained(*channel)) {
-                    continue;
-                }
-
-                submitReady(*channel, peer);
-                backend_ops_->progress(channel_id, peer);
-                publishCompletions(*channel);
-                all_drained = all_drained && drained(*channel);
-            }
-        }
-
-        if (all_drained || std::chrono::steady_clock::now() >= deadline) {
+    while (!ownedChannelsDrained()) {
+        submitOwnedChannels();
+        driveBackendProgress();
+        publishOwnedChannels();
+        if (std::chrono::steady_clock::now() >= deadline) {
             break;
         }
     }
 
-    for (uint32_t channel_id = worker_index_; channel_id < channel_count_;
-         channel_id += worker_count_) {
-        for (uint32_t peer = 0; peer < max_peers_; ++peer) {
-            nixlProxyChannelState *channel = getChannelState(peer, channel_id);
-            if (!channel->allocated()) {
-                continue;
-            }
-
-            if (!drained(*channel)) {
-                // A dead peer under err_mode=none may never complete. Give the
-                // requests back and say so, instead of dropping the work
-                // silently the way a retire used to.
-                const size_t released = channel->releaseInflightRequests(*backend_ops_);
-                NIXL_WARN << "ProxyWorker::drainOwnedChannels: channel " << channel_id << " peer "
-                          << peer << " did not drain; released " << released
-                          << " in-flight request(s)";
-            }
-            if (channel->rearm() != NIXL_SUCCESS) {
-                NIXL_ERROR << "ProxyWorker::drainOwnedChannels: failed to rearm channel "
-                           << channel_id << " peer " << peer;
-            }
+    forEachOwnedChannel([this](nixlProxyChannelState &channel, uint32_t channel_id, uint32_t peer) {
+        if (!channel.allocated()) {
+            return;
         }
-    }
+        if (!channel.drained()) {
+            // A dead peer under err_mode=none may never complete. Give the
+            // requests back and say so, instead of dropping the work silently
+            // the way a retire used to.
+            const size_t released = channel.releaseInflightRequests(*backend_ops_);
+            NIXL_WARN << "ProxyWorker::drainOwnedChannels: channel " << channel_id << " peer "
+                      << peer << " did not drain; released " << released << " in-flight request(s)";
+        }
+        if (channel.rearm() != NIXL_SUCCESS) {
+            NIXL_ERROR << "ProxyWorker::drainOwnedChannels: failed to rearm channel " << channel_id
+                       << " peer " << peer;
+        }
+    });
 }
 
 void
@@ -267,12 +241,9 @@ ProxyWorker::submitToBackend(nixlProxyChannelState &channel,
 
 void
 ProxyWorker::driveBackendProgress() {
-    for (uint32_t channel_id = worker_index_; channel_id < channel_count_;
-         channel_id += worker_count_) {
-        for (uint32_t peer = 0; peer < max_peers_; ++peer) {
-            backend_ops_->progress(channel_id, peer);
-        }
-    }
+    forEachOwnedChannel([this](nixlProxyChannelState &, uint32_t channel_id, uint32_t peer) {
+        backend_ops_->progress(channel_id, peer);
+    });
 }
 
 void

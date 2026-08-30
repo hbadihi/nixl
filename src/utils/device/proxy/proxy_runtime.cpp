@@ -135,6 +135,21 @@ nixlProxyChannelState::releaseInflightRequests(const nixlProxyBackendOps &backen
     return released;
 }
 
+bool
+nixlProxyChannelState::drained() const noexcept {
+    if (ring_depth_ == 0) {
+        return true;
+    }
+    if (consumer_idx_shadow_ != submit_idx_) {
+        return false;
+    }
+    // Catching up to submit_idx_ is not enough: records the GPU published but
+    // no worker has picked up yet sit past it. Same readiness test
+    // ProxyWorker::submitReady() uses.
+    const uint32_t slot = static_cast<uint32_t>(submit_idx_ % ring_depth_);
+    return __atomic_load_n(&recordsHost()[slot].op_idx, __ATOMIC_ACQUIRE) == 0;
+}
+
 nixl_status_t
 nixlProxyChannelState::publishConsumerIdx(uint64_t value) noexcept {
     if (control_slots_ == nullptr) {

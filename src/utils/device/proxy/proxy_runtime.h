@@ -97,6 +97,14 @@ struct alignas(64) nixlProxyChannelState {
     rearm() noexcept;
 
     /**
+     * Nothing left for this ring to do: everything submitted has completed and
+     * no published record is waiting to be picked up. Exactly the condition
+     * under which ProxyWorker's ordinary pass would be a no-op.
+     */
+    [[nodiscard]] bool
+    drained() const noexcept;
+
+    /**
      * Hand every request still in flight back to the backend and forget it.
      * Returns how many were released.
      */

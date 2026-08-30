@@ -60,16 +60,24 @@ class ProxyWorker {
         getChannelState(uint32_t peer, uint32_t channel_id);
 
         /**
+         * Apply fn(channel, channel_id, peer) to every ring this worker owns.
+         * Channels are striped across workers; a worker owns every peer of the
+         * channels assigned to it. The one definition of that ownership.
+         */
+        template<typename Fn>
+        void
+        forEachOwnedChannel(Fn &&fn);
+
+        [[nodiscard]] bool
+        ownedChannelsDrained();
+
+        /**
          * Drive every owned ring to a terminal state and rearm it. Runs on the
          * worker thread because the worker is the only writer of the ring
          * state involved, so no application thread ever touches it.
          */
         void
         drainOwnedChannels();
-
-        /** Returns false if the ring still has work the backend has not finished. */
-        bool
-        drained(const nixlProxyChannelState &channel) const noexcept;
 
         void
         publishOwnedChannels();
