@@ -20,6 +20,7 @@
 #include "nixl_log.h"
 #include <algorithm>
 #include <cstdint>
+#include <thread>
 #include <utility>
 
 #include "device/device_allocator.h"
@@ -274,7 +275,8 @@ nixlProxyRuntime::build() {
                                                          channel_count,
                                                          worker_idx,
                                                          worker_count,
-                                                         config_.pthr_delay_us));
+                                                         config_.pthr_delay_us,
+                                                         &drain_requested_));
     }
 
     NIXL_INFO << "ProxyRuntime::build: complete - " << max_peers << " peers, " << channel_count
@@ -334,7 +336,39 @@ nixlProxyRuntime::unregisterProxyMemView(nixlMemViewH proxy_memview) {
     if (memview_registry_ == nullptr) {
         return NIXL_ERR_INVALID_PARAM;
     }
+
+    // Records already in the rings still name this memview. Retiring it under
+    // them is how queued transfers - including ones to healthy peers - used to
+    // disappear at a membership change (repo docs/issues/005, G1).
+    drainChannels();
     return memview_registry_->unregister(proxy_memview);
+}
+
+void
+nixlProxyRuntime::drainChannels() noexcept {
+    if (!workers_started_) {
+        // Nobody is progressing the rings, so there is nothing to wait for and
+        // nobody to race: do the whole thing here.
+        for (auto &channel : channels_) {
+            static_cast<void>(channel.releaseInflightRequests(backend_ops_));
+            if (channel.allocated() && channel.rearm() != NIXL_SUCCESS) {
+                NIXL_ERROR << "ProxyRuntime::drainChannels: failed to rearm a channel";
+            }
+        }
+        return;
+    }
+
+    const uint64_t requested = drain_requested_.fetch_add(1, std::memory_order_acq_rel) + 1;
+    for (const auto &worker : workers_) {
+        while (worker->drainAcked() < requested) {
+            if (shutdown_state_.load(std::memory_order_acquire) !=
+                static_cast<uint64_t>(nixl_proxy_control_state_t::RUNNING)) {
+                NIXL_WARN << "ProxyRuntime::drainChannels: shutting down mid-drain";
+                return;
+            }
+            std::this_thread::yield();
+        }
+    }
 }
 
 bool

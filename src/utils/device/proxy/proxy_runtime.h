@@ -188,6 +188,15 @@ class nixlProxyRuntime {
         deviceContext() const { return device_context_mem_.as<nixlProxyDeviceContextData>(); }
 
     private:
+        /**
+         * Drive every ring to a terminal state and rearm it, so that memviews
+         * the records reference can be retired without dropping work. The
+         * workers do the ring-state changes; this only raises the request and
+         * waits for them, so nothing here touches a ring.
+         */
+        void
+        drainChannels() noexcept;
+
         nixlProxyRuntime(nixlProxyBackendOps backend_ops,
                          const nixlProxyConfig &config,
                          nixlDeviceAllocator &allocator) noexcept;
@@ -213,6 +222,8 @@ class nixlProxyRuntime {
         std::unique_ptr<nixlProxyMemViewRegistry> memview_registry_;
         alignas(64) std::atomic<uint64_t> shutdown_state_{
             static_cast<uint64_t>(nixl_proxy_control_state_t::SHUTDOWN)};
+        /** Bumped once per drain; each worker acks it when it has applied it. */
+        alignas(64) std::atomic<uint64_t> drain_requested_{0};
         uint64_t *shutdown_word_dev_ = nullptr;
         bool workers_started_ = false;
 };

@@ -186,6 +186,9 @@ namespace proxy_host {
             };
             ops.check_completion = [this](const nixlBackendProxyRequest &request) {
                 const std::lock_guard<std::mutex> lock(mutex_);
+                if (complete_on_check_) {
+                    return NIXL_SUCCESS;
+                }
                 const auto it = completed_.find(request.token);
                 return it == completed_.end() ? NIXL_IN_PROG : it->second;
             };
@@ -209,6 +212,13 @@ namespace proxy_host {
         complete(uint64_t token, nixl_status_t status = NIXL_SUCCESS) {
             const std::lock_guard<std::mutex> lock(mutex_);
             completed_[token] = status;
+        }
+
+        /** Every request finishes as soon as it is checked. */
+        void
+        completeEverything() {
+            const std::lock_guard<std::mutex> lock(mutex_);
+            complete_on_check_ = true;
         }
 
         size_t
@@ -255,6 +265,7 @@ namespace proxy_host {
         std::vector<uint64_t> released_;
         std::map<uint64_t, nixl_status_t> completed_;
         std::atomic<uint64_t> progress_calls_{0};
+        bool complete_on_check_ = false;
         uint64_t next_token_ = 0;
         uint32_t init_thread_count_ = 0;
         size_t init_calls_ = 0;
@@ -538,10 +549,14 @@ namespace proxy_host {
         // has quiesced the GPU by the time it unregisters.
         EXPECT_TRUE(allocator_.wasFreed(dst));
 
+        // Retiring drained and rearmed the ring, so the producer starts over.
+        EXPECT_EQ(consumerIdx(access), 0u);
+        EXPECT_EQ(completedIdx(access), 0u);
+
         // The worker survives it: the host-side entry is still alive, and a
         // record naming the retired id is rejected rather than dispatched.
-        publish(access, 1, record, 2);
-        ASSERT_TRUE(waitFor([&]() { return consumerIdx(access) == 2u; }));
+        publish(access, 0, record, 2);
+        ASSERT_TRUE(waitFor([&]() { return consumerIdx(access) == 1u; }));
         EXPECT_EQ(backend_.submissionCount(), 1u);
         EXPECT_LT(access.completion->next_status, 0);
 
@@ -599,6 +614,103 @@ namespace proxy_host {
 
         backend_.complete(backend_.token(0));
         ASSERT_TRUE(waitFor([&]() { return completedIdx(access) == 5u; }));
+
+        EXPECT_EQ(runtime_->shutdown(), NIXL_SUCCESS);
+    }
+
+    // repo docs/issues/005 G1: a record already in the ring when its memview is
+    // retired used to fail prepareSubmission and vanish, taking transfers to
+    // healthy peers with it. Retiring now drains first.
+    TEST_F(ProxyHostTest, DrainSubmitsQueuedRecordsBeforeRetire) {
+        backend_.completeEverything();
+        ASSERT_EQ(createRuntime(), NIXL_SUCCESS);
+        nixlMemViewH src = nullptr, dst = nullptr;
+        prepMemViews(src, dst);
+        ASSERT_EQ(runtime_->startWorkers(), NIXL_SUCCESS);
+
+        const ChannelAccess access = channel();
+        const nixlProxySubmission record = makePut(src, dst);
+        for (uint64_t i = 0; i < kRingDepth; ++i) {
+            publish(access, i, record, i + 1);
+        }
+
+        // No waiting: retire straight away, racing the worker.
+        ASSERT_EQ(runtime_->unregisterProxyMemView(dst), NIXL_SUCCESS);
+
+        EXPECT_EQ(backend_.submissionCount(), size_t{kRingDepth});
+        for (const auto &submission : backend_.submissions()) {
+            EXPECT_EQ(submission.remote.desc.addr, 0x2008u);
+        }
+        // Drained to empty and rearmed, so the next generation starts clean.
+        EXPECT_EQ(consumerIdx(access), 0u);
+        EXPECT_EQ(access.completion->next_status, NIXL_IN_PROG);
+
+        EXPECT_EQ(runtime_->shutdown(), NIXL_SUCCESS);
+    }
+
+    // A peer that never completes must not hold a membership change hostage.
+    TEST_F(ProxyHostTest, DrainCancelsRequestsThatNeverComplete) {
+        ASSERT_EQ(createRuntime(), NIXL_SUCCESS);
+        nixlMemViewH src = nullptr, dst = nullptr;
+        prepMemViews(src, dst);
+        ASSERT_EQ(runtime_->startWorkers(), NIXL_SUCCESS);
+
+        const ChannelAccess access = channel();
+        const nixlProxySubmission record = makePut(src, dst);
+        publish(access, 0, record, 1);
+        publish(access, 1, record, 2);
+        ASSERT_TRUE(waitFor([&]() { return backend_.submissionCount() == 2; }));
+
+        // Nothing is ever completed, so the drain has to give up on its own.
+        ASSERT_EQ(runtime_->unregisterProxyMemView(dst), NIXL_SUCCESS);
+
+        EXPECT_EQ(backend_.released(),
+                  (std::vector<uint64_t>{backend_.token(0), backend_.token(1)}));
+        EXPECT_EQ(consumerIdx(access), 0u);
+
+        EXPECT_EQ(runtime_->shutdown(), NIXL_SUCCESS);
+    }
+
+    // repo docs/issues/005 G2: re-adding a rank used to inherit whatever state
+    // the wedged ring was left in.
+    TEST_F(ProxyHostTest, RingsAreUsableAfterDrain) {
+        ASSERT_EQ(createRuntime(), NIXL_SUCCESS);
+        nixlMemViewH src = nullptr, dst = nullptr;
+        prepMemViews(src, dst);
+        ASSERT_EQ(runtime_->startWorkers(), NIXL_SUCCESS);
+
+        const ChannelAccess access = channel();
+        publish(access, 0, makePut(src, dst), 1);
+        ASSERT_TRUE(waitFor([&]() { return backend_.submissionCount() == 1; }));
+
+        // Wedge it: the request never completes, so this retire cancels.
+        ASSERT_EQ(runtime_->unregisterProxyMemView(dst), NIXL_SUCCESS);
+        ASSERT_EQ(runtime_->unregisterProxyMemView(src), NIXL_SUCCESS);
+
+        // Same ring, new generation of memviews - it has to work.
+        nixlMemViewH new_src = nullptr, new_dst = nullptr;
+        prepMemViews(new_src, new_dst);
+        backend_.completeEverything();
+        publish(access, 0, makePut(new_src, new_dst), 7);
+
+        ASSERT_TRUE(waitFor([&]() { return completedIdx(access) == 7u; }));
+        EXPECT_EQ(access.completion->next_status, NIXL_SUCCESS);
+        EXPECT_EQ(backend_.submissionCount(), 2u);
+
+        EXPECT_EQ(runtime_->shutdown(), NIXL_SUCCESS);
+    }
+
+    TEST_F(ProxyHostTest, DrainOnEmptyRingsCancelsNothing) {
+        ASSERT_EQ(createRuntime(), NIXL_SUCCESS);
+        nixlMemViewH src = nullptr, dst = nullptr;
+        prepMemViews(src, dst);
+        ASSERT_EQ(runtime_->startWorkers(), NIXL_SUCCESS);
+
+        ASSERT_EQ(runtime_->unregisterProxyMemView(dst), NIXL_SUCCESS);
+        ASSERT_EQ(runtime_->unregisterProxyMemView(src), NIXL_SUCCESS);
+
+        EXPECT_TRUE(backend_.released().empty());
+        EXPECT_EQ(backend_.submissionCount(), 0u);
 
         EXPECT_EQ(runtime_->shutdown(), NIXL_SUCCESS);
     }

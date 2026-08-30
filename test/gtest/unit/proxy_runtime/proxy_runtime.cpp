@@ -352,7 +352,9 @@ makeDirectWorker(const nixlProxyBackendOps *ops,
                  const nixlProxyMemViewRegistry *registry,
                  std::atomic<uint64_t> *shutdown_state,
                  nixlProxyChannelState *channel) {
-    return std::make_unique<ProxyWorker>(ops, registry, shutdown_state, channel, 1, 1, 0, 1, 0);
+    // No drain request source: these tests drive runOnce() by hand.
+    return std::make_unique<ProxyWorker>(
+        ops, registry, shutdown_state, channel, 1, 1, 0, 1, 0, nullptr);
 }
 
 static nixl_remote_meta_dlist_t
