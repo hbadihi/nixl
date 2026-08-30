@@ -66,6 +66,8 @@ struct alignas(64) nixlProxyChannelState {
     /** Device-resident cache of consumer_idx_dev_ used by GPU enqueue backpressure. */
     nixlDeviceMem consumer_idx_cache_mem_;
     nixlProxyControlBuffer *control_slots_ = nullptr;
+    /** Remembered from allocate() so rearm() needs no arguments. */
+    nixlDeviceAllocator *allocator_ = nullptr;
     size_t control_slot_index_ = 0;
     /** Host-side ring depth for the CPU worker; nixlProxyWorkRing itself is device-only. */
     uint32_t         ring_depth_         = 0;
@@ -84,6 +86,22 @@ struct alignas(64) nixlProxyChannelState {
              uint32_t depth,
              nixlProxyControlBuffer *control_slots,
              size_t control_slot_index);
+
+    /**
+     * Put an allocated ring back to the state allocate() left it in - empty,
+     * indices zeroed on both sides, completion latch cleared - without
+     * releasing any memory. The caller must have established that nobody is
+     * producing into or consuming from the ring.
+     */
+    nixl_status_t
+    rearm() noexcept;
+
+    /**
+     * Hand every request still in flight back to the backend and forget it.
+     * Returns how many were released.
+     */
+    size_t
+    releaseInflightRequests(const nixlProxyBackendOps &backend_ops) noexcept;
 
     nixl_status_t
     publishConsumerIdx(uint64_t value) noexcept;

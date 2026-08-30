@@ -38,6 +38,7 @@ nixlProxyChannelState::allocate(nixlDeviceAllocator &allocator,
 
     ring_depth_ = depth;
     control_slots_ = control_slots;
+    allocator_ = &allocator;
     control_slot_index_ = control_slot_index;
     consumer_idx_dev_ = control_slots_->devicePtr(control_slot_index_);
     consumer_idx_shadow_ = 0;
@@ -54,23 +55,11 @@ nixlProxyChannelState::allocate(nixlDeviceAllocator &allocator,
         return NIXL_ERR_BACKEND;
     }
 
-    nixlProxySubmission *records_host = recordsHost();
-    for (uint32_t i = 0; i < depth; ++i) {
-        records_host[i] = nixlProxySubmission{};
-    }
-    if (allocator.memsetDeviceMem(producer_idx_mem_.get(), 0, sizeof(uint64_t)) != NIXL_SUCCESS ||
-        allocator.memsetDeviceMem(consumer_idx_cache_mem_.get(), 0, sizeof(uint64_t)) !=
-            NIXL_SUCCESS) {
+    if (rearm() != NIXL_SUCCESS) {
         deallocate();
         return NIXL_ERR_BACKEND;
     }
-    if (publishConsumerIdx(0) != NIXL_SUCCESS) {
-        deallocate();
-        return NIXL_ERR_BACKEND;
-    }
-    submit_idx_ = 0;
-    completionSlotHost()->next_status = NIXL_IN_PROG;
-    __atomic_store_n(&completionSlotHost()->completed_idx, uint64_t{0}, __ATOMIC_RELEASE);
+
     nixlProxyWorkRing work_ring{
         records_mem_.asDev<nixlProxySubmission>(),
         producer_idx_mem_.as<uint64_t>(),
@@ -86,7 +75,6 @@ nixlProxyChannelState::allocate(nixlDeviceAllocator &allocator,
     device_view = nixlProxyChannelView{work_ring_mem_.as<nixlProxyWorkRing>(),
                                        completion_slot_mem_.asDev<nixlProxyCompletionSlot>()};
 
-    inflight_slots_.assign(depth, nixlProxyRequestState{});
     NIXL_INFO << "nixlProxyChannelState::allocate: ready"
               << " work_ring(dev)=" << work_ring_mem_.get() << " records=" << recordsHost()
               << " records(dev)=" << records_mem_.devPtr()
@@ -97,6 +85,53 @@ nixlProxyChannelState::allocate(nixlDeviceAllocator &allocator,
               << " completion_slot(host)=" << completionSlotHost()
               << " completion_slot(dev)=" << completion_slot_mem_.devPtr();
     return NIXL_SUCCESS;
+}
+
+nixl_status_t
+nixlProxyChannelState::rearm() noexcept {
+    if (allocator_ == nullptr || ring_depth_ == 0) {
+        return NIXL_ERR_NOT_SUPPORTED;
+    }
+
+    nixlProxySubmission *records_host = recordsHost();
+    for (uint32_t i = 0; i < ring_depth_; ++i) {
+        records_host[i] = nixlProxySubmission{};
+    }
+    if (allocator_->memsetDeviceMem(producer_idx_mem_.get(), 0, sizeof(uint64_t)) != NIXL_SUCCESS ||
+        allocator_->memsetDeviceMem(consumer_idx_cache_mem_.get(), 0, sizeof(uint64_t)) !=
+            NIXL_SUCCESS) {
+        return NIXL_ERR_BACKEND;
+    }
+    if (publishConsumerIdx(0) != NIXL_SUCCESS) {
+        return NIXL_ERR_BACKEND;
+    }
+
+    submit_idx_ = 0;
+    inflight_slots_.assign(ring_depth_, nixlProxyRequestState{});
+    // Clearing the latch last: until it goes back to NIXL_IN_PROG the GPU
+    // would read a stale terminal status for the next generation of work.
+    completionSlotHost()->next_status = NIXL_IN_PROG;
+    __atomic_store_n(&completionSlotHost()->completed_idx, uint64_t{0}, __ATOMIC_RELEASE);
+    return NIXL_SUCCESS;
+}
+
+size_t
+nixlProxyChannelState::releaseInflightRequests(const nixlProxyBackendOps &backend_ops) noexcept {
+    if (ring_depth_ == 0 || consumer_idx_dev_ == nullptr || !backend_ops.release_request) {
+        return 0;
+    }
+
+    size_t released = 0;
+    for (uint64_t idx = consumer_idx_shadow_; idx < submit_idx_; ++idx) {
+        nixlProxyRequestState &inflight = inflight_slots_[idx % ring_depth_];
+        if (inflight.status == NIXL_IN_PROG && inflight.backend_request) {
+            backend_ops.release_request(inflight.backend_request);
+            ++released;
+        }
+        inflight = nixlProxyRequestState{};
+    }
+    submit_idx_ = consumer_idx_shadow_;
+    return released;
 }
 
 nixl_status_t
@@ -120,6 +155,7 @@ nixlProxyChannelState::deallocate() noexcept {
     work_ring_mem_.reset();
     consumer_idx_dev_ = nullptr;
     control_slots_ = nullptr;
+    allocator_ = nullptr;
     control_slot_index_ = 0;
     consumer_idx_shadow_ = 0;
     inflight_slots_.clear();
@@ -223,8 +259,7 @@ nixlProxyRuntime::build() {
             device_context_mem_.get(), &device_context, sizeof(device_context)) != NIXL_SUCCESS) {
         return NIXL_ERR_BACKEND;
     }
-    memview_registry_ =
-        std::make_unique<nixlProxyMemViewRegistry>(allocator_, deviceContext());
+    memview_registry_ = std::make_unique<nixlProxyMemViewRegistry>(allocator_, deviceContext());
 
     workers_.reserve(worker_count);
     for (uint32_t worker_idx = 0; worker_idx < worker_count; worker_idx++) {
@@ -311,7 +346,6 @@ nixlProxyRuntime::resolveProxyMemView(nixlMemViewH proxy_memview,
     return memview_registry_->resolve(proxy_memview, backend_memview);
 }
 
-
 nixl_status_t
 nixlProxyRuntime::startWorkers() {
     NIXL_INFO << "ProxyRuntime::startWorkers: launching " << workers_.size() << " worker thread(s)";
@@ -368,29 +402,13 @@ nixlProxyRuntime::shutdown() {
     workers_started_ = false;
     NIXL_INFO << "ProxyRuntime::shutdown: all worker threads joined";
 
-    if (backend_ops_.release_request) {
-        size_t released = 0;
-        for (auto &channel : channels_) {
-            if (channel.ring_depth_ == 0 || channel.consumer_idx_dev_ == nullptr) {
-                continue;
-            }
-
-            const uint64_t consumer_idx = channel.consumer_idx_shadow_;
-            for (uint64_t idx = consumer_idx; idx < channel.submit_idx_; ++idx) {
-                nixlProxyRequestState &inflight =
-                    channel.inflight_slots_[idx % channel.ring_depth_];
-                if (inflight.status == NIXL_IN_PROG && inflight.backend_request) {
-                    backend_ops_.release_request(inflight.backend_request);
-                    ++released;
-                }
-                inflight = nixlProxyRequestState{};
-            }
-            channel.submit_idx_ = consumer_idx;
-        }
-        if (released != 0) {
-            NIXL_INFO << "ProxyRuntime::shutdown: released " << released
-                      << " pending backend request(s)";
-        }
+    size_t released = 0;
+    for (auto &channel : channels_) {
+        released += channel.releaseInflightRequests(backend_ops_);
+    }
+    if (released != 0) {
+        NIXL_INFO << "ProxyRuntime::shutdown: released " << released
+                  << " pending backend request(s)";
     }
 
     nixl_status_t backend_status = NIXL_SUCCESS;
