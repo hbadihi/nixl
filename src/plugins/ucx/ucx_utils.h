@@ -18,6 +18,7 @@
 #define NIXL_SRC_UTILS_UCX_UCX_UTILS_H
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <type_traits>
 
@@ -49,6 +50,8 @@ private:
     const uint32_t closeFlags_;
     /** Remembered because it decides which close flavours UCP will accept. */
     const ucp_err_handling_mode_t errHandlingMode_;
+    /** Invoked once, from UCX progress, when the endpoint first fails. */
+    const std::function<void()> onFailed_;
 
     /**
      * UCP only accepts UCP_EP_CLOSE_FLAG_FORCE, and only guarantees request
@@ -82,10 +85,18 @@ public:
         return nixl::ucx::toNixlStatus(state_);
     }
 
+    /**
+     * on_failed, when set, is called from UCX progress the first time the
+     * endpoint transitions to FAILED. It fires under every error-handling
+     * mode, including none, for endpoints with traffic in flight: the
+     * transport reports retransmit exhaustion and UCP invokes the handler
+     * regardless of mode (repo docs/issues/006 B8).
+     */
     nixlUcxEp(ucp_worker_h worker,
               void *addr,
               ucp_err_handling_mode_t err_handling_mode,
-              uint32_t close_flags);
+              uint32_t close_flags,
+              std::function<void()> on_failed = nullptr);
     ~nixlUcxEp();
     nixlUcxEp(const nixlUcxEp &) = delete;
     nixlUcxEp &
@@ -244,7 +255,7 @@ public:
     [[nodiscard]] std::string
     epAddr();
     [[nodiscard]] std::unique_ptr<nixlUcxEp>
-    connect(void *addr);
+    connect(void *addr, std::function<void()> on_failed = nullptr);
 
     /* Active message handling */
     int

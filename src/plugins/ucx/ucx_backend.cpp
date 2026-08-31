@@ -1121,8 +1121,24 @@ nixl_status_t nixlUcxEngine::loadRemoteConnInfo (const std::string &remote_agent
 
     nixlSerDes::_stringToBytes(addr.data(), remote_conn_info, size);
     std::shared_ptr<nixlUcxConnection> conn = std::make_shared<nixlUcxConnection>();
+
+    std::function<void()> on_failed;
+#ifdef HAVE_NIXL_DEVICE_API
+    // Under err-mode none the proxy gets no keepalive, but an endpoint with
+    // traffic in flight still fails when the transport gives up retransmitting,
+    // and UCP invokes the handler anyway (repo docs/issues/006 B8). Any one of
+    // this agent's endpoints failing means the agent is gone.
+    if (proxyRuntime_) {
+        on_failed = [this, remote_agent]() {
+            if (proxyRuntime_) {
+                proxyRuntime_->remoteFailed(remote_agent);
+            }
+        };
+    }
+#endif
+
     for (const auto &uw : workers_) {
-        std::unique_ptr<nixlUcxEp> ep = uw->connect(addr.data());
+        std::unique_ptr<nixlUcxEp> ep = uw->connect(addr.data(), on_failed);
         if (!ep) {
             return NIXL_ERR_BACKEND;
         }

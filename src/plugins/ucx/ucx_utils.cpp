@@ -101,6 +101,9 @@ nixlUcxEp::err_cb(ucp_ep_h ucp_ep, ucs_status_t status) {
         return;
     case nixl::ucx::ep_state_t::CONNECTED:
         setState(nixl::ucx::ep_state_t::FAILED);
+        if (onFailed_) {
+            onFailed_();
+        }
         return;
     }
     NIXL_FATAL << "Invalid endpoint state: " << current_state;
@@ -171,9 +174,11 @@ nixlUcxEp::closeImpl() {
 nixlUcxEp::nixlUcxEp(ucp_worker_h worker,
                      void *addr,
                      ucp_err_handling_mode_t err_handling_mode,
-                     uint32_t close_flags)
+                     uint32_t close_flags,
+                     std::function<void()> on_failed)
     : closeFlags_{close_flags},
-      errHandlingMode_{err_handling_mode} {
+      errHandlingMode_{err_handling_mode},
+      onFailed_{std::move(on_failed)} {
     ucp_ep_params_t ep_params;
     nixl_status_t status;
 
@@ -644,10 +649,10 @@ nixlUcxWorker::epAddr() {
 }
 
 std::unique_ptr<nixlUcxEp>
-nixlUcxWorker::connect(void *addr) {
+nixlUcxWorker::connect(void *addr, std::function<void()> on_failed) {
     try {
-        auto ep =
-            std::make_unique<nixlUcxEp>(worker.get(), addr, err_handling_mode_, epCloseFlags_);
+        auto ep = std::make_unique<nixlUcxEp>(
+            worker.get(), addr, err_handling_mode_, epCloseFlags_, std::move(on_failed));
         NIXL_DEBUG << *this << ": created ep " << ep->getEp();
         return ep;
     }
