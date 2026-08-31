@@ -129,12 +129,20 @@ nixlUcxEp::closeImpl() {
         NIXL_ASSERT(eph == nullptr);
         return NIXL_SUCCESS;
     case nixl::ucx::ep_state_t::FAILED: {
-        const ucp_request_param_t force_req_param = {
+        // Forcing a close is only legal when error handling is enabled: under
+        // err-mode none UCP rejects the flag outright and hands back an error
+        // pointer, which used to be discarded here and leak the ucp_ep (see
+        // repo docs/issues/006 B7). A failed endpoint has already had its lanes
+        // discarded, so a graceful close of one completes immediately anyway.
+        const ucp_request_param_t failed_req_param = {
             .op_attr_mask = UCP_OP_ATTR_FIELD_FLAGS,
-            .flags = UCP_EP_CLOSE_FLAG_FORCE,
+            .flags = errorHandlingEnabled() ? UCP_EP_CLOSE_FLAG_FORCE : 0u,
         };
-        request = ucp_ep_close_nbx(eph, &force_req_param);
-        if (UCS_PTR_IS_PTR(request)) {
+        request = ucp_ep_close_nbx(eph, &failed_req_param);
+        if (UCS_PTR_IS_ERR(request)) {
+            NIXL_ERROR << "Failed to close failed ep " << eph << ": "
+                       << ucs_status_string(UCS_PTR_STATUS(request));
+        } else if (UCS_PTR_IS_PTR(request)) {
             ucp_request_free(request);
         }
         eph = nullptr;
@@ -164,7 +172,8 @@ nixlUcxEp::nixlUcxEp(ucp_worker_h worker,
                      void *addr,
                      ucp_err_handling_mode_t err_handling_mode,
                      uint32_t close_flags)
-    : closeFlags_{close_flags} {
+    : closeFlags_{close_flags},
+      errHandlingMode_{err_handling_mode} {
     ucp_ep_params_t ep_params;
     nixl_status_t status;
 
