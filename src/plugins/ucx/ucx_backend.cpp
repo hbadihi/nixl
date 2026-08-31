@@ -973,6 +973,9 @@ nixlUcxEngine::setupProxyRuntime(const nixlProxyConfig &config) {
             return NIXL_ERR_NOT_SUPPORTED;
         }
 
+        // Only puts ever yield a request: a post-mode atomic completes into
+        // ucp_atomic_op_nbx and never hands back a handle, so there is nothing
+        // to track, poll or release for one (docs/issues/006 A4).
         if (status == NIXL_IN_PROG) {
             request = nixlBackendProxyRequest{proxyTokenFromReq(req), worker_id};
         }
@@ -997,13 +1000,13 @@ nixlUcxEngine::setupProxyRuntime(const nixlProxyConfig &config) {
 
         NIXL_DEBUG << "device proxy completion: token=" << request.token
                    << " context=" << request.context << " status=" << status;
-        releaseProxyRequest(request.context, req, false);
+        releaseProxyRequest(request.context, req);
         return status;
     };
 
     ops.release_request = [this](const nixlBackendProxyRequest &request) {
         if (request) {
-            releaseProxyRequest(request.context, proxyReqFromToken(request), true);
+            releaseProxyRequest(request.context, proxyReqFromToken(request));
         }
     };
 
@@ -1395,7 +1398,7 @@ nixlUcxEngine::checkProxyRequest(nixlUcxReq req) const {
 }
 
 void
-nixlUcxEngine::releaseProxyRequest(size_t worker_id, nixlUcxReq req, bool cancel) const {
+nixlUcxEngine::releaseProxyRequest(size_t worker_id, nixlUcxReq req) const {
     if (req == nullptr) {
         return;
     }
@@ -1404,11 +1407,11 @@ nixlUcxEngine::releaseProxyRequest(size_t worker_id, nixlUcxReq req, bool cancel
         return;
     }
 
-    auto *worker = getSharedWorker(worker_id).get();
-    if (cancel && checkProxyRequest(req) == NIXL_IN_PROG) {
-        worker->reqCancel(req);
-    }
-    worker->reqRelease(req);
+    // Deliberately no ucp_request_cancel: it only acts on tag receives and is
+    // a no-op for every send the proxy posts, so calling it only implied a
+    // cancellation that never happened. Releasing is bookkeeping; the
+    // operation itself ends when the transport says so.
+    getSharedWorker(worker_id)->reqRelease(req);
 }
 
 nixl_status_t nixlUcxEngine::estimateXferCost (const nixl_xfer_op_t &operation,

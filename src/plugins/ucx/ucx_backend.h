@@ -275,8 +275,16 @@ private:
     nixl_status_t
     checkProxyRequest(nixlUcxReq req) const;
 
+    /**
+     * Drop the proxy's bookkeeping for a request. This does NOT abort the
+     * operation: under err-mode none, which the proxy is required to use, UCX
+     * offers no way to abort an in-flight put (repo docs/issues/006 B6/B7).
+     * The NIC may keep reading the source buffer and land the write remotely
+     * until the transport reports the failure - so the memory behind a
+     * released operation must stay mapped until the endpoint is torn down.
+     */
     void
-    releaseProxyRequest(size_t worker_id, nixlUcxReq req, bool cancel) const;
+    releaseProxyRequest(size_t worker_id, nixlUcxReq req) const;
 
     // Memory management helpers
     nixl_status_t

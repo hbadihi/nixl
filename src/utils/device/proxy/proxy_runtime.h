@@ -107,6 +107,12 @@ struct alignas(64) nixlProxyChannelState {
     /**
      * Hand every request still in flight back to the backend and forget it.
      * Returns how many were released.
+     *
+     * This releases bookkeeping only - no transport can abort an operation the
+     * proxy has already posted (repo docs/issues/006 B6). A released transfer
+     * may still read its source buffer and land remotely until the transport
+     * reports the peer gone, so the memory behind one must stay mapped until
+     * the endpoint is torn down.
      */
     size_t
     releaseInflightRequests(const nixlProxyBackendOps &backend_ops) noexcept;
