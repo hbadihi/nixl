@@ -696,11 +696,10 @@ nixlLibfabricEngine::initPostThreadPool() {
 nixlLibfabricEngine::~nixlLibfabricEngine() {
 #ifdef NIXL_LIBFABRIC_DEVICE_PROXY
     if (proxyRuntime_) {
-        // Join the proxy threads first; shutdown() closes the proxy EPs, which
-        // live in the rails' domains and must go before the rails do. The runtime
-        // destroys the proxy.
+        // Join the proxy threads first; destroying the runtime then destroys the
+        // proxy, which closes its EPs. They live in the rails' domains and must go
+        // before the rails do.
         proxy_ = nullptr;
-        proxyRuntime_->shutdown();
         proxyRuntime_.reset();
     }
 #endif
@@ -2432,7 +2431,8 @@ nixlLibfabricEngine::setupProxyRuntime(const nixl::proxyConfig &config) {
 
     // Unless proxy_thread_count is set, run at most one proxy thread per EFA device next to
     // the GPU: rail domains are FI_THREAD_SAFE, one lock each, and two threads posting on
-    // one rail contend for it. Channels share threads as channel % threads.
+    // one rail contend for it. The count must still split the rings evenly
+    // (proxyConfig::evenThreadSplit()), so take the largest such count within the cap.
     nixl::proxyConfig effective = config;
     std::string explicit_threads;
     if (getInitParam(std::string(nixl::kProxyThreadCountParam), explicit_threads) != NIXL_SUCCESS) {
@@ -2446,29 +2446,31 @@ nixlLibfabricEngine::setupProxyRuntime(const nixl::proxyConfig &config) {
         }
 #endif
         if (gpu_rails > 0 && effective.thread_count > gpu_rails) {
-            NIXL_INFO << "Device proxy: " << gpu_rails << " thread(s) for "
-                      << effective.channel_count << " channel(s), one per EFA device of the GPU";
-            effective.thread_count = static_cast<uint32_t>(gpu_rails);
+            nixl::proxyConfig capped = effective;
+            for (capped.thread_count = static_cast<uint32_t>(gpu_rails);
+                 capped.thread_count > 1 && !capped.evenThreadSplit();
+                 --capped.thread_count) {
+            }
+            NIXL_INFO << "Device proxy: " << capped.thread_count << " thread(s) for "
+                      << effective.channel_count << " channel(s), at most one per EFA device ("
+                      << gpu_rails << ") of the GPU";
+            effective.thread_count = capped.thread_count;
         }
     }
 
     // The runtime owns the transport; the engine keeps a pointer to it for
     // registrations and connection info until it shuts the runtime down.
-    auto transport = std::make_unique<nixlLibfabricProxy>(*this);
-    nixlLibfabricProxy *proxy = transport.get();
+    // create() also starts the proxy threads.
+    nixlLibfabricProxy *proxy = nullptr;
     std::unique_ptr<nixl::proxyRuntime> runtime;
-    nixl_status_t status =
-        nixl::proxyRuntime::create(std::move(transport), effective, runtime, *ops);
-    if (status != NIXL_SUCCESS) {
-        NIXL_ERROR << "Device proxy runtime creation failed: " << status;
-        return status;
+    try {
+        auto transport = std::make_unique<nixlLibfabricProxy>(*this, effective);
+        proxy = transport.get();
+        runtime = nixl::proxyRuntime::create(std::move(transport), effective, *ops);
     }
-
-    status = runtime->startWorkers();
-    if (status != NIXL_SUCCESS) {
-        NIXL_ERROR << "Device proxy runtime failed to start workers: " << status;
-        runtime->shutdown();
-        return status;
+    catch (const std::exception &e) {
+        NIXL_ERROR << "Device proxy runtime creation failed: " << e.what();
+        return NIXL_ERR_BACKEND;
     }
     proxyRuntime_ = std::move(runtime);
     proxy_ = proxy;
@@ -2486,7 +2488,7 @@ nixlLibfabricEngine::setupProxyRuntime(const nixl::proxyConfig &config) {
     }
 
     NIXL_INFO << "Engine-owned device proxy enabled: " << config.channel_count << " channel(s), "
-              << effective.effectiveThreadCount() << " thread(s), max_peers=" << effective.max_peers
+              << effective.thread_count << " thread(s), max_peers=" << effective.max_peers
               << ", ring_depth=" << config.ring_depth;
     return NIXL_SUCCESS;
 }
@@ -2506,7 +2508,7 @@ nixlLibfabricEngine::prepMemViewImpl(const DlistT &dlist, nixlMemViewH &mvh) con
     status = nixl::deviceMemViewAllocate(
         *deviceOps_, nixl_device_exec_mode_t::PROXY, backend_mvh, mvh);
     if (status != NIXL_SUCCESS) {
-        static_cast<void>(proxyRuntime_->releaseMemView(backend_mvh));
+        proxyRuntime_->releaseMemView(backend_mvh);
     }
     return status;
 }
@@ -2535,11 +2537,7 @@ nixlLibfabricEngine::releaseMemView(nixlMemViewH mem_view) const {
         NIXL_FATAL << "Failed to read proxy memory view before retirement";
     }
     if (proxyRuntime_) {
-        const nixl_status_t status = proxyRuntime_->releaseMemView(backend_mvh);
-        if (status != NIXL_SUCCESS) {
-            NIXL_FATAL << "Failed to release proxy memory view " << mem_view << " with status "
-                       << status;
-        }
+        proxyRuntime_->releaseMemView(backend_mvh);
     }
     nixl::deviceMemViewFree(*deviceOps_, mem_view);
 }

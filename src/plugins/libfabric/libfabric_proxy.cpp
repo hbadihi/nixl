@@ -34,6 +34,7 @@
 #include <rdma/fi_errno.h>
 #include <rdma/fi_rma.h>
 
+#include "common/exception.h"
 #include "common/nixl_log.h"
 #include "libfabric_backend.h"
 #include "libfabric_connection.h"
@@ -322,7 +323,10 @@ struct nixlLibfabricProxy::RailRes {
 struct nixlLibfabricProxy::Thread {
     uint32_t id = 0;
     uint32_t home = 0;
-    std::thread::id owner{}; // the worker that drives this thread's channels
+    std::thread::id owner{}; // the worker that drives this thread's rings
+    // This thread's first ring (proxyConfig::threadShare()); progress on it polls the CQs.
+    uint32_t first_channel = 0;
+    uint32_t first_peer = 0;
     // Held while this thread applies an add; registration changes take all of them.
     std::mutex regions_lock;
     std::vector<RailRes> rails;
@@ -734,7 +738,9 @@ struct nixlLibfabricProxy::Inject {
  * Construction and callback table
  * ------------------------------------------------------------------------- */
 
-nixlLibfabricProxy::nixlLibfabricProxy(nixlLibfabricEngine &engine) : engine_(engine) {
+nixlLibfabricProxy::nixlLibfabricProxy(nixlLibfabricEngine &engine,
+                                       const nixl::proxyConfig &config)
+    : engine_(engine) {
     const nixl_b_params_t &params = engine_.getCustomParams();
     idle_poll_ns_ = kDefaultIdlePollUs * 1000;
     if (auto idle = params.find("efa_proxy_idle_poll_us"); idle != params.end()) {
@@ -757,24 +763,31 @@ nixlLibfabricProxy::nixlLibfabricProxy(nixlLibfabricEngine &engine) : engine_(en
     inject_ = Inject::fromEnv();
     counters_ = std::make_unique<CounterMap>(!(inject_ && inject_->no_gdrcopy));
     incarnation_ = std::random_device{}() | static_cast<uint64_t>(std::random_device{}()) << 32;
+    const nixl_status_t status = init(config);
+    if (status != NIXL_SUCCESS) {
+        // No destructor runs for a throwing constructor: release the threads set up so far.
+        releaseThreads();
+        nixl::throwRuntimeError("EFA proxy: setup failed: status=", status);
+    }
 }
 
 nixlLibfabricProxy::~nixlLibfabricProxy() {
-    static_cast<void>(shutdown());
+    releaseThreads();
 }
 
 
 /* ---------------------------------------------------------------------------
- * init / shutdown
+ * init / releaseThreads
  * ------------------------------------------------------------------------- */
 
 nixl_status_t
 nixlLibfabricProxy::init(const nixl::proxyConfig &config) {
     config_ = config;
-    threads_ = config.effectiveThreadCount();
+    threads_ = config.thread_count;
     rails_ = engine_.rail_manager_.getNumRails();
-    if (threads_ == 0 || rails_ == 0) {
-        NIXL_ERROR << "EFA proxy: needs at least one thread and one rail";
+    if (threads_ == 0 || rails_ == 0 || !config.evenThreadSplit()) {
+        NIXL_ERROR << "EFA proxy: needs at least one thread and one rail, and threads that split "
+                      "the rings evenly";
         return NIXL_ERR_INVALID_PARAM;
     }
     if (config.ring_depth > wire::kEpochs) {
@@ -896,12 +909,11 @@ nixlLibfabricProxy::init(const nixl::proxyConfig &config) {
         }
 
         // One request per ring slot this thread can have in flight.
-        uint32_t owned_channels = 0;
-        for (uint32_t c = t; c < config.channel_count; c += threads_) {
-            ++owned_channels;
-        }
-        const size_t ring_slots =
-            static_cast<size_t>(owned_channels) * config.max_peers * config.ring_depth;
+        const nixl::proxyThreadShare share = config.threadShare(t);
+        th->first_channel = share.first_channel;
+        th->first_peer = share.peers.first;
+        const size_t ring_slots = static_cast<size_t>(share.channel_count) *
+            (config.max_peers / share.peers.stride) * config.ring_depth;
         const size_t nreq = ring_slots + kRequestSlack;
         th->reqs.resize(nreq);
         th->free_reqs.reserve(nreq);
@@ -1071,9 +1083,9 @@ nixlLibfabricProxy::releaseThread(Thread &th) {
 #endif
 }
 
-nixl_status_t
-nixlLibfabricProxy::shutdown() {
-    // Runs after the runtime has joined every proxy thread.
+void
+nixlLibfabricProxy::releaseThreads() noexcept {
+    // Runs after the runtime has joined every proxy thread and drained every ring.
     for (auto &th : thread_state_) {
         if (th->cq_errors != 0) {
             NIXL_ERROR << "EFA proxy: thread " << th->id << ": " << th->cq_errors
@@ -1094,7 +1106,6 @@ nixlLibfabricProxy::shutdown() {
         releaseThread(*th);
     }
     thread_state_.clear();
-    return NIXL_SUCCESS;
 }
 
 /* ---------------------------------------------------------------------------
@@ -1133,24 +1144,35 @@ nixlLibfabricProxy::freeRequest(Thread &th, Request *req) {
  * submit / check_completion
  * ------------------------------------------------------------------------- */
 
+uint32_t
+nixlLibfabricProxy::threadOf(uint32_t channel, uint32_t peer) const noexcept {
+    // As nixl::proxyConfig::threadShare(): blocks of whole channels, or a stride of one
+    // channel's peers.
+    if (threads_ <= config_.channel_count) {
+        return channel / (config_.channel_count / threads_);
+    }
+    const uint32_t per_channel = threads_ / config_.channel_count;
+    return channel * per_channel + peer % per_channel;
+}
+
 nixlLibfabricProxy::Thread &
-nixlLibfabricProxy::ownerOf(uint32_t channel) {
-    Thread &th = *thread_state_[channel % threads_];
+nixlLibfabricProxy::ownerOf(uint32_t channel, uint32_t peer) {
+    Thread &th = *thread_state_[threadOf(channel, peer)];
     checkOwner(th);
     return th;
 }
 
 void
 nixlLibfabricProxy::checkOwner(Thread &th) {
-    // The design rests on ProxyWorker's striping: channel c only ever on the
-    // worker c % threads, so each thread state (and CQ) has one caller.
+    // The design rests on the runtime's split of the rings (proxyConfig::threadShare()):
+    // a ring only ever on one worker, so each thread state (and CQ) has one caller.
     const std::thread::id self = std::this_thread::get_id();
     if (th.owner == self) {
         return;
     }
     if (th.owner != std::thread::id{}) {
         NIXL_FATAL << "EFA proxy: thread state " << th.id << " used by a second worker thread; "
-                   << "the runtime no longer stripes channels as channel % threads";
+                   << "the runtime no longer splits rings as proxyConfig::threadShare()";
     }
     th.owner = self;
 }
@@ -1158,7 +1180,7 @@ nixlLibfabricProxy::checkOwner(Thread &th) {
 nixl_status_t
 nixlLibfabricProxy::submit(const nixl::proxyBackendSubmission &sub,
                            nixl::proxyBackendRequest &request) {
-    Thread &th = ownerOf(sub.channel_id);
+    Thread &th = ownerOf(sub.channel_id, sub.peer_index);
     const uint64_t ring_index =
         static_cast<uint64_t>(sub.channel_id) * config_.max_peers + sub.peer_index;
     auto [it, created] = th.rings.try_emplace(ring_index);
@@ -1907,13 +1929,14 @@ nixlLibfabricProxy::reportCqError(Thread &th, uint32_t rail, int err) {
 
 void
 nixlLibfabricProxy::progress(uint32_t channel, uint32_t peer) noexcept {
-    // The runtime calls this once per owned ring and pass; ring (t, 0) polls
-    // thread t's CQs, at most once per pass.
-    const uint32_t t = channel % threads_;
-    if (channel != t || peer != 0) {
+    // The runtime calls this once per owned ring and pass; thread t's first ring
+    // polls its CQs, at most once per pass.
+    const uint32_t t = threadOf(channel, peer);
+    Thread &th = *thread_state_[t];
+    if (channel != th.first_channel || peer != th.first_peer) {
         return;
     }
-    Thread &th = ownerOf(channel);
+    checkOwner(th);
     // Every CQ read takes its rail domain's lock (FI_THREAD_SAFE) and progresses
     // the whole domain, so a thread spinning on idle CQs starves the engine's host
     // transfers on the same rails. With nothing of its own outstanding and no puts
@@ -1956,7 +1979,7 @@ nixl_status_t
 nixlLibfabricProxy::quiesce(uint32_t channel, uint32_t peer) {
     // Called after every owned ring has drained and published; wait briefly for
     // any trailing completion.
-    Thread &th = ownerOf(channel);
+    Thread &th = ownerOf(channel, peer);
     const uint64_t key = static_cast<uint64_t>(channel) * config_.max_peers + peer;
     auto it = th.rings.find(key);
     if (it == th.rings.end()) {
@@ -2258,7 +2281,6 @@ nixlLibfabricProxy::drainDeferred(Thread &th) {
                 }
             }
         }
-        const uint64_t now = nowNs();
         for (auto &[owned, add] : ready) {
             RxRing &ring = *owned->ring;
             const wire::atomicAddMsg &msg = add->second.msg;

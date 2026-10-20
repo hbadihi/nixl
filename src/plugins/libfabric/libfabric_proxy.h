@@ -73,16 +73,18 @@ struct nixlLibfabricConnection;
  * CPU atomic) once its ring's epoch slot counted its puts and the ring's previous
  * atomicAdd was applied, then acks with the result.
  *
- * Threading: ProxyWorker owns channel c on thread c % effectiveThreadCount() and
- * calls submit/check_completion/progress/quiesce for a ring only from that thread
- * (checked), visiting ring (t, 0) on every pass; that call polls the thread's CQs
+ * Threading: the runtime gives each proxy thread the rings of
+ * proxyConfig::threadShare() (whole channels, or a stride of one channel's peers)
+ * and calls submit/check_completion/progress/quiesce for a ring only from that
+ * thread (checked), visiting the thread's first ring on every pass; that call polls its CQs
  * (every pass while it has work, every efa_proxy_idle_poll_us when idle). Every CQ
  * has one polling thread. Receive-side ring state is shared between the thread
  * counting a ring's puts and the owners of its counters through atomics.
  */
 class nixlLibfabricProxy final : public nixl::proxyTransport {
 public:
-    explicit nixlLibfabricProxy(nixlLibfabricEngine &engine);
+    /** Sets up the proxy threads' endpoints; @throws std::runtime_error on failure. */
+    nixlLibfabricProxy(nixlLibfabricEngine &engine, const nixl::proxyConfig &config);
     ~nixlLibfabricProxy() override;
 
     nixlLibfabricProxy(const nixlLibfabricProxy &) = delete;
@@ -90,8 +92,6 @@ public:
     operator=(const nixlLibfabricProxy &) = delete;
 
     // nixl::proxyTransport.
-    [[nodiscard]] nixl_status_t
-    init(const nixl::proxyConfig &config) override;
     [[nodiscard]] nixl_status_t
     submit(const nixl::proxyBackendSubmission &sub, nixl::proxyBackendRequest &request) override;
     [[nodiscard]] nixl_status_t
@@ -102,8 +102,6 @@ public:
     progress(uint32_t channel, uint32_t peer) noexcept override;
     [[nodiscard]] nixl_status_t
     quiesce(uint32_t channel, uint32_t peer) override;
-    [[nodiscard]] nixl_status_t
-    shutdown() override;
 
     /** Local registrations the target side may apply atomics to. */
     void
@@ -147,9 +145,19 @@ private:
     struct CounterMap;
     struct Inject;
 
-    /** The thread state that serves @p channel; fatal if called from another worker. */
+    [[nodiscard]] nixl_status_t
+    init(const nixl::proxyConfig &config);
+    /** Release every thread's resources; the runtime has joined the proxy threads. */
+    void
+    releaseThreads() noexcept;
+
+    /** Index of the thread that serves ring (@p channel, @p peer). */
+    [[nodiscard]] uint32_t
+    threadOf(uint32_t channel, uint32_t peer) const noexcept;
+    /** The thread state that serves ring (@p channel, @p peer); fatal if called from another
+     *  worker. */
     Thread &
-    ownerOf(uint32_t channel);
+    ownerOf(uint32_t channel, uint32_t peer);
     void
     checkOwner(Thread &th);
 
