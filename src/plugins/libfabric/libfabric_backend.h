@@ -55,6 +55,10 @@ typedef hipDevice_t CUdevice;
 class nixlLibfabricEngine;
 class nixlLibfabricPostThreadPool;
 
+namespace nixl::libfabric {
+class proxyEngine;
+}
+
 #ifdef HAVE_CUDA
 /** CUDA context management for libfabric backend */
 class nixlLibfabricCudaCtx {
@@ -96,6 +100,7 @@ private:
 public:
     nixlLibfabricPrivateMetadata() : nixlBackendMD(true), device_id_(-1) {}
     friend class nixlLibfabricEngine;
+    friend class nixl::libfabric::proxyEngine;
 };
 
 /** Public metadata for remote memory access */
@@ -115,6 +120,7 @@ public:
     derive_remote_selected_endpoints();
 
     friend class nixlLibfabricEngine;
+    friend class nixl::libfabric::proxyEngine;
 };
 
 /** Request handle for multi-rail transfer operations */
@@ -189,6 +195,9 @@ private:
     // Store user's original progress thread preference
     bool progress_thread_enabled_;
 
+    // Rails progressed by threads outside the engine, so app-thread calls never poll them
+    bool external_progress_ = false;
+
     // Progress thread delay in microseconds
     std::chrono::microseconds progress_thread_delay_;
 
@@ -229,6 +238,11 @@ private:
 
     void
     cleanup();
+
+    [[nodiscard]] bool
+    appThreadPolls() const {
+        return !progress_thread_enabled_ && !external_progress_;
+    }
 
     // Central notification storage
     std::mutex notif_mutex_;
@@ -403,6 +417,16 @@ private:
     vramApplyCtxEx(bool &use_cuda_addr_wa) const;
     friend class nixlLibfaricCudaCtxEngineMediator;
 #endif
+
+protected:
+    [[nodiscard]] nixlLibfabricRailManager &
+    railManager() const {
+        return rail_manager_;
+    }
+
+    /** Hand rail progress to threads outside the engine, or take it back. */
+    void
+    setExternalProgress(bool enabled);
 
 public:
     /** Initialize multi-rail libfabric backend engine */

@@ -629,6 +629,14 @@ nixlLibfabricEngine::nixlLibfabricEngine(const nixlBackendInitParams *init_param
 }
 
 void
+nixlLibfabricEngine::setExternalProgress(bool enabled) {
+    external_progress_ = enabled;
+    for (size_t rail_id = 0; rail_id < rail_manager_.getNumRails(); ++rail_id) {
+        rail_manager_.getRail(rail_id).setExternalProgress(enabled);
+    }
+}
+
+void
 nixlLibfabricEngine::initPostThreadPool() {
     LibfabricUtils::getCustomIntParam(
         getCustomParams(), NIXL_LIBFABRIC_POST_THREADS_PARAM, post_thread_count_);
@@ -928,7 +936,7 @@ nixlLibfabricEngine::establishConnection(const std::string &remote_agent) const 
             return conn->handshake_received_.load(std::memory_order_acquire) ||
                 conn->handshake_rejected_.load(std::memory_order_acquire);
         };
-        if (progress_thread_enabled_) {
+        if (!appThreadPolls()) {
             std::unique_lock<std::mutex> lk(conn->handshake_mutex_);
             conn->handshake_cv_.wait_until(lk, deadline, handshake_done);
         } else {
@@ -1896,7 +1904,7 @@ nixlLibfabricEngine::notifSendPriv(const std::string &remote_agent,
         }
 
         // Progress rail 0 to ensure the message is sent
-        if (!progress_thread_enabled_) {
+        if (appThreadPolls()) {
             status = rail_manager_.getRail(rail_id).progressCompletionQueue();
             if (status != NIXL_SUCCESS && status != NIXL_IN_PROG) {
                 NIXL_ERROR << "Failed to progress rail 0 in notifSendPriv";
@@ -1967,7 +1975,7 @@ nixlLibfabricEngine::notifXferErrorPriv(const std::string &remote_agent,
     }
 
     // Without a progress thread, progress rail to ensure the message is sent
-    if (!progress_thread_enabled_) {
+    if (appThreadPolls()) {
         status = rail_manager_.getRail(rail_id).progressCompletionQueue();
         if (status != NIXL_SUCCESS && status != NIXL_IN_PROG) {
             NIXL_ERROR << "Failed to progress rail 0 in notifXferErrorPriv";
@@ -2026,7 +2034,7 @@ nixlLibfabricEngine::genNotif(const std::string &remote_agent, const std::string
 
 nixl_status_t
 nixlLibfabricEngine::getNotifs(notif_list_t &notif_list) {
-    if (!progress_thread_enabled_) {
+    if (appThreadPolls()) {
         nixl_status_t progress_status = rail_manager_.progressActiveRails();
         if (progress_status != NIXL_SUCCESS && progress_status != NIXL_IN_PROG) {
             NIXL_ERROR << "Failed to progress rails in getNotifs";
