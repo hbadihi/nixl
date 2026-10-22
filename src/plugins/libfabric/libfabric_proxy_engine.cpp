@@ -109,7 +109,7 @@ public:
         const ringState &ring = rings_[ringIndex(channel, peer)];
         flushPending(threads_[ring.thread]);
         while (ring.in_flight != 0) {
-            pollRails(threads_[ring.thread], false);
+            pollRails(threads_[ring.thread], true);
         }
         return NIXL_SUCCESS;
     }
@@ -288,7 +288,7 @@ private:
 
         flushPending(threads_[ring.thread]);
         while (ring.in_flight != 0) {
-            pollRails(threads_[ring.thread], false);
+            pollRails(threads_[ring.thread], true);
         }
 
         record = allocateOp(ring);
