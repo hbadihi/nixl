@@ -429,6 +429,10 @@ protected:
     setExternalProgress(bool enabled);
 
 public:
+    /** Pick the engine for the parameters: the device proxy engine with device_proxy=true. */
+    [[nodiscard]] static std::unique_ptr<nixlLibfabricEngine>
+    create(const nixlBackendInitParams &init_params);
+
     /** Initialize multi-rail libfabric backend engine */
     nixlLibfabricEngine(const nixlBackendInitParams *init_params);
     /** Destroy engine and cleanup all resources */
