@@ -66,6 +66,8 @@ struct proxyConfig {
     uint32_t ring_depth = kDefaultProxyRingDepth;
     /** Drain deadline in milliseconds; 0 disables it. */
     uint32_t drain_timeout_ms = kDefaultProxyDrainTimeoutMs;
+    /** Commands a worker takes from one ring per pass. Set by the backend, not a parameter. */
+    uint32_t ring_submits_per_pass = 1;
 
     [[nodiscard]] size_t
     ringCount() const noexcept {

@@ -40,7 +40,7 @@ namespace nixl {
  */
 class proxyChannel {
 public:
-    proxyChannel(uint32_t channel_id, uint32_t max_peers);
+    proxyChannel(uint32_t channel_id, uint32_t max_peers, uint32_t ring_submits_per_pass = 1);
 
     /** Allocate every peer's ring; ring (id, peer) takes control-buffer ring id * max_peers + peer.
      */
@@ -100,6 +100,7 @@ private:
                  const nixlProxyCommand &submission);
 
     uint32_t id_;
+    uint32_t ring_submits_per_pass_;
     std::vector<proxyRing> rings_;
 };
 

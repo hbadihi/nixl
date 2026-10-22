@@ -338,6 +338,15 @@ requireDeviceOps() {
     }
     return *ops;
 }
+
+constexpr uint32_t kRingSubmitsPerPass = 16;
+
+[[nodiscard]] nixl::proxyConfig
+runtimeConfig(const nixl::proxyConfig &config) noexcept {
+    nixl::proxyConfig runtime_config = config;
+    runtime_config.ring_submits_per_pass = kRingSubmitsPerPass;
+    return runtime_config;
+}
 } // namespace
 
 namespace nixl::libfabric {
@@ -368,7 +377,7 @@ proxyEngine::proxyEngine(const nixlBackendInitParams &init_params, const nixl::p
 
     setExternalProgress(true);
     runtime_ = nixl::proxyRuntime::create(
-        std::make_unique<transport>(railManager(), config), config, ops_);
+        std::make_unique<transport>(railManager(), config), runtimeConfig(config), ops_);
     NIXL_INFO << "Engine-owned device proxy enabled: " << config.channel_count << " channel(s), "
               << config.thread_count << " thread(s) over " << num_rails
               << " rail(s), max_peers=" << config.max_peers << ", ring_depth=" << config.ring_depth;

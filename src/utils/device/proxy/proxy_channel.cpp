@@ -16,6 +16,7 @@
  */
 #include "proxy_channel.h"
 
+#include <algorithm>
 #include <optional>
 
 #include "nixl_log.h"
@@ -23,8 +24,11 @@
 
 namespace nixl {
 
-proxyChannel::proxyChannel(uint32_t channel_id, uint32_t max_peers)
+proxyChannel::proxyChannel(uint32_t channel_id,
+                           uint32_t max_peers,
+                           uint32_t ring_submits_per_pass)
     : id_(channel_id),
+      ring_submits_per_pass_(std::max(ring_submits_per_pass, 1u)),
       rings_(max_peers) {}
 
 nixl_status_t
@@ -42,9 +46,12 @@ proxyChannel::allocate(deviceOps &allocator, uint32_t depth, proxyControlBuffer 
 void
 proxyChannel::submitReady(proxyTransport &transport, proxyPeerSlice peers) {
     for (uint32_t peer = peers.first; peer < rings_.size(); peer += peers.stride) {
-        uint32_t slot = 0;
-        const std::optional<nixlProxyCommand> submission = rings_[peer].tryDequeue(slot);
-        if (submission) {
+        for (uint32_t submitted = 0; submitted < ring_submits_per_pass_; ++submitted) {
+            uint32_t slot = 0;
+            const std::optional<nixlProxyCommand> submission = rings_[peer].tryDequeue(slot);
+            if (!submission) {
+                break;
+            }
             NIXL_DEBUG << "proxyChannel::submitReady: channel=" << id_ << " slot=" << slot
                        << " opcode=" << static_cast<int>(submission->opcode)
                        << " op_idx=" << submission->op_idx << " size=" << submission->size;
