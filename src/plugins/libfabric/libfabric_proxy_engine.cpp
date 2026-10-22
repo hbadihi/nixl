@@ -41,6 +41,7 @@ public:
           rings_(config.ringCount()) {
         for (threadState &thread : threads_) {
             thread.in_flight.resize(rails_.getNumRails());
+            thread.pending.resize(rails_.getNumRails());
         }
         for (size_t rail_id = 0; rail_id < rails_.getNumRails(); ++rail_id) {
             threads_[rail_id % thread_count_].rails.push_back(rail_id);
@@ -98,6 +99,7 @@ public:
         const ringState &ring = rings_[ringIndex(channel, peer)];
         if (ring.anchor) {
             threadState &thread = threads_[ring.thread];
+            flushPending(thread);
             pollRails(thread, ++thread.passes % kSweepPasses == 0);
         }
     }
@@ -105,6 +107,7 @@ public:
     nixl_status_t
     quiesce(uint32_t channel, uint32_t peer) override {
         const ringState &ring = rings_[ringIndex(channel, peer)];
+        flushPending(threads_[ring.thread]);
         while (ring.in_flight != 0) {
             pollRails(threads_[ring.thread], false);
         }
@@ -120,6 +123,13 @@ private:
         ringState *ring = nullptr;
         uint32_t *rail_in_flight = nullptr;
         uint64_t operand = 0;
+        nixlLibfabricReq *req = nullptr;
+        const void *local_addr = nullptr;
+        size_t len = 0;
+        void *local_desc = nullptr;
+        fi_addr_t dest = 0;
+        uint64_t remote_addr = 0;
+        uint64_t remote_key = 0;
         nixl_status_t status = NIXL_IN_PROG;
         bool busy = false;
         bool done = false;
@@ -146,6 +156,8 @@ private:
     struct alignas(64) threadState {
         std::vector<size_t> rails;
         std::vector<uint32_t> in_flight;
+        std::vector<std::vector<op *>> pending;
+        bool has_pending = false;
         uint32_t passes = 0;
     };
 
@@ -234,19 +246,18 @@ private:
             return NIXL_ERR_BACKEND;
         }
         req->completion_callback = [record](nixl_status_t status) { record->complete(status); };
+        record->req = req;
+        record->local_addr = reinterpret_cast<void *>(local.addr);
+        record->len = submission.size;
+        record->local_desc = fi_mr_desc(lmd->rail_mr_list_[rail_id]);
+        record->dest = dest;
+        record->remote_addr = remote_addr;
+        record->remote_key = rmd->rail_remote_key_list_[remote_ep];
 
-        nixl_status_t status;
-        while ((status = rail.tryPostWrite(reinterpret_cast<void *>(local.addr),
-                                           submission.size,
-                                           fi_mr_desc(lmd->rail_mr_list_[rail_id]),
-                                           dest,
-                                           remote_addr,
-                                           rmd->rail_remote_key_list_[remote_ep],
-                                           req,
-                                           FI_DELIVERY_COMPLETE)) == NIXL_IN_PROG) {
-            rail.progressCompletionQueue();
-        }
-        return finishPost(rail, req, ring, record, status);
+        threadState &thread = threads_[ring.thread];
+        thread.pending[rail_id].push_back(record);
+        thread.has_pending = true;
+        return finishPost(rail, req, ring, record, NIXL_SUCCESS);
     }
 
     nixl_status_t
@@ -275,6 +286,7 @@ private:
             remote_addr -= rmd->remote_buf_addr_;
         }
 
+        flushPending(threads_[ring.thread]);
         while (ring.in_flight != 0) {
             pollRails(threads_[ring.thread], false);
         }
@@ -301,6 +313,38 @@ private:
             rail.progressCompletionQueue();
         }
         return finishPost(rail, req, ring, record, status);
+    }
+
+    void
+    flushPending(threadState &thread) noexcept {
+        if (!thread.has_pending) {
+            return;
+        }
+        thread.has_pending = false;
+        for (const size_t rail_id : thread.rails) {
+            std::vector<op *> &batch = thread.pending[rail_id];
+            nixlLibfabricRail &rail = rails_.getRail(rail_id);
+            for (size_t i = 0; i < batch.size(); ++i) {
+                op *record = batch[i];
+                const uint64_t flags = FI_DELIVERY_COMPLETE | (i + 1 < batch.size() ? FI_MORE : 0);
+                nixl_status_t status;
+                while ((status = rail.tryPostWrite(record->local_addr,
+                                                   record->len,
+                                                   record->local_desc,
+                                                   record->dest,
+                                                   record->remote_addr,
+                                                   record->remote_key,
+                                                   record->req,
+                                                   flags)) == NIXL_IN_PROG) {
+                    rail.progressCompletionQueue();
+                }
+                if (status != NIXL_SUCCESS) {
+                    rail.releaseRequest(record->req);
+                    record->complete(status);
+                }
+            }
+            batch.clear();
+        }
     }
 
     nixl_status_t
