@@ -459,8 +459,12 @@ validateDeviceAPIConfig() {
     if (!proxy && xferBenchConfig::device_mode != XFERBENCH_DEVICE_MODE_DIRECT) {
         return reject("device_mode must be direct or proxy");
     }
-    if (xferBenchConfig::backend != XFERBENCH_BACKEND_UCX) {
-        return reject("backend must be UCX");
+    if (proxy && xferBenchConfig::backend != XFERBENCH_BACKEND_UCX &&
+        xferBenchConfig::backend != XFERBENCH_BACKEND_LIBFABRIC) {
+        return reject("backend must be UCX or LIBFABRIC with device_mode=proxy");
+    }
+    if (!proxy && xferBenchConfig::backend != XFERBENCH_BACKEND_UCX) {
+        return reject("backend must be UCX with device_mode=direct");
     }
 #ifndef HAVE_UCX_GPU_DEVICE_API
     if (!proxy) {

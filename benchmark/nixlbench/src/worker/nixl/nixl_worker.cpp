@@ -202,7 +202,21 @@ xferBenchNixlWorker::xferBenchNixlWorker(const std::vector<std::string> &devices
                   << (("all" == devices[0]) ? "all" : backend_params["device_list"]) << " rank "
                   << rank << ", type " << name << ", hostname " << hostname << std::endl;
     } else if (0 == xferBenchConfig::backend.compare(XFERBENCH_BACKEND_LIBFABRIC)) {
-        backend_params["num_threads"] = std::to_string(xferBenchConfig::progress_threads);
+        if (xferBenchConfig::use_device_api) {
+            backend_params["device_proxy"] = "true";
+            backend_params["proxy_channel_count"] =
+                std::to_string(xferBenchConfig::device_channel_num);
+            backend_params["proxy_max_peers"] = "1";
+            if (xferBenchConfig::device_proxy_threads > 0) {
+                backend_params["proxy_thread_count"] =
+                    std::to_string(xferBenchConfig::device_proxy_threads);
+            }
+            std::cout << "Device API mode: configuring " << xferBenchConfig::device_channel_num
+                      << " CPU proxy channels for " << xferBenchConfig::deviceGroupNum()
+                      << " execution groups" << std::endl;
+        } else {
+            backend_params["num_threads"] = std::to_string(xferBenchConfig::progress_threads);
+        }
 
         if (gethostname(hostname, 256)) {
             std::cerr << "Failed to get hostname" << std::endl;
