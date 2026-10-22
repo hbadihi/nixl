@@ -208,6 +208,12 @@ proxyRuntime::releaseMemView(proxy_view_handle_t proxy_memview) {
 }
 
 void
+proxyRuntime::drain() {
+    const std::lock_guard lock(control_mutex_);
+    drainChannels();
+}
+
+void
 proxyRuntime::drainChannels() noexcept {
     if (state_ != state_t::RUNNING) {
         for (auto &channel : channels_) {

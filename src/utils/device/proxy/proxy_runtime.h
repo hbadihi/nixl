@@ -72,6 +72,10 @@ public:
     void
     releaseMemView(proxy_view_handle_t proxy_memview);
 
+    /** Wait until every operation submitted so far has completed. */
+    void
+    drain();
+
     nixlProxyDeviceContextData *
     deviceContext() const {
         return static_cast<nixlProxyDeviceContextData *>(device_context_mem_.get());

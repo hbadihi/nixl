@@ -95,6 +95,16 @@ struct proxyConfig {
         const uint32_t per_channel = thread_count / channel_count;
         return {thread / per_channel, 1, {thread % per_channel, per_channel}};
     }
+
+    /** The thread that owns ring (channel, peer); the inverse of threadShare(). */
+    [[nodiscard]] uint32_t
+    owningThread(uint32_t channel, uint32_t peer) const noexcept {
+        if (thread_count <= channel_count) {
+            return channel / (channel_count / thread_count);
+        }
+        const uint32_t per_channel = thread_count / channel_count;
+        return channel * per_channel + peer % per_channel;
+    }
 };
 
 /**
