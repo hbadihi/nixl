@@ -500,6 +500,18 @@ public:
               nixlLibfabricReq *req,
               uint64_t fi_flags = 0);
 
+    /** Post one RDMA write without remote CQ data and without retrying.
+     *  @return NIXL_IN_PROG on FI_EAGAIN, when nothing was posted. */
+    nixl_status_t
+    tryPostWrite(const void *local_buffer,
+                 size_t length,
+                 void *local_desc,
+                 fi_addr_t dest_addr,
+                 uint64_t remote_addr,
+                 uint64_t remote_key,
+                 nixlLibfabricReq *req,
+                 uint64_t fi_flags);
+
     /** Post RDMA read operation */
     nixl_status_t
     postRead(void *local_buffer,
@@ -544,6 +556,15 @@ public:
      */
     void
     setProgressThreadEnabled(bool enabled);
+
+    /** Rails progressed by threads outside the engine: a post retrying FI_EAGAIN polls the CQ
+     *  only on a thread marked with setProgressingThread(). */
+    void
+    setExternalProgress(bool enabled);
+
+    /** Mark the calling thread as one that progresses rails under external progress. */
+    static void
+    setProgressingThread(bool progressing);
 
     /** Check if progress thread is enabled for this rail */
     bool
@@ -627,6 +648,8 @@ private:
     // Whether a progress thread is handling CQ draining
     bool progress_thread_enabled_ = false;
 
+    bool external_progress_ = false;
+
     // Callback functions. Receive completions carry the sender's index in OUR table,
     // resolved from the completion's source address (see resolveSourceAddress()).
     std::function<void(const std::string &, uint32_t)> notificationCallback;
@@ -651,6 +674,9 @@ private:
 
     void
     pollForCompletions();
+
+    [[nodiscard]] bool
+    pollsOnRetry() const;
 
     /** Record that fi_addr belongs to agent_idx. Called from insertAddress(). */
     void
