@@ -152,6 +152,7 @@ private:
         size_t next_endpoint = 0;
         uint32_t in_flight = 0;
         uint32_t puts_in_flight = 0;
+        int put_rail = -1;
         uint32_t thread = 0;
         bool anchor = false;
     };
@@ -231,6 +232,7 @@ private:
         if (rail_id < 0) {
             return NIXL_ERR_INVALID_PARAM;
         }
+        ring.put_rail = rail_id;
         const auto &endpoints = rmd->remote_selected_endpoints_;
         const size_t remote_ep = endpoints[ring.next_endpoint++ % endpoints.size()];
         nixlLibfabricRail &rail = rails_.getRail(rail_id);
@@ -277,7 +279,8 @@ private:
             return NIXL_ERR_INVALID_PARAM;
         }
 
-        const size_t rail_id = threads_[ring.thread].rails.front();
+        const size_t rail_id =
+            ring.put_rail >= 0 ? ring.put_rail : threads_[ring.thread].rails.front();
         nixlLibfabricRail &rail = rails_.getRail(rail_id);
         if (!(rail.getRailInfo()->caps & FI_ATOMIC)) {
             NIXL_ERROR << "device proxy: rail " << rail_id << " provider has no FI_ATOMIC";
