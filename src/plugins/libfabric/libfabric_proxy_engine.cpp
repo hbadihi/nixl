@@ -133,12 +133,14 @@ private:
         nixl_status_t status = NIXL_IN_PROG;
         bool busy = false;
         bool done = false;
+        bool is_put = false;
 
         void
         complete(nixl_status_t result) noexcept {
             status = result;
             done = true;
             --ring->in_flight;
+            ring->puts_in_flight -= is_put;
             --*rail_in_flight;
         }
     };
@@ -149,6 +151,7 @@ private:
         size_t next_rail = 0;
         size_t next_endpoint = 0;
         uint32_t in_flight = 0;
+        uint32_t puts_in_flight = 0;
         uint32_t thread = 0;
         bool anchor = false;
     };
@@ -186,6 +189,7 @@ private:
         ring.next_op = (ring.next_op + 1) % ring.ops.size();
         record.busy = true;
         record.done = false;
+        record.is_put = false;
         record.status = NIXL_IN_PROG;
         return &record;
     }
@@ -253,6 +257,7 @@ private:
         record->dest = dest;
         record->remote_addr = remote_addr;
         record->remote_key = rmd->rail_remote_key_list_[remote_ep];
+        record->is_put = true;
 
         threadState &thread = threads_[ring.thread];
         thread.pending[rail_id].push_back(record);
@@ -287,7 +292,7 @@ private:
         }
 
         flushPending(threads_[ring.thread]);
-        while (ring.in_flight != 0) {
+        while (ring.puts_in_flight != 0) {
             pollRails(threads_[ring.thread], true);
         }
 
@@ -361,6 +366,7 @@ private:
         record->rail_in_flight = &threads_[ring.thread].in_flight[rail.rail_id];
         ++*record->rail_in_flight;
         ++ring.in_flight;
+        ring.puts_in_flight += record->is_put;
         return NIXL_IN_PROG;
     }
 
