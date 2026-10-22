@@ -512,6 +512,17 @@ public:
                  nixlLibfabricReq *req,
                  uint64_t fi_flags);
 
+    /** Post one 64-bit atomic add of *operand, which must stay valid until completion, without
+     *  retrying. Needs FI_ATOMIC in getRailInfo()->caps.
+     *  @return NIXL_IN_PROG on FI_EAGAIN, when nothing was posted. */
+    nixl_status_t
+    tryPostAtomicAdd(const uint64_t *operand,
+                     fi_addr_t dest_addr,
+                     uint64_t remote_addr,
+                     uint64_t remote_key,
+                     nixlLibfabricReq *req,
+                     uint64_t fi_flags);
+
     /** Post RDMA read operation */
     nixl_status_t
     postRead(void *local_buffer,
