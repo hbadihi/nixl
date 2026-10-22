@@ -106,7 +106,7 @@ public:
     quiesce(uint32_t channel, uint32_t peer) override {
         const ringState &ring = rings_[ringIndex(channel, peer)];
         while (ring.in_flight != 0) {
-            pollRails(threads_[ring.thread], false);
+            pollRails(threads_[ring.thread], true);
         }
         return NIXL_SUCCESS;
     }
@@ -276,7 +276,7 @@ private:
         }
 
         while (ring.in_flight != 0) {
-            pollRails(threads_[ring.thread], false);
+            pollRails(threads_[ring.thread], true);
         }
 
         record = allocateOp(ring);
