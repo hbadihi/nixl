@@ -788,6 +788,25 @@ nixlLibfabricRail::setProgressThreadEnabled(bool enabled) {
     progress_thread_enabled_ = enabled;
 }
 
+namespace {
+thread_local bool progressing_thread = false;
+} // namespace
+
+void
+nixlLibfabricRail::setExternalProgress(bool enabled) {
+    external_progress_ = enabled;
+}
+
+void
+nixlLibfabricRail::setProgressingThread(bool progressing) {
+    progressing_thread = progressing;
+}
+
+bool
+nixlLibfabricRail::pollsOnRetry() const {
+    return !progress_thread_enabled_ && (!external_progress_ || progressing_thread);
+}
+
 bool
 nixlLibfabricRail::initPostQueue(size_t post_queue_size) {
     return post_ring_.initialize(post_queue_size);
@@ -1270,7 +1289,7 @@ nixlLibfabricRail::postSend(uint64_t immediate_data, fi_addr_t dest_addr, nixlLi
             }
 
             // Progress completion queue to drain pending completions before retry
-            if (!progress_thread_enabled_) {
+            if (pollsOnRetry()) {
                 nixl_status_t progress_status = progressCompletionQueue();
                 if (progress_status != NIXL_SUCCESS && progress_status != NIXL_IN_PROG) {
                     NIXL_ERROR << "progressCompletionQueue failed on rail " << rail_id
@@ -1514,7 +1533,7 @@ nixlLibfabricRail::postWrite(const void *local_buffer,
             }
 
             // Progress completion queue to drain pending completions before retry
-            if (!progress_thread_enabled_) {
+            if (pollsOnRetry()) {
                 nixl_status_t progress_status = progressCompletionQueue();
                 if (progress_status != NIXL_SUCCESS && progress_status != NIXL_IN_PROG) {
                     NIXL_ERROR << "progressCompletionQueue failed on rail " << rail_id
@@ -1533,6 +1552,41 @@ nixlLibfabricRail::postWrite(const void *local_buffer,
         }
     }
 
+    NIXL_ERROR << "fi_writemsg failed on rail " << rail_id << ": " << fi_strerror(-ret);
+    return NIXL_ERR_BACKEND;
+}
+
+nixl_status_t
+nixlLibfabricRail::tryPostWrite(const void *local_buffer,
+                                size_t length,
+                                void *local_desc,
+                                fi_addr_t dest_addr,
+                                uint64_t remote_addr,
+                                uint64_t remote_key,
+                                nixlLibfabricReq *req,
+                                uint64_t fi_flags) {
+    struct iovec iov{const_cast<void *>(local_buffer), length};
+    struct fi_rma_iov rma_iov{remote_addr, length, remote_key};
+    struct fi_msg_rma msg = {};
+    msg.msg_iov = &iov;
+    msg.desc = &local_desc;
+    msg.iov_count = 1;
+    msg.addr = dest_addr;
+    msg.rma_iov = &rma_iov;
+    msg.rma_iov_count = 1;
+    msg.context = &req->ctx;
+
+    ssize_t ret;
+    {
+        const std::lock_guard<std::mutex> ep_lock(ep_mutex_);
+        ret = fi_writemsg(endpoint, &msg, fi_flags);
+    }
+    if (ret == 0) {
+        return NIXL_SUCCESS;
+    }
+    if (ret == -FI_EAGAIN) {
+        return NIXL_IN_PROG;
+    }
     NIXL_ERROR << "fi_writemsg failed on rail " << rail_id << ": " << fi_strerror(-ret);
     return NIXL_ERR_BACKEND;
 }
@@ -1597,7 +1651,7 @@ nixlLibfabricRail::postRead(void *local_buffer,
             }
 
             // Progress completion queue to drain pending completions before retry
-            if (!progress_thread_enabled_) {
+            if (pollsOnRetry()) {
                 nixl_status_t progress_status = progressCompletionQueue();
                 if (progress_status != NIXL_SUCCESS && progress_status != NIXL_IN_PROG) {
                     NIXL_ERROR << "progressCompletionQueue failed on rail " << rail_id
