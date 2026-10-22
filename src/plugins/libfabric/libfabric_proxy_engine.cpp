@@ -18,6 +18,7 @@
 #include "libfabric_proxy_engine.h"
 
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <string>
 #include <vector>
@@ -101,15 +102,18 @@ public:
             threadState &thread = threads_[ring.thread];
             flushPending(thread);
             pollRails(thread, ++thread.passes % kSweepPasses == 0);
+            postParked(thread);
         }
     }
 
     nixl_status_t
     quiesce(uint32_t channel, uint32_t peer) override {
         const ringState &ring = rings_[ringIndex(channel, peer)];
-        flushPending(threads_[ring.thread]);
+        threadState &thread = threads_[ring.thread];
+        flushPending(thread);
         while (ring.in_flight != 0) {
-            pollRails(threads_[ring.thread], true);
+            pollRails(thread, true);
+            postParked(thread);
         }
         return NIXL_SUCCESS;
     }
@@ -130,6 +134,8 @@ private:
         fi_addr_t dest = 0;
         uint64_t remote_addr = 0;
         uint64_t remote_key = 0;
+        size_t rail_id = 0;
+        uint64_t seq = 0;
         nixl_status_t status = NIXL_IN_PROG;
         bool busy = false;
         bool done = false;
@@ -140,7 +146,6 @@ private:
             status = result;
             done = true;
             --ring->in_flight;
-            ring->puts_in_flight -= is_put;
             --*rail_in_flight;
         }
     };
@@ -151,7 +156,9 @@ private:
         size_t next_rail = 0;
         size_t next_endpoint = 0;
         uint32_t in_flight = 0;
-        uint32_t puts_in_flight = 0;
+        uint64_t next_seq = 0;
+        uint64_t scan_seq = 0;
+        std::deque<op *> parked;
         int put_rail = -1;
         uint32_t thread = 0;
         bool anchor = false;
@@ -162,6 +169,7 @@ private:
         std::vector<uint32_t> in_flight;
         std::vector<std::vector<op *>> pending;
         bool has_pending = false;
+        std::vector<ringState *> parked_rings;
         uint32_t passes = 0;
     };
 
@@ -191,6 +199,7 @@ private:
         record.busy = true;
         record.done = false;
         record.is_put = false;
+        record.seq = ring.next_seq++;
         record.status = NIXL_IN_PROG;
         return &record;
     }
@@ -294,11 +303,6 @@ private:
             remote_addr -= rmd->remote_buf_addr_;
         }
 
-        flushPending(threads_[ring.thread]);
-        while (ring.puts_in_flight != 0) {
-            pollRails(threads_[ring.thread], true);
-        }
-
         record = allocateOp(ring);
         if (record == nullptr) {
             return NIXL_ERR_BACKEND;
@@ -310,17 +314,69 @@ private:
             return NIXL_ERR_BACKEND;
         }
         req->completion_callback = [record](nixl_status_t status) { record->complete(status); };
+        record->req = req;
+        record->dest = dest;
+        record->remote_addr = remote_addr;
+        record->remote_key = rmd->rail_remote_key_list_[remote_ep];
+        record->rail_id = rail_id;
 
+        if (ring.parked.empty() && putsBeforeDone(ring, record->seq)) {
+            return finishPost(rail, req, ring, record, postAtomic(*record));
+        }
+        if (ring.parked.empty()) {
+            threads_[ring.thread].parked_rings.push_back(&ring);
+        }
+        ring.parked.push_back(record);
+        return finishPost(rail, req, ring, record, NIXL_SUCCESS);
+    }
+
+    [[nodiscard]] static bool
+    putsBeforeDone(ringState &ring, uint64_t seq) noexcept {
+        for (; ring.scan_seq < seq; ++ring.scan_seq) {
+            const op &record = ring.ops[ring.scan_seq % ring.ops.size()];
+            if (record.seq == ring.scan_seq && record.busy && record.is_put && !record.done) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    [[nodiscard]] nixl_status_t
+    postAtomic(op &record) noexcept {
+        nixlLibfabricRail &rail = rails_.getRail(record.rail_id);
         nixl_status_t status;
-        while ((status = rail.tryPostAtomicAdd(&record->operand,
-                                               dest,
-                                               remote_addr,
-                                               rmd->rail_remote_key_list_[remote_ep],
-                                               req,
+        while ((status = rail.tryPostAtomicAdd(&record.operand,
+                                               record.dest,
+                                               record.remote_addr,
+                                               record.remote_key,
+                                               record.req,
                                                FI_DELIVERY_COMPLETE)) == NIXL_IN_PROG) {
             rail.progressCompletionQueue();
         }
-        return finishPost(rail, req, ring, record, status);
+        return status;
+    }
+
+    void
+    postParked(threadState &thread) noexcept {
+        std::vector<ringState *> &rings = thread.parked_rings;
+        for (size_t i = 0; i < rings.size();) {
+            ringState &ring = *rings[i];
+            while (!ring.parked.empty() && putsBeforeDone(ring, ring.parked.front()->seq)) {
+                op *record = ring.parked.front();
+                ring.parked.pop_front();
+                const nixl_status_t status = postAtomic(*record);
+                if (status != NIXL_SUCCESS) {
+                    rails_.getRail(record->rail_id).releaseRequest(record->req);
+                    record->complete(status);
+                }
+            }
+            if (ring.parked.empty()) {
+                rings[i] = rings.back();
+                rings.pop_back();
+            } else {
+                ++i;
+            }
+        }
     }
 
     void
@@ -369,7 +425,6 @@ private:
         record->rail_in_flight = &threads_[ring.thread].in_flight[rail.rail_id];
         ++*record->rail_in_flight;
         ++ring.in_flight;
-        ring.puts_in_flight += record->is_put;
         return NIXL_IN_PROG;
     }
 
