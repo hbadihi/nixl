@@ -345,6 +345,7 @@ constexpr uint32_t kRingSubmitsPerPass = 16;
 runtimeConfig(const nixl::proxyConfig &config) noexcept {
     nixl::proxyConfig runtime_config = config;
     runtime_config.ring_submits_per_pass = kRingSubmitsPerPass;
+    runtime_config.publish_per_pass = true;
     return runtime_config;
 }
 } // namespace

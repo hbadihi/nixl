@@ -68,6 +68,8 @@ struct proxyConfig {
     uint32_t drain_timeout_ms = kDefaultProxyDrainTimeoutMs;
     /** Commands a worker takes from one ring per pass. Set by the backend, not a parameter. */
     uint32_t ring_submits_per_pass = 1;
+    /** Publish completions once per ring per pass, not per request. Set by the backend. */
+    bool publish_per_pass = false;
 
     [[nodiscard]] size_t
     ringCount() const noexcept {

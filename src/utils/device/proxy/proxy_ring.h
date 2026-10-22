@@ -108,7 +108,11 @@ public:
 
     /** Publish the oldest request's terminal status, then advance the consumer index. */
     void
-    retireOldest(nixl_status_t status) noexcept;
+    retireOldest(nixl_status_t status, bool defer_publish = false) noexcept;
+
+    /** Publish the completions that retireOldest() deferred: one completion and CI store. */
+    void
+    publishRetired() noexcept;
 
     /** No submitted or published work remains. */
     [[nodiscard]] bool
@@ -168,6 +172,8 @@ private:
     uint64_t submit_idx_ = 0;
     /** Host shadow of the authoritative GPU-visible consumer index. */
     uint64_t consumer_idx_shadow_ = 0;
+    uint64_t retired_op_idx_ = 0;
+    bool retire_pending_ = false;
     /** In-flight state retained until the completion frontier passes its ring slot. */
     std::vector<proxyRequestState> inflight_;
 

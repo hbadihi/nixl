@@ -103,6 +103,7 @@ proxyRing::rearm() noexcept {
     }
 
     submit_idx_ = 0;
+    retire_pending_ = false;
     inflight_.assign(depth_, proxyRequestState{});
     // Clear the old completion latch before reusing the ring.
     completionSlotHost()->completion_status = NIXL_IN_PROG;
@@ -112,9 +113,17 @@ proxyRing::rearm() noexcept {
 }
 
 void
-proxyRing::retireOldest(nixl_status_t status) noexcept {
+proxyRing::retireOldest(nixl_status_t status, bool defer_publish) noexcept {
     const uint64_t consumer_idx = consumer_idx_shadow_;
     proxyRequestState &front = inflight_[consumer_idx % depth_];
+    if (defer_publish && status >= 0) {
+        retired_op_idx_ = front.op_idx;
+        retire_pending_ = true;
+        consumer_idx_shadow_ = consumer_idx + 1;
+        front = proxyRequestState{};
+        return;
+    }
+    publishRetired();
     nixlProxyCompletionSlot *slot = completionSlotHost();
     if (__atomic_load_n(&slot->failed_idx, __ATOMIC_RELAXED) == 0) {
         slot->completion_status = status;
@@ -128,6 +137,23 @@ proxyRing::retireOldest(nixl_status_t status) noexcept {
                    << " consumer_idx=" << consumer_idx + 1;
     }
     front = proxyRequestState{};
+}
+
+void
+proxyRing::publishRetired() noexcept {
+    if (!retire_pending_) {
+        return;
+    }
+    retire_pending_ = false;
+    nixlProxyCompletionSlot *slot = completionSlotHost();
+    if (__atomic_load_n(&slot->failed_idx, __ATOMIC_RELAXED) == 0) {
+        slot->completion_status = NIXL_SUCCESS;
+        __atomic_store_n(&slot->completed_idx, retired_op_idx_, __ATOMIC_RELEASE);
+    }
+    if (publishConsumerIdx(consumer_idx_shadow_) != NIXL_SUCCESS) {
+        NIXL_FATAL << "proxyRing::publishRetired: failed to publish CI"
+                   << " consumer_idx=" << consumer_idx_shadow_;
+    }
 }
 
 bool

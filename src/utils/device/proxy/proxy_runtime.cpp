@@ -99,7 +99,8 @@ proxyRuntime::build() {
     std::vector<nixlProxyRingDesc> device_channel_views;
     device_channel_views.reserve(channel_slots);
     for (uint32_t channel_idx = 0; channel_idx < channel_count; channel_idx++) {
-        channels_.emplace_back(channel_idx, max_peers, config_.ring_submits_per_pass);
+        channels_.emplace_back(
+            channel_idx, max_peers, config_.ring_submits_per_pass, config_.publish_per_pass);
         rc = channels_.back().allocate(allocator_, config_.ring_depth, *control_slots_);
         if (rc != NIXL_SUCCESS) {
             return rc;

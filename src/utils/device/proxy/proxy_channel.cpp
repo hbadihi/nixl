@@ -26,9 +26,11 @@ namespace nixl {
 
 proxyChannel::proxyChannel(uint32_t channel_id,
                            uint32_t max_peers,
-                           uint32_t ring_submits_per_pass)
+                           uint32_t ring_submits_per_pass,
+                           bool publish_per_pass)
     : id_(channel_id),
       ring_submits_per_pass_(std::max(ring_submits_per_pass, 1u)),
+      publish_per_pass_(publish_per_pass),
       rings_(max_peers) {}
 
 nixl_status_t
@@ -130,8 +132,9 @@ proxyChannel::publishCompletions(proxyTransport &transport, proxyPeerSlice peers
             }
             NIXL_DEBUG << "proxyChannel::publishCompletions: op_idx=" << front->op_idx
                        << " status=" << st << " token=" << front->backend_request.token;
-            ring.retireOldest(st);
+            ring.retireOldest(st, publish_per_pass_);
         }
+        ring.publishRetired();
     }
 }
 
