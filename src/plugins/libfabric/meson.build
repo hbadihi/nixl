@@ -33,6 +33,8 @@ libfabric_plugin_deps = [
     libfabric_dep,
     serdes_interface,
     libfabric_utils_dep,
+    device_utils_interface,
+    device_proxy_interface,
     dependency('dl', required: true)
 ]
 
@@ -59,6 +61,8 @@ if 'LIBFABRIC' in static_plugins
         'libfabric_connection.h',
         'libfabric_handshake.cpp',
         'libfabric_plugin.cpp',
+        'libfabric_proxy_engine.cpp',
+        'libfabric_proxy_engine.h',
         dependencies: libfabric_plugin_deps,
         include_directories: [nixl_inc_dirs, utils_inc_dirs],
         install: false,
@@ -74,6 +78,8 @@ else
         'libfabric_connection.h',
         'libfabric_handshake.cpp',
         'libfabric_plugin.cpp',
+        'libfabric_proxy_engine.cpp',
+        'libfabric_proxy_engine.h',
         dependencies: libfabric_plugin_deps,
         include_directories: [nixl_inc_dirs, utils_inc_dirs],
         install: true,

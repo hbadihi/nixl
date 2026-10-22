@@ -17,9 +17,12 @@
  */
 
 #include "libfabric_backend.h"
+#include "libfabric_proxy_engine.h"
 #include "serdes/serdes.h"
+#include "common/backend.h"
 #include "common/configuration.h"
 #include "common/nixl_log.h"
+#include "device/proxy/proxy_config.h"
 
 #include <cstdint>
 #include <dlfcn.h>
@@ -626,6 +629,23 @@ nixlLibfabricEngine::nixlLibfabricEngine(const nixlBackendInitParams *init_param
         cleanup();
         throw;
     }
+}
+
+std::unique_ptr<nixlLibfabricEngine>
+nixlLibfabricEngine::create(const nixlBackendInitParams &init_params) {
+    nixl::proxyConfig proxy_config;
+    if (nixl::parseProxyConfig(init_params, proxy_config) != NIXL_SUCCESS) {
+        nixl::throwRuntimeError("invalid device proxy configuration");
+    }
+
+    if (!proxy_config.enabled) {
+        return std::make_unique<nixlLibfabricEngine>(&init_params);
+    }
+    if (nixl::getBackendParamDefaulted(init_params.customParams, "num_threads", 0u) > 0) {
+        nixl::throwRuntimeError(
+            "num_threads is not supported with device_proxy=true; use proxy_thread_count");
+    }
+    return std::make_unique<nixl::libfabric::proxyEngine>(init_params, proxy_config);
 }
 
 void
