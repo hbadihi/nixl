@@ -451,23 +451,29 @@ validateDeviceAPIConfig() {
         std::cerr << "Invalid configuration for NIXL Device API: " << reason << std::endl;
         return false;
     };
-#ifdef HAVE_UCX_GPU_DEVICE_API
+#ifdef NIXLBENCH_DEVICE_API
     if (xferBenchConfig::worker_type != XFERBENCH_WORKER_NIXL) {
         return reject("worker_type must be nixl");
+    }
+    const bool proxy = xferBenchConfig::device_mode == XFERBENCH_DEVICE_MODE_PROXY;
+    if (!proxy && xferBenchConfig::device_mode != XFERBENCH_DEVICE_MODE_DIRECT) {
+        return reject("device_mode must be direct or proxy");
     }
     if (xferBenchConfig::backend != XFERBENCH_BACKEND_UCX) {
         return reject("backend must be UCX");
     }
+#ifndef HAVE_UCX_GPU_DEVICE_API
+    if (!proxy) {
+        return reject("device_mode=direct needs UCX GPU Device API support, which is not enabled "
+                      "in this build; set -Ducx_path=<path> with UCX GPU device headers available");
+    }
+#endif
     if (xferBenchConfig::op_type != XFERBENCH_OP_WRITE) {
         return reject("op_type must be WRITE");
     }
     if (xferBenchConfig::initiator_seg_type != XFERBENCH_SEG_TYPE_VRAM ||
         xferBenchConfig::target_seg_type != XFERBENCH_SEG_TYPE_VRAM) {
         return reject("initiator_seg_type and target_seg_type must be VRAM");
-    }
-    const bool proxy = xferBenchConfig::device_mode == XFERBENCH_DEVICE_MODE_PROXY;
-    if (!proxy && xferBenchConfig::device_mode != XFERBENCH_DEVICE_MODE_DIRECT) {
-        return reject("device_mode must be direct or proxy");
     }
     if (proxy) {
         if (xferBenchConfig::progress_threads != 0) {
@@ -496,8 +502,8 @@ validateDeviceAPIConfig() {
     }
     return true;
 #else
-    return reject("UCX GPU Device API support is not enabled in this build. "
-                  "Set -Ducx_path=<path> with UCX GPU device headers available");
+    return reject("NIXL Device API support is not enabled in this build; "
+                  "it needs CUDA >= 12.8 and nvcc");
 #endif
 }
 
