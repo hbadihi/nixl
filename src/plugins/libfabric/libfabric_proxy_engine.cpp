@@ -17,6 +17,7 @@
 
 #include "libfabric_proxy_engine.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <deque>
 #include <memory>
@@ -154,7 +155,6 @@ private:
         std::vector<op> ops;
         size_t next_op = 0;
         size_t next_rail = 0;
-        size_t next_endpoint = 0;
         uint32_t in_flight = 0;
         uint64_t next_seq = 0;
         uint64_t scan_seq = 0;
@@ -242,8 +242,10 @@ private:
             return NIXL_ERR_INVALID_PARAM;
         }
         ring.put_rail = rail_id;
+        const auto &rails = lmd->selected_rails_;
+        const size_t rail_pos = std::find(rails.begin(), rails.end(), static_cast<size_t>(rail_id)) - rails.begin();
         const auto &endpoints = rmd->remote_selected_endpoints_;
-        const size_t remote_ep = endpoints[ring.next_endpoint++ % endpoints.size()];
+        const size_t remote_ep = endpoints[rail_pos % endpoints.size()];
         nixlLibfabricRail &rail = rails_.getRail(rail_id);
         const fi_addr_t dest = rmd->conn_->rail_remote_addr_list_.at(rail_id)[remote_ep];
         uint64_t remote_addr = remote.addr;
