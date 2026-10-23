@@ -111,6 +111,7 @@ def test_main(
     seed: int = 0,
     kineto: bool = False,
     fault_tolerance_test: bool = False,
+    dispatch_only: bool = False,
 ):
     torch.manual_seed(seed + rank)
     torch.cuda.manual_seed(seed + rank)
@@ -407,6 +408,8 @@ def test_main(
             return_recv_hook=return_recv_hook,
         )
         return_recv_hook and large_gemm_with_hook(hook)
+        if dispatch_only:
+            return
         combined_x, event, hook = buffer.combine(
             simulated_gemm_x,
             topk_idx,
@@ -433,8 +436,12 @@ def test_main(
 
     # Dispatch + combine testing
     avg_t, min_t, max_t = bench(partial(test_func, return_recv_hook=False))
+    label = "Dispatch" if dispatch_only else "Dispatch + combine"
+    comm_bytes = num_dispatch_comm_bytes + (
+        0 if dispatch_only else num_combine_comm_bytes
+    )
     print(
-        f"[rank {rank}] Dispatch + combine bandwidth: {(num_dispatch_comm_bytes + num_combine_comm_bytes) / 1e9 / avg_t:.2f} GB/s, "
+        f"[rank {rank}] {label} bandwidth: {comm_bytes / 1e9 / avg_t:.2f} GB/s, "
         f"avg_t={avg_t * 1e6:.2f} us, min_t={min_t * 1e6:.2f} us, max_t={max_t * 1e6:.2f} us",
         flush=True,
     )
@@ -588,6 +595,7 @@ def worker(torch_rank: int, args: argparse.Namespace):
             buffer,
             kineto=args.kineto,
             fault_tolerance_test=kill_rank,
+            dispatch_only=args.dispatch_only,
         )
         # Query mask buffer to detect rank failures and clean them up
         buffer.query_mask_buffer(mask_status)
@@ -658,6 +666,11 @@ def main():
     )
     parser.add_argument("--kineto", action="store_true", help="Enable kineto profiling")
     parser.add_argument(
+        "--dispatch-only",
+        action="store_true",
+        help="Benchmark dispatch only and skip combine",
+    )
+    parser.add_argument(
         "--disable-ll-nvlink",
         action="store_true",
         help="Disable NVLink communication for low-latency kernels",
@@ -681,6 +694,9 @@ def main():
         server_process = torch.multiprocessing.Process(target=run_server, daemon=True)
         server_process.start()
         time.sleep(0.5)
+
+    if args.kineto and args.dispatch_only:
+        raise SystemExit("--kineto cannot be combined with --dispatch-only")
 
     if args.kineto and not kineto_cuda_available(0):
         raise SystemExit("Kineto profiling was requested but is not supported")
