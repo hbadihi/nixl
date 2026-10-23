@@ -80,8 +80,10 @@ A performance number counts only if these pass.
 ## Recording a run
 
 One row per run, in a results file (not here): date, commit, eval ID, preconditions held (y/n), metrics #1-#5, C1/C2 result.
-Repeat each eval 5 times; report the median of #1 and the worst of #2 and #5.
+Run each eval once; runs must stay fast (seconds). Repeat a run only to confirm a difference that is close to the
+run-to-run spread (about 1%).
 
 ## Changelog
 
 - Defined E1 and E2 (4 ranks, dispatch only) and metrics #1-#5. E2 replaces the earlier 8-rank dispatch+combine run.
+- Run each eval once instead of 5 times (fast runs). Metric definitions are unchanged, so earlier numbers stay comparable.
