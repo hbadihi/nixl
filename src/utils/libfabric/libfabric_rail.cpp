@@ -790,6 +790,11 @@ nixlLibfabricRail::setNotificationCallback(
 }
 
 void
+nixlLibfabricRail::setAtomicCallback(std::function<void(const void *, size_t)> callback) {
+    atomicCallback = std::move(callback);
+}
+
+void
 nixlLibfabricRail::setHandshakeCallback(std::function<void(const std::string &)> callback) {
     handshakeCallback = callback;
 }
@@ -1131,6 +1136,13 @@ nixlLibfabricRail::processRecvCompletion(struct fi_cq_data_entry *comp, fi_addr_
             NIXL_ERROR << "No transfer-error callback set on rail " << rail_id;
             result = NIXL_ERR_BACKEND;
         }
+    } else if (msg_type == NIXL_LIBFABRIC_MSG_ATOMIC) {
+        if (atomicCallback) {
+            atomicCallback(req->buffer, comp->len);
+        } else {
+            NIXL_ERROR << "No atomic callback set on rail " << rail_id;
+            result = NIXL_ERR_BACKEND;
+        }
     } else if (msg_type == NIXL_LIBFABRIC_MSG_HANDSHAKE) {
         if (comp->len < 4) {
             NIXL_ERROR << "Handshake message too short on rail " << rail_id << " (len=" << comp->len
@@ -1148,7 +1160,7 @@ nixlLibfabricRail::processRecvCompletion(struct fi_cq_data_entry *comp, fi_addr_
     }
 
     // Clear the receive buffer after processing
-    memset(req->buffer, 0, req->buffer_size);
+    memset(req->buffer, 0, msg_type == NIXL_LIBFABRIC_MSG_ATOMIC ? comp->len : req->buffer_size);
 
     releaseRequest(req);
 

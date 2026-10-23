@@ -79,8 +79,16 @@ public:
     void
     releaseMemView(nixlMemViewH mem_view) const override;
 
+    /** Also maps VRAM through GDRCopy, so the proxy threads can apply atomic adds to it. */
+    nixl_status_t
+    registerMem(const nixlBlobDesc &mem, const nixl_mem_t &nixl_mem, nixlBackendMD *&out) override;
+
+    nixl_status_t
+    deregisterMem(nixlBackendMD *meta) override;
+
 private:
     class transport;
+    class atomicTargets;
 
     template<typename DlistT>
     nixl_status_t
@@ -88,6 +96,7 @@ private:
 
     nixl::deviceOps &ops_;
     const uint32_t thread_count_;
+    std::unique_ptr<atomicTargets> atomic_targets_;
     std::unique_ptr<nixl::proxyRuntime> runtime_;
 };
 } // namespace nixl::libfabric

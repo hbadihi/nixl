@@ -559,6 +559,11 @@ public:
     void
     setHandshakeCallback(std::function<void(const std::string &)> callback);
 
+    /** Set callback for NIXL_LIBFABRIC_MSG_ATOMIC payloads; it runs on the thread that
+     *  progresses this rail. */
+    void
+    setAtomicCallback(std::function<void(const void *, size_t)> callback);
+
     /**
      * @brief Enable or disable a progress thread that handles CQ draining.
      *
@@ -664,6 +669,7 @@ private:
     // Callback functions. Receive completions carry the sender's index in OUR table,
     // resolved from the completion's source address (see resolveSourceAddress()).
     std::function<void(const std::string &, uint32_t)> notificationCallback;
+    std::function<void(const void *, size_t)> atomicCallback;
     std::function<void(uint64_t, uint32_t)> xferIdCallback;
     std::function<void(const std::string &)> handshakeCallback;
     std::function<void(uint16_t, uint32_t, uint32_t)> xferErrorCallback;

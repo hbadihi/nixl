@@ -97,6 +97,8 @@ constexpr const char *NIXL_HANDSHAKE_TAG_CONN = "conn";
 #define NIXL_LIBFABRIC_MSG_XFER_ERROR 1
 #define NIXL_LIBFABRIC_MSG_NOTIFICTION 2
 #define NIXL_LIBFABRIC_MSG_TRANSFER 4
+// Device proxy atomic add, applied by the target proxy thread that owns the receiving rail.
+#define NIXL_LIBFABRIC_MSG_ATOMIC 3
 // Peer-id handshake message. Sent once per (peer A, peer B) pair after
 // connection setup. Carries assigned agent index, sender name, and optionally
 // connection info. See libfabric_handshake.cpp for wire-format details.

@@ -19,6 +19,11 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
+#include <dlfcn.h>
+#include <immintrin.h>
+#include <shared_mutex>
+#include <unordered_map>
 #include <deque>
 #include <memory>
 #include <string>
@@ -32,11 +37,144 @@
 #include "device/proxy/proxy_runtime.h"
 #include "device/proxy/proxy_transport.h"
 
+#ifdef HAVE_CUDA
+#include <cuda_runtime.h>
+#endif
+
 namespace nixl::libfabric {
+class proxyEngine::atomicTargets {
+public:
+    [[nodiscard]] static std::unique_ptr<atomicTargets>
+    create() {
+        void *lib = dlopen("libgdrapi.so.2", RTLD_NOW | RTLD_LOCAL);
+        if (lib == nullptr) {
+            lib = dlopen("libgdrapi.so", RTLD_NOW | RTLD_LOCAL);
+        }
+        if (lib == nullptr) {
+            return nullptr;
+        }
+        std::unique_ptr<atomicTargets> targets(new atomicTargets(lib));
+        if (!targets->load() || (targets->gdr_ = targets->api_.open()) == nullptr) {
+            return nullptr;
+        }
+        return targets;
+    }
+
+    ~atomicTargets() {
+        for (auto &[key, m] : maps_) {
+            unmap(m);
+        }
+        if (gdr_ != nullptr) {
+            api_.close(gdr_);
+        }
+        dlclose(lib_);
+    }
+
+    void
+    add(const nixlBackendMD *key, uintptr_t addr, size_t len) {
+        const uintptr_t start = addr & ~(kGpuPageSize - 1);
+        const size_t size = ((addr + len + kGpuPageSize - 1) & ~(kGpuPageSize - 1)) - start;
+        mapping m{start, size, {}, nullptr};
+        std::unique_lock lock(mutex_);
+        if (api_.pin_buffer(gdr_, start, size, 0, 0, &m.mh) != 0) {
+            NIXL_WARN << "device proxy: GDRCopy cannot pin " << reinterpret_cast<void *>(addr)
+                      << "; atomic adds to it go through cudaMemcpy";
+            return;
+        }
+        if (api_.map(gdr_, m.mh, &m.cpu, size) != 0) {
+            api_.unpin_buffer(gdr_, m.mh);
+            NIXL_WARN << "device proxy: GDRCopy cannot map " << reinterpret_cast<void *>(addr);
+            return;
+        }
+        maps_.emplace(key, m);
+    }
+
+    void
+    remove(const nixlBackendMD *key) {
+        std::unique_lock lock(mutex_);
+        auto it = maps_.find(key);
+        if (it != maps_.end()) {
+            unmap(it->second);
+            maps_.erase(it);
+        }
+    }
+
+    [[nodiscard]] uint64_t *
+    lookup(uint64_t va) const {
+        std::shared_lock lock(mutex_);
+        for (const auto &[key, m] : maps_) {
+            if (va >= m.start && va - m.start < m.size) {
+                return reinterpret_cast<uint64_t *>(static_cast<char *>(m.cpu) + (va - m.start));
+            }
+        }
+        return nullptr;
+    }
+
+private:
+    // GDRCopy ABI, unchanged since 2.0, declared from gdrapi.h
+    // (Copyright (c) 2014-2021, NVIDIA CORPORATION, MIT).
+    struct gdr;
+    using gdr_t = gdr *;
+
+    struct gdr_mh_t {
+        unsigned long h;
+    };
+
+    struct gdrApi {
+        gdr_t (*open)();
+        int (*close)(gdr_t);
+        int (*pin_buffer)(gdr_t, unsigned long, size_t, uint64_t, uint32_t, gdr_mh_t *);
+        int (*unpin_buffer)(gdr_t, gdr_mh_t);
+        int (*map)(gdr_t, gdr_mh_t, void **, size_t);
+        int (*unmap)(gdr_t, gdr_mh_t, void *, size_t);
+    };
+
+    struct mapping {
+        uintptr_t start;
+        size_t size;
+        gdr_mh_t mh;
+        void *cpu;
+    };
+
+    static constexpr uintptr_t kGpuPageSize = uintptr_t{1} << 16;
+
+    explicit atomicTargets(void *lib) : lib_(lib) {}
+
+    template<typename Fn>
+    bool
+    loadSymbol(const char *name, Fn &fn) {
+        fn = reinterpret_cast<Fn>(dlsym(lib_, name));
+        return fn != nullptr;
+    }
+
+    bool
+    load() {
+        return loadSymbol("gdr_open", api_.open) && loadSymbol("gdr_close", api_.close) &&
+            loadSymbol("gdr_pin_buffer", api_.pin_buffer) &&
+            loadSymbol("gdr_unpin_buffer", api_.unpin_buffer) && loadSymbol("gdr_map", api_.map) &&
+            loadSymbol("gdr_unmap", api_.unmap);
+    }
+
+    void
+    unmap(mapping &m) {
+        api_.unmap(gdr_, m.mh, m.cpu, m.size);
+        api_.unpin_buffer(gdr_, m.mh);
+    }
+
+    void *lib_;
+    gdrApi api_{};
+    gdr_t gdr_ = nullptr;
+    mutable std::shared_mutex mutex_;
+    std::unordered_map<const nixlBackendMD *, mapping> maps_;
+};
+
 class proxyEngine::transport final : public nixl::proxyTransport {
 public:
-    transport(nixlLibfabricRailManager &rails, const nixl::proxyConfig &config)
-        : rails_(rails),
+    transport(nixlLibfabricRailManager &rails,
+              const nixl::proxyConfig &config,
+              const atomicTargets *atomic_targets)
+        : atomic_targets_(atomic_targets),
+          rails_(rails),
           max_peers_(config.max_peers),
           thread_count_(config.thread_count),
           threads_(config.thread_count),
@@ -46,7 +184,17 @@ public:
             thread.pending.resize(rails_.getNumRails());
         }
         for (size_t rail_id = 0; rail_id < rails_.getNumRails(); ++rail_id) {
-            threads_[rail_id % thread_count_].rails.push_back(rail_id);
+            threadState &owner = threads_[rail_id % thread_count_];
+            owner.rails.push_back(rail_id);
+            if (atomic_targets_ != nullptr) {
+                rails_.getRail(rail_id).setAtomicCallback([&owner](const void *data, size_t len) {
+                    if (len == sizeof(atomicAdd)) {
+                        atomicAdd add;
+                        memcpy(&add, data, sizeof(add));
+                        owner.atomic_adds.push_back(add);
+                    }
+                });
+            }
         }
         for (uint32_t channel = 0; channel < config.channel_count; ++channel) {
             for (uint32_t peer = 0; peer < max_peers_; ++peer) {
@@ -164,8 +312,15 @@ private:
         bool anchor = false;
     };
 
+    struct atomicAdd {
+        uint64_t addr;
+        uint64_t value;
+    };
+
     struct alignas(64) threadState {
         std::vector<size_t> rails;
+        std::vector<atomicAdd> atomic_adds;
+        std::vector<uint64_t *> atomic_ptrs;
         std::vector<uint32_t> in_flight;
         std::vector<std::vector<op *>> pending;
         bool has_pending = false;
@@ -179,13 +334,75 @@ private:
     }
 
     void
-    pollRails(const threadState &thread, bool sweep) noexcept {
+    pollRails(threadState &thread, bool sweep) noexcept {
         nixlLibfabricRail::setProgressingThread(true);
         for (const size_t rail_id : thread.rails) {
             if (sweep || thread.in_flight[rail_id] != 0) {
                 rails_.getRail(rail_id).progressCompletionQueue();
             }
         }
+        if (!thread.atomic_adds.empty()) {
+            applyAtomicAdds(thread);
+        }
+    }
+
+    __attribute__((target("sse4.1"))) void
+    applyAtomicAdds(threadState &thread) noexcept {
+        std::vector<atomicAdd> &adds = thread.atomic_adds;
+        std::vector<uint64_t *> &ptrs = thread.atomic_ptrs;
+        ptrs.resize(adds.size());
+        for (size_t i = 0; i < adds.size(); ++i) {
+            ptrs[i] = atomic_targets_->lookup(adds[i].addr);
+            if (ptrs[i] == nullptr) {
+                applySlow(adds[i]);
+            }
+        }
+        constexpr size_t kBatch = 32;
+        uint64_t values[kBatch];
+        for (size_t base = 0; base < adds.size(); base += kBatch) {
+            const size_t n = std::min(kBatch, adds.size() - base);
+            for (size_t i = 0; i < n; ++i) {
+                const uintptr_t p = reinterpret_cast<uintptr_t>(ptrs[base + i]);
+                if (p != 0) {
+                    const __m128i line = _mm_stream_load_si128(reinterpret_cast<__m128i *>(p & ~uintptr_t{15}));
+                    values[i] = (p & 8) ? _mm_extract_epi64(line, 1) : _mm_extract_epi64(line, 0);
+                }
+            }
+            for (size_t i = 0; i < n; ++i) {
+                uint64_t *p = ptrs[base + i];
+                if (p == nullptr) {
+                    continue;
+                }
+                uint64_t sum = values[i] + adds[base + i].value;
+                for (size_t j = i + 1; j < n; ++j) {
+                    if (ptrs[base + j] == p) {
+                        sum += adds[base + j].value;
+                        ptrs[base + j] = nullptr;
+                    }
+                }
+                *reinterpret_cast<volatile uint64_t *>(p) = sum;
+            }
+        }
+        _mm_sfence();
+        adds.clear();
+    }
+
+    static void
+    applySlow(const atomicAdd &add) noexcept {
+#ifdef HAVE_CUDA
+        uint64_t value = 0;
+        void *counter = reinterpret_cast<void *>(add.addr);
+        if (cudaMemcpy(&value, counter, sizeof(value), cudaMemcpyDeviceToHost) != cudaSuccess) {
+            NIXL_ERROR << "device proxy: cannot read counter " << counter;
+            return;
+        }
+        value += add.value;
+        if (cudaMemcpy(counter, &value, sizeof(value), cudaMemcpyHostToDevice) != cudaSuccess) {
+            NIXL_ERROR << "device proxy: cannot write counter " << counter;
+        }
+#else
+        NIXL_ERROR << "device proxy: no GDRCopy mapping for counter " << add.addr;
+#endif
     }
 
     [[nodiscard]] op *
@@ -293,7 +510,7 @@ private:
         const size_t rail_id =
             ring.put_rail >= 0 ? ring.put_rail : threads_[ring.thread].rails.front();
         nixlLibfabricRail &rail = rails_.getRail(rail_id);
-        if (!(rail.getRailInfo()->caps & FI_ATOMIC)) {
+        if (atomic_targets_ == nullptr && !(rail.getRailInfo()->caps & FI_ATOMIC)) {
             NIXL_ERROR << "device proxy: rail " << rail_id << " provider has no FI_ATOMIC";
             return NIXL_ERR_NOT_SUPPORTED;
         }
@@ -310,10 +527,16 @@ private:
             return NIXL_ERR_BACKEND;
         }
         record->operand = submission.value;
-        nixlLibfabricReq *req = rail.allocateDataRequest(nixlLibfabricReq::WRITE, 0);
+        nixlLibfabricReq *req = atomic_targets_ != nullptr ?
+            rail.allocateControlRequest(sizeof(atomicAdd), 0) :
+            rail.allocateDataRequest(nixlLibfabricReq::WRITE, 0);
         if (req == nullptr) {
             record->busy = false;
             return NIXL_ERR_BACKEND;
+        }
+        if (atomic_targets_ != nullptr) {
+            const atomicAdd add{remote.addr, submission.value};
+            memcpy(req->buffer, &add, sizeof(add));
         }
         req->completion_callback = [record](nixl_status_t status) { record->complete(status); };
         record->req = req;
@@ -346,6 +569,10 @@ private:
     [[nodiscard]] nixl_status_t
     postAtomic(op &record) noexcept {
         nixlLibfabricRail &rail = rails_.getRail(record.rail_id);
+        if (atomic_targets_ != nullptr) {
+            return rail.postSend(
+                NIXL_MAKE_IMM_DATA(NIXL_LIBFABRIC_MSG_ATOMIC, 0, 0), record.dest, record.req);
+        }
         nixl_status_t status;
         while ((status = rail.tryPostAtomicAdd(&record.operand,
                                                record.dest,
@@ -430,6 +657,7 @@ private:
         return NIXL_IN_PROG;
     }
 
+    const atomicTargets *atomic_targets_;
     nixlLibfabricRailManager &rails_;
     const uint32_t max_peers_;
     const uint32_t thread_count_;
@@ -486,9 +714,16 @@ proxyEngine::proxyEngine(const nixlBackendInitParams &init_params, const nixl::p
                   << "handles every put";
     }
 
+    atomic_targets_ = atomicTargets::create();
+    if (atomic_targets_ == nullptr) {
+        NIXL_INFO << "device proxy: GDRCopy is unavailable; atomic adds use provider atomics";
+    }
+
     setExternalProgress(true);
     runtime_ = nixl::proxyRuntime::create(
-        std::make_unique<transport>(railManager(), config), runtimeConfig(config), ops_);
+        std::make_unique<transport>(railManager(), config, atomic_targets_.get()),
+        runtimeConfig(config),
+        ops_);
     NIXL_INFO << "Engine-owned device proxy enabled: " << config.channel_count << " channel(s), "
               << config.thread_count << " thread(s) over " << num_rails
               << " rail(s), max_peers=" << config.max_peers << ", ring_depth=" << config.ring_depth;
@@ -497,6 +732,23 @@ proxyEngine::proxyEngine(const nixlBackendInitParams &init_params, const nixl::p
 proxyEngine::~proxyEngine() {
     runtime_.reset();
     setExternalProgress(false);
+}
+
+nixl_status_t
+proxyEngine::registerMem(const nixlBlobDesc &mem, const nixl_mem_t &nixl_mem, nixlBackendMD *&out) {
+    const nixl_status_t status = nixlLibfabricEngine::registerMem(mem, nixl_mem, out);
+    if (status == NIXL_SUCCESS && nixl_mem == VRAM_SEG && atomic_targets_ != nullptr) {
+        atomic_targets_->add(out, mem.addr, mem.len);
+    }
+    return status;
+}
+
+nixl_status_t
+proxyEngine::deregisterMem(nixlBackendMD *meta) {
+    if (atomic_targets_ != nullptr) {
+        atomic_targets_->remove(meta);
+    }
+    return nixlLibfabricEngine::deregisterMem(meta);
 }
 
 nixl_status_t
