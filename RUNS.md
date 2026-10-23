@@ -68,8 +68,9 @@ Every E2 run reports all of these. Each answers a different question.
 Notes:
 - Compare p50, p90 and p99 separately; a change that moves only p99 is a tail effect, not a throughput effect.
 - Report the main metric together with #2 and #5; a faster average with a worse max_t or any ring-full wait is not a win.
-- Instrumentation status: #1 and #2 are printed today. #3, #4 and #5 are **not instrumented yet**; report them as `n/a` until they are added.
-  Adding them is a code change, not an eval change, and must not alter timing when disabled.
+- Instrumentation: #1 and #2 are always printed. #3, #4 and #5 are printed per rank when E2 runs with `NIXL_EP_PROBE=1`
+  (`dispatch nixlPut time`, `dispatch nixlAtomicAdd time`, `Ring-full waits`). The probes cost about 0.6% of #1, so take
+  #1 and #2 from a run without `NIXL_EP_PROBE`, and #3 to #5 from a second run with it.
 
 ## Correctness gates
 
@@ -87,3 +88,4 @@ run-to-run spread (about 1%).
 
 - Defined E1 and E2 (4 ranks, dispatch only) and metrics #1-#5. E2 replaces the earlier 8-rank dispatch+combine run.
 - Run each eval once instead of 5 times (fast runs). Metric definitions are unchanged, so earlier numbers stay comparable.
+- Metrics #3 to #5 are instrumented (`NIXL_EP_PROBE=1`, commit "nixl ep: measure the time of nixlPut, nixlAtomicAdd and ring-full waits"). Read them from a second E2 run.
