@@ -91,6 +91,21 @@ void update_mask_buffer(int* mask_buffer_ptr, int rank_to_mask, bool mask, cudaS
 
 void cache_p2p_ptr(gpu_nixl_ctx* nixl_ctx, int rank_id, cudaStream_t stream);
 
+// Kernel probes: time in nixlPut / nixlAtomicAdd per call site, and ring-full waits.
+constexpr int kProbeDispatchPut = 0;
+constexpr int kProbeDispatchAtomic = 1;
+constexpr int kProbeCombinePut = 2;
+constexpr int kProbeCombineAtomic = 3;
+constexpr int kProbeKinds = 4;
+constexpr int kProbeBuckets = 4096;
+constexpr int kProbeBucketNs = 500;
+
+// Enables or disables the probes and clears their counters.
+void probe_start(bool enable);
+
+// Histograms (kProbeKinds x kProbeBuckets), then ring-full wait count and wait ns.
+std::vector<uint64_t> probe_read();
+
 } // namespace ep_kernels
 
 } // namespace nixl_ep

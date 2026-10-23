@@ -500,3 +500,17 @@ class Buffer:
         Does not flush network QPs, since there is currently no use case that requires it.
         """
         self.runtime.barrier()
+
+    def probe_start(self, enable: bool = True) -> None:
+        """
+        Enable or disable the kernel probes and clear their counters.
+        """
+        self.runtime.probe_start(enable)
+
+    def probe_read(self) -> List[int]:
+        """
+        Read the kernel probes: the time histograms of the nixlPut and nixlAtomicAdd calls
+        (dispatch put, dispatch atomic, combine put, combine atomic; 4096 buckets of 0.5 us
+        each), then the count and the total ns of the ring-full waits.
+        """
+        return self.runtime.probe_read()

@@ -264,6 +264,14 @@ void Buffer::barrier() {
     ep_kernels::barrier(gpu_ctx_ptr, mask_buffer_ptr, timeout_cycles, cuda_stream::get_current());
 }
 
+void Buffer::probe_start(bool enable) {
+    ep_kernels::probe_start(enable);
+}
+
+std::vector<uint64_t> Buffer::probe_read() const {
+    return ep_kernels::probe_read();
+}
+
 void Buffer::_nixl_agents_connect(const std::vector<int>& ranks, const std::vector<nixl_blob_t>& remote_mds) {
     EP_HOST_ASSERT(!ranks.empty());
     EP_HOST_ASSERT(remote_mds.empty() || remote_mds.size() == ranks.size());
@@ -915,6 +923,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         .def(pybind11::init<int, bool, int>())
         .def("update_memory_buffers", &nixl_ep::Buffer::update_memory_buffers)
         .def("barrier", &nixl_ep::Buffer::barrier)
+        .def("probe_start", &nixl_ep::Buffer::probe_start)
+        .def("probe_read", &nixl_ep::Buffer::probe_read)
         .def("connect_ranks", [](nixl_ep::Buffer &buffer, const std::vector<int>& remote_ranks, const std::optional<std::vector<pybind11::bytes>>& remote_mds, bool activate) {
             buffer.connect_ranks(remote_ranks, nixl_ep::convert_mds(remote_mds), activate);
         }, py::arg("remote_ranks"), py::arg("remote_mds") = std::nullopt, py::arg("activate") = true)

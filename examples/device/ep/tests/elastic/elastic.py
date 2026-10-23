@@ -97,6 +97,36 @@ def self_kill():
     os.kill(os.getpid(), signal.SIGTERM)
 
 
+PROBE_KINDS = ["dispatch nixlPut", "dispatch nixlAtomicAdd", "combine nixlPut", "combine nixlAtomicAdd"]
+PROBE_BUCKETS, PROBE_BUCKET_US = 4096, 0.5
+
+
+def print_probe(rank: int, counters: list):
+    for kind, name in enumerate(PROBE_KINDS):
+        hist = counters[kind * PROBE_BUCKETS : (kind + 1) * PROBE_BUCKETS]
+        total = sum(hist)
+        if total == 0:
+            continue
+        pcts = []
+        for q in (0.50, 0.90, 0.99):
+            acc, target = 0, q * total
+            for bucket, count in enumerate(hist):
+                acc += count
+                if acc >= target:
+                    pcts.append((bucket + 0.5) * PROBE_BUCKET_US)
+                    break
+        print(
+            f"[rank {rank}] {name} time: n={total}, p50={pcts[0]:.1f} us, "
+            f"p90={pcts[1]:.1f} us, p99={pcts[2]:.1f} us",
+            flush=True,
+        )
+    waits, wait_ns = counters[-2], counters[-1]
+    print(
+        f"[rank {rank}] Ring-full waits: count={waits}, total={wait_ns / 1e3:.1f} us",
+        flush=True,
+    )
+
+
 def test_main(
     num_tokens: int,
     max_tokens_per_rank: int,
@@ -435,6 +465,9 @@ def test_main(
         ) * num_selections
 
     # Dispatch + combine testing
+    probe = os.environ.get("NIXL_EP_PROBE") == "1"
+    if probe:
+        buffer.probe_start()
     avg_t, min_t, max_t = bench(partial(test_func, return_recv_hook=False))
     label = "Dispatch" if dispatch_only else "Dispatch + combine"
     comm_bytes = num_dispatch_comm_bytes + (
@@ -445,6 +478,9 @@ def test_main(
         f"avg_t={avg_t * 1e6:.2f} us, min_t={min_t * 1e6:.2f} us, max_t={max_t * 1e6:.2f} us",
         flush=True,
     )
+    if probe:
+        print_probe(rank, buffer.probe_read())
+        buffer.probe_start(False)
 
     # Separate profiling
     if not kineto:

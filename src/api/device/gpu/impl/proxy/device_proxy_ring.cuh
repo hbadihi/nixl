@@ -26,6 +26,17 @@
 
 namespace nixl::gpu::impl::proxy {
 
+// Waits for a free ring slot in this translation unit: count and total time in ns.
+static __device__ unsigned long long proxyRingFullWaits;
+static __device__ unsigned long long proxyRingFullNs;
+
+__device__ __forceinline__ uint64_t
+proxyGlobalTimerNs() {
+    uint64_t t;
+    asm volatile("mov.u64 %0, %%globaltimer;" : "=l"(t));
+    return t;
+}
+
 // Overlay struct written into xferStatusH::storage by enqueue()
 // and read back by pollXferStatus().  Must fit within the 64-byte opaque blob.
 struct proxyXferStatus {
@@ -83,14 +94,23 @@ struct proxyDeviceContext : nixlProxyDeviceContextData {
         // Fast path: use the device cache. Refresh from host only if the ring
         // appears full, since mapped-host loads are much slower than HBM loads.
         uint64_t cached_consumer_idx = *ring->consumer_idx_cache;
+        uint64_t wait_start = 0;
         while (ticket - cached_consumer_idx >= ring->depth) {
             cached_consumer_idx = cons.load(cuda::memory_order_acquire);
             *ring->consumer_idx_cache = cached_consumer_idx;
+            if (wait_start == 0 && ticket - cached_consumer_idx >= ring->depth) {
+                wait_start = proxyGlobalTimerNs();
+            }
 
             if (shut.load(cuda::memory_order_relaxed) ==
                 static_cast<uint64_t>(nixl_proxy_control_state_t::SHUTDOWN)) {
                 return NIXL_ERR_BACKEND;
             }
+        }
+        if (wait_start != 0) {
+            atomicAdd(&proxyRingFullWaits, 1ull);
+            atomicAdd(&proxyRingFullNs,
+                      static_cast<unsigned long long>(proxyGlobalTimerNs() - wait_start));
         }
 
         const uint64_t submission_op_idx = ticket + 1;

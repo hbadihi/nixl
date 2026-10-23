@@ -201,6 +201,10 @@ public:
 
     void barrier();
 
+    void probe_start(bool enable);
+
+    std::vector<uint64_t> probe_read() const;
+
     torch::Tensor
     get_next_combine_buffer(int num_max_dispatch_tokens_per_rank, int hidden,
                             int rank_bound) const;
