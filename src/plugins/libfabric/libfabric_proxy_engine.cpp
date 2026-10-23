@@ -188,9 +188,9 @@ public:
             owner.rails.push_back(rail_id);
             if (atomic_targets_ != nullptr) {
                 rails_.getRail(rail_id).setAtomicCallback([&owner](const void *data, size_t len) {
-                    if (len == sizeof(atomicAdd)) {
+                    for (size_t off = 0; off + sizeof(atomicAdd) <= len; off += sizeof(atomicAdd)) {
                         atomicAdd add;
-                        memcpy(&add, data, sizeof(add));
+                        memcpy(&add, static_cast<const char *>(data) + off, sizeof(add));
                         owner.atomic_adds.push_back(add);
                     }
                 });
@@ -277,6 +277,7 @@ private:
         uint32_t *rail_in_flight = nullptr;
         uint64_t operand = 0;
         nixlLibfabricReq *req = nullptr;
+        op *batch_next = nullptr;
         const void *local_addr = nullptr;
         size_t len = 0;
         void *local_desc = nullptr;
@@ -325,6 +326,7 @@ private:
         std::vector<std::vector<op *>> pending;
         bool has_pending = false;
         std::vector<ringState *> parked_rings;
+        std::vector<op *> ready_atomics;
         uint32_t passes = 0;
     };
 
@@ -545,7 +547,8 @@ private:
         record->remote_key = rmd->rail_remote_key_list_[remote_ep];
         record->rail_id = rail_id;
 
-        if (ring.parked.empty() && putsBeforeDone(ring, record->seq)) {
+        if (atomic_targets_ == nullptr && ring.parked.empty() &&
+            putsBeforeDone(ring, record->seq)) {
             return finishPost(rail, req, ring, record, postAtomic(*record));
         }
         if (ring.parked.empty()) {
@@ -593,6 +596,10 @@ private:
             while (!ring.parked.empty() && putsBeforeDone(ring, ring.parked.front()->seq)) {
                 op *record = ring.parked.front();
                 ring.parked.pop_front();
+                if (atomic_targets_ != nullptr) {
+                    thread.ready_atomics.push_back(record);
+                    continue;
+                }
                 const nixl_status_t status = postAtomic(*record);
                 if (status != NIXL_SUCCESS) {
                     rails_.getRail(record->rail_id).releaseRequest(record->req);
@@ -605,6 +612,58 @@ private:
             } else {
                 ++i;
             }
+        }
+        if (!thread.ready_atomics.empty()) {
+            postReadyAtomics(thread);
+        }
+    }
+
+    void
+    postReadyAtomics(threadState &thread) noexcept {
+        std::vector<op *> &ready = thread.ready_atomics;
+        for (size_t i = 0; i < ready.size(); ++i) {
+            op *head = ready[i];
+            if (head == nullptr) {
+                continue;
+            }
+            nixlLibfabricRail &rail = rails_.getRail(head->rail_id);
+            const size_t max_len = NIXL_LIBFABRIC_SEND_RECV_BUFFER_SIZE - sizeof(atomicAdd);
+            op *tail = head;
+            for (size_t j = i + 1; j < ready.size() && head->req->buffer_size <= max_len; ++j) {
+                op *other = ready[j];
+                if (other == nullptr || other->rail_id != head->rail_id ||
+                    other->dest != head->dest) {
+                    continue;
+                }
+                memcpy(static_cast<char *>(head->req->buffer) + head->req->buffer_size,
+                       other->req->buffer,
+                       sizeof(atomicAdd));
+                head->req->buffer_size += sizeof(atomicAdd);
+                rail.releaseRequest(other->req);
+                other->req = head->req;
+                tail->batch_next = other;
+                tail = other;
+                ready[j] = nullptr;
+            }
+            tail->batch_next = nullptr;
+            head->req->completion_callback = [head](nixl_status_t status) {
+                completeBatch(head, status);
+            };
+            const nixl_status_t status = postAtomic(*head);
+            if (status != NIXL_SUCCESS) {
+                rail.releaseRequest(head->req);
+                completeBatch(head, status);
+            }
+        }
+        ready.clear();
+    }
+
+    static void
+    completeBatch(op *head, nixl_status_t status) noexcept {
+        for (op *record = head; record != nullptr;) {
+            op *next = record->batch_next;
+            record->complete(status);
+            record = next;
         }
     }
 
