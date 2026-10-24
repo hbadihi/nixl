@@ -68,6 +68,22 @@ __device__ __forceinline__ uint64_t doorbell_flag(int idx) {
     return (idx + 1) % 4 == 0 ? 0 : nixl_gpu_flags::defer;
 }
 
+__device__ unsigned int stat_hist[kStatKinds][kStatBuckets];
+__device__ unsigned long long stat_min[kStatKinds], stat_max[kStatKinds];
+
+__device__ __forceinline__ uint64_t stat_now() {
+    uint64_t t;
+    asm volatile("mov.u64 %0, %%globaltimer;" : "=l"(t)::"memory");
+    return t;
+}
+
+__device__ __forceinline__ void stat_record(int kind, uint64_t start) {
+    const unsigned long long ns = stat_now() - start;
+    atomicAdd(&stat_hist[kind][min(ns / kStatBucketNs, kStatBuckets - 1ull)], 1u);
+    atomicMin(&stat_min[kind], ns);
+    atomicMax(&stat_max[kind], ns);
+}
+
 template <bool kUseFP8, bool kUseUE8M0, int kHidden>
 __global__ __launch_bounds__(1024, 1) void
 dispatch(void* packed_recv_x, void* packed_recv_x_scales,
@@ -199,8 +215,10 @@ dispatch(void* packed_recv_x, void* packed_recv_x_scales,
                     if (dst_p2p_ptr == 0) {
                         nixlMemViewElem src_mdesc{nixl_ctx.local_mvh, 0, nixl_ctx.offset_get(src_ptr)};
                         nixlMemViewElem dst_mdesc{nixl_ctx.remote_mvh, (size_t) dst_rank, nixl_ctx.offset_get(dst_ptr)};
+                        const auto stat_t0 = stat_now();
                         EP_DEVICE_ASSERT(nixlPut<nixl_gpu_level_t::WARP>(src_mdesc, dst_mdesc, num_bytes_per_msg,
                                 dst_expert_local_idx, doorbell_flag(slot_idx)) == NIXL_IN_PROG);
+                        if (lane_id == 0) stat_record(kStatDispatchPut, stat_t0);
                     } else {
                         // NOTES: only 2 load iterations for 7K hidden with 8 unrolls
                         const auto* src_int4_ptr = reinterpret_cast<const int4*>(src_ptr);
@@ -267,7 +285,9 @@ dispatch(void* packed_recv_x, void* packed_recv_x_scales,
             void* dst_p2p_ptr = p2p_ptr_get(nixl_ctx, dst_ptr, dst_rank);
             if (dst_p2p_ptr == 0) {
                 nixlMemViewElem dst_mdesc{nixl_ctx.remote_mvh, static_cast<size_t>(dst_rank), nixl_ctx.offset_get(dst_ptr)};
+                const auto stat_t0 = stat_now();
                 EP_DEVICE_ASSERT(nixlAtomicAdd(num_tokens_sent + 1, dst_mdesc, dst_expert_local_idx) == NIXL_IN_PROG);
+                stat_record(kStatDispatchAtomic, stat_t0);
             } else {
                 st_release_sys_global(static_cast<uint64_t*>(dst_p2p_ptr), static_cast<uint64_t>(num_tokens_sent + 1));
             }
@@ -803,8 +823,10 @@ combine(void* combined_x,
                 if (dst_p2p_ptr == 0) {
                     nixlMemViewElem src_mdesc{nixl_ctx.local_mvh, 0, nixl_ctx.offset_get(buf_ptr)};
                     nixlMemViewElem dst_mdesc{nixl_ctx.remote_mvh, (size_t) dst_rank, nixl_ctx.offset_get(dst_ptr)};
+                    const auto stat_t0 = stat_now();
                     EP_DEVICE_ASSERT(nixlPut<nixl_gpu_level_t::WARP>(src_mdesc, dst_mdesc, num_send_bytes,
                             local_expert_idx, doorbell_flag(token_idx - offset)) == NIXL_IN_PROG);
+                    if (lane_id == 0) stat_record(kStatCombinePut, stat_t0);
                 }
             }
         }
@@ -819,7 +841,9 @@ combine(void* combined_x,
                 void* dst_p2p_ptr = p2p_ptr_get(nixl_ctx, dst_ptr, dst_rank);
                 if (dst_p2p_ptr == 0) {
                     nixlMemViewElem dst_mdesc{nixl_ctx.remote_mvh, (size_t) dst_rank, nixl_ctx.offset_get(dst_ptr)};
+                    const auto stat_t0 = stat_now();
                     EP_DEVICE_ASSERT(nixlAtomicAdd(1, dst_mdesc, local_expert_idx) == NIXL_IN_PROG);
+                    stat_record(kStatCombineAtomic, stat_t0);
                 } else {
                     st_release_sys_global(static_cast<uint64_t*>(dst_p2p_ptr), 1);
                 }
@@ -1184,6 +1208,36 @@ void barrier(nixl_ep::gpu_nixl_ctx* nixl_ctx, int* mask_buffer_ptr, uint64_t tim
     constexpr int kNumThreads = 32;
     SETUP_LAUNCH_CONFIG(1, kNumThreads, stream);
     LAUNCH_KERNEL(&cfg, barrier_kernel<kNumThreads>, nixl_ctx, mask_buffer_ptr, timeout_cycles);
+}
+
+void stats_reset() {
+    void* ptr = nullptr;
+    const unsigned long long zero = 0;
+    CUDA_CHECK(cudaDeviceSynchronize());
+    CUDA_CHECK(cudaGetSymbolAddress(&ptr, stat_hist));
+    CUDA_CHECK(cudaMemset(ptr, 0, sizeof(stat_hist)));
+    CUDA_CHECK(cudaGetSymbolAddress(&ptr, stat_min));
+    CUDA_CHECK(cudaMemset(ptr, 0xff, sizeof(stat_min)));
+    CUDA_CHECK(cudaGetSymbolAddress(&ptr, stat_max));
+    CUDA_CHECK(cudaMemset(ptr, 0, sizeof(stat_max)));
+    CUDA_CHECK(cudaMemcpyToSymbol(nixl::gpu::impl::proxy::proxyRingFullCount, &zero, sizeof(zero)));
+}
+
+std::vector<uint64_t> stats_read() {
+    std::vector<unsigned int> hist(kStatKinds * kStatBuckets);
+    unsigned long long mins[kStatKinds], maxs[kStatKinds], ring_full;
+    CUDA_CHECK(cudaDeviceSynchronize());
+    CUDA_CHECK(cudaMemcpyFromSymbol(hist.data(), stat_hist, sizeof(stat_hist)));
+    CUDA_CHECK(cudaMemcpyFromSymbol(mins, stat_min, sizeof(mins)));
+    CUDA_CHECK(cudaMemcpyFromSymbol(maxs, stat_max, sizeof(maxs)));
+    CUDA_CHECK(cudaMemcpyFromSymbol(&ring_full, nixl::gpu::impl::proxy::proxyRingFullCount, sizeof(ring_full)));
+    std::vector<uint64_t> out{ring_full};
+    for (int kind = 0; kind < kStatKinds; ++kind) {
+        out.push_back(mins[kind]);
+        out.push_back(maxs[kind]);
+        out.insert(out.end(), hist.begin() + kind * kStatBuckets, hist.begin() + (kind + 1) * kStatBuckets);
+    }
+    return out;
 }
 } // namespace ep_kernels
 

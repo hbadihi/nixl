@@ -935,4 +935,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         });
     m.attr("topk_idx_t") = pybind11::cast(c10::CppTypeToScalarType<nixl_ep::topk_idx_t>::value);
     m.def("is_sm90_compiled", nixl_ep::is_sm90_compiled);
+    m.def("stats_reset", &nixl_ep::ep_kernels::stats_reset);
+    m.def("stats_read", &nixl_ep::ep_kernels::stats_read);
 }

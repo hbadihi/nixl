@@ -26,6 +26,9 @@
 
 namespace nixl::gpu::impl::proxy {
 
+// Enqueues that found the ring full after a refresh of the consumer index from host memory.
+static __device__ unsigned long long proxyRingFullCount;
+
 // Overlay struct written into xferStatusH::storage by enqueue()
 // and read back by pollXferStatus().  Must fit within the 64-byte opaque blob.
 struct proxyXferStatus {
@@ -83,9 +86,14 @@ struct proxyDeviceContext : nixlProxyDeviceContextData {
         // Fast path: use the device cache. Refresh from host only if the ring
         // appears full, since mapped-host loads are much slower than HBM loads.
         uint64_t cached_consumer_idx = *ring->consumer_idx_cache;
+        bool full_counted = false;
         while (ticket - cached_consumer_idx >= ring->depth) {
             cached_consumer_idx = cons.load(cuda::memory_order_acquire);
             *ring->consumer_idx_cache = cached_consumer_idx;
+            if (!full_counted && ticket - cached_consumer_idx >= ring->depth) {
+                full_counted = true;
+                atomicAdd(&proxyRingFullCount, 1ull);
+            }
 
             if (shut.load(cuda::memory_order_relaxed) ==
                 static_cast<uint64_t>(nixl_proxy_control_state_t::SHUTDOWN)) {

@@ -91,6 +91,20 @@ void update_mask_buffer(int* mask_buffer_ptr, int rank_to_mask, bool mask, cudaS
 
 void cache_p2p_ptr(gpu_nixl_ctx* nixl_ctx, int rank_id, cudaStream_t stream);
 
+// Time in each nixlPut / nixlAtomicAdd call, as histograms of kStatBucketNs buckets
+constexpr int kStatDispatchPut = 0;
+constexpr int kStatDispatchAtomic = 1;
+constexpr int kStatCombinePut = 2;
+constexpr int kStatCombineAtomic = 3;
+constexpr int kStatKinds = 4;
+constexpr int kStatBuckets = 32768;
+constexpr int kStatBucketNs = 100;
+
+void stats_reset();
+
+// Ring-full count, then for each kind: min ns, max ns and kStatBuckets histogram counts
+std::vector<uint64_t> stats_read();
+
 } // namespace ep_kernels
 
 } // namespace nixl_ep
